@@ -1,0 +1,8 @@
+# Verified working together on 2026-10-07 (Python 3.13; FastMCP needs >=3.10)
+fastmcp==4.0.11          # pulls mcp==2.3.0
+python-dotenv>=1.0
+pytest>=8
+pytest-asyncio>=0.24
+# real (non-stub) mode only:
+# neo4j>=5.20
+# psycopg[binary,pool]>=3.1

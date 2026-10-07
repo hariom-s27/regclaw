@@ -1,0 +1,15 @@
+# Obligation classifier (R3). Versions = latest on PyPI as checked 2026-10-07.
+# Release dates UNVERIFIED. train.py / infer.py use a plain PyTorch loop (no Trainer) to avoid transformers 5.x API churn.
+# CPU-only torch:  pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1
+transformers==5.19.0
+scikit-learn==1.9.1
+numpy==2.5.3
+
+# Run order:
+#   1) python weak_labeler.py clauses.json weak_labels.json --sample gold_to_label.csv --n 200
+#   2) hand-fill gold_label in gold_to_label.csv  (blind: weak label is not shown)
+#   3) python train.py clauses.json weak_labels.json --gold gold_to_label.csv --mode frozen   --out model_frozen
+#      python train.py clauses.json weak_labels.json --gold gold_to_label.csv --mode finetune --out model_ft
+#   4) python infer.py clauses.json model_ft predictions.json
+#   5) python evaluate.py gold_to_label.csv predictions.json --report eval_report.json

@@ -1,0 +1,20 @@
+{
+  "_comment": "Pick ONE entry, rename it to \"regclaw\", and merge into mcpServers of claude_desktop_config.json. All paths must be ABSOLUTE. Fully quit and restart Claude Desktop after editing.",
+  "mcpServers": {
+    "regclaw-venv-macos": {
+      "command": "/Users/shyam/regclaw/.venv/bin/python",
+      "args": ["/Users/shyam/regclaw/regclaw_mcp/server.py"],
+      "env": { "REGCLAW_STUB": "1" }
+    },
+    "regclaw-venv-windows": {
+      "command": "C:\\Users\\shyam\\regclaw\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\shyam\\regclaw\\regclaw_mcp\\server.py"],
+      "env": { "REGCLAW_STUB": "1" }
+    },
+    "regclaw-uv-macos": {
+      "command": "/Users/shyam/.local/bin/uv",
+      "args": ["run", "--project", "/Users/shyam/regclaw", "python", "/Users/shyam/regclaw/regclaw_mcp/server.py"],
+      "env": { "REGCLAW_STUB": "0" }
+    }
+  }
+}

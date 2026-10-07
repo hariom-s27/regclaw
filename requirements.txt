@@ -1,0 +1,43 @@
+# RegClaw / PageIndex rebuild — v2 pins, updated from research R3–R8 (checked 7 Oct 2026)
+# Python 3.11 (PageIndex needs >=3.10; 3.11 avoids its litellm 3.10 shim)
+# PageIndex itself is NOT on this list: install from a pinned git commit (see 00_ROADMAP.md, Step 0).
+
+# ---------- PART I: Literature Agent ----------
+neo4j>=5.20,<7              # tested 6.3.1 (R4)
+psycopg[binary]>=3.1
+pgvector>=0.5               # R4: 0.5.0
+openai>=1.70                # text-embedding-3-small; PageIndex needs >=1.70
+anthropic>=1.0              # R4/R8 tested 1.11.0; PageIndex [anthropic] extra needs >=0.122
+tiktoken>=0.7
+torch==2.14.1               # R3 (CPU wheel: --index-url https://download.pytorch.org/whl/cpu)
+transformers==5.19.0        # R3 — LegalBERT
+scikit-learn==1.9.1         # R3 — frozen-embedding baseline + metrics
+numpy==2.5.3
+fastmcp==4.0.11             # R6 — NOT >=2.0: unpinned installs 4.x whose API differs from 2.x tutorials
+pytest>=8                   # R6 tests
+pytest-asyncio>=0.24        # R6 tests (asyncio_mode = auto in mcp/pytest.ini)
+
+# ---------- PART II: PageIndex ----------
+litellm>=1.97.0             # R5 — required by PageIndex (was >=1.40)
+pypdfium2>=5                # R5 — PageIndex PDF backend
+PyPDF2>=3.0
+pdfplumber>=0.11            # scanned-PDF check (your ingestion, not PageIndex)
+PyMuPDF>=1.24               # page fetching in the agent
+pydantic>=2.7
+PyYAML>=6.0
+python-dotenv>=1.0
+# pycryptodome              # only if a PDF is encrypted (PageIndex issue #426)
+
+# ---------- Evaluation (R7) ----------
+ragas==0.4.3
+langchain-community<0.4     # ragas 0.4.3 import breaks with 0.4.x
+# langchain-openai          # report's original evaluator wiring; deprecated path in ragas 0.4 (not needed)
+
+# ---------- Observability (R8) ----------
+langfuse>=4.7               # v4 SDK; >=4.7 needed for real-time reads
+langchain>=1.0              # langfuse.langchain needs full langchain, not only langchain-core
+langgraph>=1.0
+langchain-anthropic>=1.0
+
+# If pip reports a conflict between ragas/langchain-community<0.4 and langchain>=1.0,
+# put evaluation in its own venv (.venv-eval) — see 00_ROADMAP.md, Known risks.

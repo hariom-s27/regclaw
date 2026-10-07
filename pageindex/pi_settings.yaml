@@ -1,0 +1,21 @@
+# PageIndex rebuild settings (read by pi_common.load_settings)
+store_dir: ./store
+index_mode: standard            # standard = LLM builds titles/structure (matches report); flash = layout-based
+index_model: anthropic/claude-sonnet-5-5      # LiteLLM name -> needs ANTHROPIC_API_KEY
+summary_model: anthropic/claude-sonnet-5-5
+agent_model: claude-sonnet-5-5                # Anthropic SDK name
+verifier_model: claude-haiku-4-5-20251001
+
+toc_check_page_num: 20
+max_page_num_each_node: 10
+max_token_num_each_node: 20000
+if_add_node_id: "yes"
+if_add_node_summary: "yes"
+if_add_doc_description: "yes"
+if_add_node_text: "no"
+litellm_max_tokens: 16000
+
+agent_max_turns: 12
+max_pages_per_fetch: 12
+max_pages_total: 40
+overview_char_budget: 24000

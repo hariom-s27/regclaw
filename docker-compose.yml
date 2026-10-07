@@ -1,0 +1,28 @@
+services:
+  neo4j:
+    image: neo4j:5
+    container_name: regclaw-neo4j
+    ports:
+      - "7474:7474"   # browser UI -> http://localhost:7474
+      - "7687:7687"   # bolt (python driver)
+    environment:
+      NEO4J_AUTH: neo4j/regclaw123
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: regclaw-pgvector
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: regclaw
+      POSTGRES_PASSWORD: regclaw123
+      POSTGRES_DB: regclaw
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  neo4j_data:
+  pg_data:
