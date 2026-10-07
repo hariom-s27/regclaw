@@ -12,6 +12,8 @@ obligation/models/
 *.safetensors
 *.bin
 .pytest_cache/
+data/*.csv
+specs/
 meril_local_v1/data/pdfs/
 meril_local_v1/data/*.json
 meril_local_v1/pageindex/store/

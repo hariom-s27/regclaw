@@ -3,6 +3,7 @@
 # PageIndex itself is NOT on this list: install from a pinned git commit (see 00_ROADMAP.md, Step 0).
 
 # ---------- PART I: Literature Agent ----------
+requests>=2.31          # corpus/download.py
 neo4j>=5.20,<7              # tested 6.3.1 (R4)
 psycopg[binary]>=3.1
 pgvector>=0.5               # R4: 0.5.0

@@ -1,0 +1,14 @@
+# Physical PDF pages, 1-based inclusive. Replace each TODO with [first, last].
+parts:
+  - name: Articles 1-10
+    pages: TODO
+  - name: Annex I
+    pages: TODO
+  - name: Annex II
+    pages: TODO
+  - name: Annex III
+    pages: TODO
+  - name: Annex XIV
+    pages: TODO
+  - name: Annex XV
+    pages: TODO

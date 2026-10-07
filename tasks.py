@@ -45,6 +45,7 @@ def run_tests():
     suites = (
         (ROOT / "mcp", [sys.executable, "-m", "pytest", "-q", "."]),
         (ROOT / "observability", [sys.executable, "-c", SUMMARY_TEST_RUNNER]),
+        (ROOT, [sys.executable, "-m", "pytest", "-q", "tests/"]),
     )
     exit_code = 0
     for folder, command in suites:
@@ -61,6 +62,8 @@ def main():
         ("up", "Start Docker Compose services."),
         ("check", "Run setup checks."),
         ("test", "Run offline tests in stub mode."),
+        ("download", "Download the public substitute corpus."),
+        ("count", "Count corpus pages, modal words, and headings."),
     ):
         subcommands.add_parser(name, help=description)
     for name in PLACEHOLDERS:
@@ -69,6 +72,10 @@ def main():
 
     if args.command == "test":
         return run_tests()
+    if args.command in ("download", "count"):
+        return subprocess.run(
+            [sys.executable, "-m", "corpus." + args.command], cwd=ROOT, check=False
+        ).returncode
     if args.command == "up":
         return subprocess.run(
             ["docker", "compose", "up", "-d"], cwd=ROOT, check=False
