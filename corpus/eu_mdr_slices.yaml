@@ -1,14 +1,14 @@
-# Physical PDF pages, 1-based inclusive. Replace each TODO with [first, last].
+# Physical PDF pages, 1-based inclusive. S3 uses markers for exact text cuts.
 parts:
   - name: Articles 1-10
-    pages: TODO
-  - name: Annex I
-    pages: TODO
-  - name: Annex II
-    pages: TODO
-  - name: Annex III
-    pages: TODO
-  - name: Annex XIV
-    pages: TODO
-  - name: Annex XV
-    pages: TODO
+    pages: [13, 25]
+    start_marker: "Article 1"
+    stop_marker: "Article 11"
+  - name: Annexes I-III
+    pages: [94, 112]
+    start_marker: "ANNEX I"
+    stop_marker: "ANNEX IV"
+  - name: Annexes XIV-XV
+    pages: [164, 172]
+    start_marker: "ANNEX XIV"
+    stop_marker: "ANNEX XVI"

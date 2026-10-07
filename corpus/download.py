@@ -1,5 +1,6 @@
 """Download the public substitute corpus described in the local source spec."""
 
+import argparse
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +17,12 @@ SPEC = ROOT / "specs" / "S2_corpus_sources.md"
 PDF_DIR = ROOT / "data" / "pdfs"
 MANIFEST = ROOT / "data" / "corpus_manifest.json"
 SLICES = Path(__file__).with_name("eu_mdr_slices.yaml")
+MANUAL_STATUSES = ("ok_manual", "ok_manual_html_print")
+FDA_KNEE_HTML_URL = (
+    "https://www.fda.gov/medical-devices/guidance-documents-medical-devices-and-"
+    "radiation-emitting-products/knee-joint-patellofemorotibial-and-femorotibial-"
+    "metalpolymer-porous-coated-uncemented-prostheses"
+)
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -102,12 +109,51 @@ def download_source(source, pdf_dir, session, previous=None):
         if content is not None:
             entry.update(bytes=len(content), sha256=digest,
                          downloaded_at=downloaded_at, status="ok")
+            if ((previous or {}).get("status") in MANUAL_STATUSES
+                    and (previous or {}).get("sha256") == digest):
+                entry["status"] = previous["status"]
+                if "source_url" in previous:
+                    entry["source_url"] = previous["source_url"]
             return entry
     except (OSError, ValueError) as error:
         print(f"{source.code}: {error}", file=sys.stderr, flush=True)
     print(f"MANUAL: download {source.code} from {source.url} "
           f"and save as data/pdfs/{source.filename}", flush=True)
     return entry
+
+
+def refresh_manifest(manifest_path=MANIFEST, pdf_dir=PDF_DIR):
+    manifest_path = Path(manifest_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    refreshed, missing = [], []
+    for code, entry in manifest.items():
+        if entry["status"] not in ("manual", *MANUAL_STATUSES):
+            continue
+        path = Path(pdf_dir) / f"{code}.pdf"
+        try:
+            content = path.read_bytes()
+            if not is_pdf(content):
+                raise ValueError("File does not start with %PDF")
+        except (OSError, ValueError) as error:
+            print(f"MISSING: data/pdfs/{code}.pdf ({error})", flush=True)
+            missing.append(code)
+            continue
+        status = "ok_manual_html_print" if code == "fda-knee" else "ok_manual"
+        digest = hashlib.sha256(content).hexdigest()
+        if (entry["status"] == status and entry.get("bytes") == len(content)
+                and entry.get("sha256") == digest and entry.get("downloaded_at")
+                and (code != "fda-knee" or entry.get("source_url") == FDA_KNEE_HTML_URL)):
+            continue
+        entry.update(bytes=len(content), sha256=digest,
+                     downloaded_at=datetime.now(timezone.utc).isoformat(), status=status)
+        if code == "fda-knee":
+            entry["source_url"] = FDA_KNEE_HTML_URL
+        refreshed.append(code)
+        print(f"REFRESHED: {code} -> {status}", flush=True)
+    if refreshed:
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print(f"Manifest refresh: {len(refreshed)} updated, {len(missing)} still missing", flush=True)
+    return refreshed, missing
 
 
 def slice_eu_mdr(pdf_dir=PDF_DIR, config_path=SLICES):
@@ -149,6 +195,14 @@ def slice_eu_mdr(pdf_dir=PDF_DIR, config_path=SLICES):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--refresh-manifest", action="store_true",
+                        help="Record locally supplied manual PDFs without downloading anything.")
+    args = parser.parse_args()
+    if args.refresh_manifest:
+        refresh_manifest()
+        return 0
+
     # requests is needed for downloading, not for the offline PDF-check tests.
     import requests
 
@@ -161,7 +215,7 @@ def main():
             manifest[source.code] = download_source(source, PDF_DIR, session, previous.get(source.code))
             MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     slice_eu_mdr()
-    ok = sum(entry["status"] == "ok" for entry in manifest.values())
+    ok = sum(entry["status"] in ("ok", *MANUAL_STATUSES) for entry in manifest.values())
     print(f"Manifest: {len(manifest)} entries, {ok} ok, {len(manifest) - ok} manual", flush=True)
     return 0
 
