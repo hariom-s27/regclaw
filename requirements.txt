@@ -26,6 +26,7 @@ pdfplumber>=0.11            # scanned-PDF check (your ingestion, not PageIndex)
 PyMuPDF>=1.24               # page fetching in the agent
 pydantic>=2.7
 PyYAML>=6.0
+jsonschema>=4
 python-dotenv>=1.0
 # pycryptodome              # only if a PDF is encrypted (PageIndex issue #426)
 

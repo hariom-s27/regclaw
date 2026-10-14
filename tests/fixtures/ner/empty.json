@@ -1,0 +1,15 @@
+{
+  "data": {
+    "entities": {
+      "biological_effects": [],
+      "chemicals": [],
+      "device_types": [],
+      "regulatory_actors": [],
+      "lifecycle_phases": [],
+      "keywords": []
+    }
+  },
+  "stop_reason": "end_turn",
+  "model": "stub-fixture",
+  "usage": {}
+}

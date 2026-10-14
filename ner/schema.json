@@ -1,0 +1,82 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entities"],
+  "properties": {
+    "entities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["biological_effects","chemicals","device_types","regulatory_actors","lifecycle_phases","keywords"],
+      "properties": {
+        "biological_effects": {
+          "type": "array",
+          "description": "Biological effects / biocompatibility endpoints the clause explicitly names. Empty if none.",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["mention","canonical","evidence"],
+            "properties": {
+              "mention":  {"type": "string", "description": "Exact text copied from the clause, e.g. 'sensitisation'."},
+              "canonical":{"type": "string", "enum": ["cytotoxicity","sensitization","irritation","intracutaneous_reactivity","material_mediated_pyrogenicity","systemic_toxicity","acute_systemic_toxicity","subacute_systemic_toxicity","subchronic_systemic_toxicity","chronic_systemic_toxicity","implantation_effects","hemocompatibility","genotoxicity","carcinogenicity","reproductive_developmental_toxicity","degradation","other"]},
+              "evidence": {"type": "string", "description": "Shortest exact substring of the clause (≤25 words) that contains the mention."}
+            }
+          }
+        },
+        "chemicals": {
+          "type": "array",
+          "description": "Named chemical substances, residues, extractables/leachables, sterilants. Not generic words like 'material' or 'chemical'.",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["mention","canonical","evidence"],
+            "properties": {
+              "mention":  {"type": "string", "description": "Exact text, e.g. 'EO' or 'ethylene chlorohydrin'."},
+              "canonical":{"type": "string", "description": "Full lowercase IUPAC-style or common name with abbreviations expanded ONLY if the clause itself defines them, else repeat the mention lowercased. e.g. 'ethylene oxide'."},
+              "evidence": {"type": "string"}
+            }
+          }
+        },
+        "device_types": {
+          "type": "array",
+          "description": "Device categories or contact categories named in the clause, e.g. 'implantable device', 'surface device contacting mucosal membrane', 'catheter'. Not 'device' alone.",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["mention","canonical","evidence"],
+            "properties": {
+              "mention":  {"type": "string"},
+              "canonical":{"type": "string", "description": "Lowercase singular generic name, e.g. 'implantable device'."},
+              "evidence": {"type": "string"}
+            }
+          }
+        },
+        "regulatory_actors": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["mention","canonical","evidence"],
+            "properties": {
+              "mention":  {"type": "string", "description": "Exact text, e.g. 'the sponsor', 'FDA', 'notified body'."},
+              "canonical":{"type": "string", "enum": ["manufacturer","authorised_representative","importer","distributor","notified_body","competent_authority","sponsor","investigator","applicant","laboratory","other"]},
+              "evidence": {"type": "string"}
+            }
+          }
+        },
+        "lifecycle_phases": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["mention","canonical","evidence"],
+            "properties": {
+              "mention":  {"type": "string"},
+              "canonical":{"type": "string", "enum": ["design_development","material_selection","manufacturing","sterilization","packaging","storage_transport","clinical_investigation","premarket_submission","conformity_assessment","post_market_surveillance","change_control","reprocessing","other"]},
+              "evidence": {"type": "string"}
+            }
+          }
+        },
+        "keywords": {
+          "type": "array",
+          "description": "Up to 8 lowercase domain terms not captured above (e.g. 'extractables', 'allowable limit'). No stopwords, no entity duplicates.",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}

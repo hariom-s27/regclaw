@@ -1,0 +1,15 @@
+{
+  "data": {
+    "entities": {
+      "biological_effects": [],
+      "chemicals": [{"mention": "EO", "canonical": "ethylene oxide", "evidence": "ethylene oxide (EO)"}],
+      "device_types": [{"mention": "catheters", "canonical": "catheter", "evidence": "in catheters"}],
+      "regulatory_actors": [{"mention": "manufacturer", "canonical": "manufacturer", "evidence": "Each manufacturer shall"}],
+      "lifecycle_phases": [],
+      "keywords": []
+    }
+  },
+  "stop_reason": "end_turn",
+  "model": "stub-fixture",
+  "usage": {"input_tokens": 10, "output_tokens": 20}
+}

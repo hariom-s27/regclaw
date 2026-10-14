@@ -9,7 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 PLACEHOLDERS = (
-    "ner", "obligation", "enrich", "graph", "embed", "retrieve", "eval"
+    "obligation", "enrich", "graph", "embed", "retrieve", "eval"
 )
 
 # The existing summary file uses script-level assertions, not pytest functions.
@@ -78,6 +78,13 @@ def main():
     parse_score = subcommands.add_parser('parse-score', help='Score labelled parse samples.')
     parse_score.add_argument('--csv')
     subcommands.add_parser('token-stats', help='Count embed input v1 tokens offline.')
+    ner = subcommands.add_parser('ner', help='Extract entities with fixtures or an explicitly configured SDK.')
+    ner.add_argument('--limit', type=int)
+    ner.add_argument('--ids')
+    ner.add_argument('--force', action='store_true')
+    ner.add_argument('--stub', action='store_true')
+    ner.add_argument('--mode', choices=['structured', 'strict_tool'], default='structured')
+    ner.add_argument('--effort', default='low')
     args = parser.parse_args()
 
     if args.command == "test":
@@ -94,6 +101,9 @@ def main():
         from embed.token_stats import run
         run()
         return 0
+    if args.command == 'ner':
+        from ner.extract import main as ner_main
+        return ner_main(sys.argv[2:])
     if args.command == 'ingest':
         from ingest.ingest import run
         if bool(args.pdf) != bool(args.as_code):
