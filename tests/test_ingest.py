@@ -7,7 +7,8 @@ import pytest
 import yaml
 
 from ingest.ingest import (Line, TEXT_FLAGS, clean, extract_lines, filter_lines, heading,
-                           is_bold, join_text, parse_document, resolve_ambiguous, run)
+                           is_bold, join_text, parse_document, resolve_ambiguous, run,
+                           body_spans)
 from ingest.validate import validate
 
 CONFIG = yaml.safe_load((Path(__file__).parents[1] / 'ingest/sources.yaml').read_text(encoding='utf-8'))
@@ -200,3 +201,179 @@ def test_validator_rejects(change):
     if change == 'parent': c['parent'] = 'x:missing'
     if change == 'page': c['page'] = 0
     with pytest.raises(ValueError): validate(rows, {'x': {}})
+
+
+def styled(text, size=12, bold=True, x=72, y=100, block=0):
+    return Line(text, bbox=(x, y, x + 300, y + size), block=block,
+                spans=[{'text': text, 'size': size, 'font': 'Arial-Bold' if bold else 'Arial',
+                        'flags': 16 if bold else 0}])
+
+
+def parse_lines(monkeypatch, doc, lines):
+    for i, line in enumerate(lines):
+        line.line_id = f'1:{i + 1}'
+    monkeypatch.setattr('ingest.ingest.extract_lines', lambda *args: (lines, 1, []))
+    return parse_document('sample.pdf', doc, CONFIG[doc])
+
+
+@pytest.mark.parametrize('doc,first,second,size,second_bold', [
+    ('in-ep', '2. Applicable Standards used to meet essential principles for safety and', 'performance', 14, True),
+    ('in-ep', '5.3.1 Where a medical device incorporates, as an integral part, a substance which, if',
+     'used separately, may be considered to be a medicinal product or drug as defined', 12, False),
+    ('imdrf-n47', '5.0 Essential Principles Applicable to all Medical Devices and IVD Medical', 'Devices', 14, True),
+])
+def test_real_wrapped_titles(monkeypatch, doc, first, second, size, second_bold):
+    r = parse_lines(monkeypatch, doc, [styled(first, size), styled(second, size, second_bold, y=120),
+                    styled('Unique body paragraph with sufficient text.', 10, False, y=150)])
+    c = r['clauses'][0]
+    whole = first.split(' ', 1)[1] + ' ' + second
+    if len(whole.split()) > 15 or whole.startswith('Where'):
+        assert c['title'] == ''
+        assert first + ' ' + second in c['text']
+    else:
+        assert c['title'] == whole
+        assert second not in c['text']
+
+
+def test_sentence_heading_is_body_with_ancestor_title(monkeypatch):
+    r = parse_lines(monkeypatch, 'in-ep', [
+        styled('5.3 Medicinal substances:', 14),
+        styled('5.3.1 Where a medical device incorporates, as an integral part, a substance which, if'),
+        styled('used separately, may be considered to be a medicinal product', y=120),
+        styled('Unique body paragraph with sufficient text.', 10, False, y=150)])
+    c = r['clauses'][0]
+    assert c['title'] == 'Medicinal substances'
+    assert 'substance which, if used separately' in c['text']
+
+
+@pytest.mark.parametrize('text,number', [
+    ('4. 1 Medical devices should be designed and manufactured in such a way that, when', '4.1'),
+    ('5.1. 2 The devices should be designed, manufactured and packaged in such a way as', '5.1.2'),
+    ('5. 10 Protection against mechanical risks:', '5.10'),
+])
+def test_real_spaced_decimal_numbers(text, number):
+    assert heading(bold_line(text), CONFIG['in-ep'], [])['number'] == number
+
+
+@pytest.mark.parametrize('doc,root,group,child,expected', [
+    ('eu-mdr', 'Annex XV', 'CHAPTER II', '1. General requirements', 'Annex XV.II.1'),
+    ('eu-mdr', 'Annex XIV', 'PART A', '1. Clinical evaluation', 'Annex XIV.A.1'),
+    ('in-mdr', 'Schedule 4', 'PART III', '1. General Information:', 'Schedule 4.Part III.1'),
+    ('in-mdr', 'Schedule 7', 'TABLE 4', '3. Preclinical testing', 'Schedule 7.Table 4.3'),
+])
+def test_s3_9_document_group_prefixes(doc, root, group, child, expected):
+    stack = [node(root, 1, 'annex' if doc == 'eu-mdr' else 'schedule')]
+    h = heading(bold_line(group), CONFIG[doc], stack)
+    stack.append(node(h['number'], h['depth'], 'group'))
+    assert heading(bold_line(child), CONFIG[doc], stack)['number'] == expected
+
+
+def test_real_cross_references_and_deeper_roman_are_not_headings():
+    assert heading(Line('5.1.4 below.'), CONFIG['imdrf-n47'], []) is None
+    assert heading(styled('(v)', x=108.2), CONFIG['epa-63o'],
+                   [node('§63.364', 1, 'section'), node('§63.364(h)', 2, 'point')])['depth'] == 99
+    assert heading(styled('(e).', x=155.2), CONFIG['epa-63o'],
+                   [node('§63.366', 1, 'section')])['depth'] == 99
+    assert heading(styled('§ 63.362 must fulfill all reporting requirements in § 63.10(a)', x=83.25),
+                   CONFIG['epa-63o'], []) is None
+
+
+def test_real_body_lines_survive_header_filter():
+    texts = [
+        'the references of which have been published in the Official Journal of the European Union, shall be presumed to be in',
+        'products, provided that references to those monographs have been published in the Official Journal of the European Union.',
+    ]
+    lines = [styled(t, bold=False, y=200 + i * 20) for i, t in enumerate(texts)]
+    for i, l in enumerate(lines): l.line_id = f'1:{i}'
+    filter_lines(lines, 1, CONFIG['eu-mdr'])
+    assert all(l.role == 'continuation' for l in lines)
+    links = []
+    for p in range(1, 5):
+        l = styled('(http://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfCFR/CFRSearch.cfm?FR=807.87), including the',
+                   bold=False, y=500)
+        l.page, l.line_id = p, f'{p}:1'
+        links.append(l)
+    filter_lines(links, 4, CONFIG['fda-knee'])
+    assert all(l.role == 'continuation' for l in links)
+
+
+def test_real_encoding_and_superscript_exponents():
+    assert clean('\uf0b7 \uf0a7 „quotes‟ ‘single’') == '• • "quotes" \'single\''
+    spans = [{'text': 'skin. FDA recommends a SAL of 10', 'flags': 4},
+             {'text': '-3', 'flags': 5}, {'text': ' for devices', 'flags': 4},
+             {'text': '11', 'flags': 5}]
+    assert ''.join(s['text'] for s in body_spans(spans)) == 'skin. FDA recommends a SAL of 10-3 for devices'
+    spans = [{'text': '25', 'size': 9, 'flags': 20},
+             {'text': ' [87A. Registration certificate to sell, stock, exhibit or offer for sale or',
+              'size': 14, 'flags': 20}]
+    text = ''.join(s['text'] for s in body_spans(spans)).strip()
+    assert heading(bold_line(text), CONFIG['in-mdr'], [])['number'] == '87A'
+
+
+def test_real_eu_short_point_and_inline_reference(monkeypatch):
+    r = parse_lines(monkeypatch, 'eu-mdr', [
+        styled('Article 1', 14, x=72, y=50),
+        styled('Subject matter', 14, y=70),
+        styled('1. Devices shall comply with these requirements.', 12, False, y=100),
+        styled('(a) the devices are not transferred to another legal entity,', 12, False, y=120),
+        styled('defined in point', 12, False, x=339, y=150),
+        styled('(1)(c)', 12, False, x=640, y=150),
+    ])
+    c = next(c for c in r['clauses'] if c['number'] == 'Art 1(1)(a)')
+    assert '(a) the devices are not transferred to another legal entity,' in c['text']
+    assert '(1)(c)' in c['text']
+    assert not any(d['reason'] == 'id_collision' for d in r['drops'])
+
+
+def test_coverage_does_not_exclude_unowned_body(monkeypatch):
+    r = parse_lines(monkeypatch, 'in-ep', [styled('1. Introduction', 14),
+                    styled('Unique body paragraph with sufficient text.', 10, False, y=150)])
+    q = r['stats']['quality_report']['Q7']
+    assert q['ratio'] == 1
+    assert q['excluded_chars']['heading_title'] == len('1.Introduction')
+    assert q['body_chars'] == len('Uniquebodyparagraphwithsufficienttext.')
+    monkeypatch.setattr('ingest.ingest.join_text', lambda *args: '')
+    r = parse_lines(monkeypatch, 'in-ep', [styled('1. Introduction', 14),
+                    styled('Unique body paragraph with sufficient text.', 10, False, y=150)])
+    q = r['stats']['quality_report']['Q7']
+    assert q['ratio'] == 0 and q['warning']
+    assert 'header_only' not in q['excluded_chars']
+
+
+def test_ecfr_detached_section_label_does_not_steal_previous_clause(monkeypatch):
+    r = parse_lines(monkeypatch, 'epa-63o', [
+        styled('Subpart O—Ethylene Oxide Emissions Standards', y=20),
+        styled('§ 63.365 Testing and monitoring requirements.', x=36, y=50),
+        styled('Earlier body paragraph with sufficient text.', 10, False, y=80),
+        styled('§ 63.366 Reporting requirements.', x=36, y=478),
+        styled('monitoring plan is subject to the Administrator\'s approval.', 10, False, x=107, y=58),
+        styled('(f)', 10, False, x=60.9, y=151),
+        styled('Determination of compliance with PTE requirement.', 10, False, x=82, y=151),
+        styled('(a)', 10, False, x=60, y=502),
+        styled('General requirements. The owner or operator shall submit reports.', 10, False, x=82, y=502),
+    ])
+    numbers = {c['number'] for c in r['clauses']}
+    assert '§63.365(f)' in numbers and '§63.366(a)' in numbers
+    assert '§63.366(f)' not in numbers
+
+
+def test_table_cell_is_not_a_wrapped_title(monkeypatch):
+    r = parse_lines(monkeypatch, 'imdrf-n47', [
+        styled('Appendix B', 14, y=50),
+        styled('5.12', 10, False, x=72, y=573.87),
+        styled('IEC 62366-1', 10, False, x=410.47, y=573.87),
+        styled('IEC/TR 62366-2', 10, False, x=410.47, y=591.39),
+    ])
+    c = r['clauses'][0]
+    assert c['number'] == 'Appendix B.5.12'
+    assert c['text'] == 'IEC 62366-1 IEC/TR 62366-2'
+
+
+def test_fda_number_and_adjacent_title_share_a_visual_line(monkeypatch):
+    label = styled('I.', 18, y=449.18)
+    label.bbox = (72, 449.18, 83.46, 467.18)
+    r = parse_lines(monkeypatch, 'fda-iso10993-1', [label,
+                    styled('Introduction', 18, x=108, y=449.18),
+                    styled('FDA has developed this guidance document to assist industry.', 12, False, y=474.68)])
+    assert r['clauses'][0]['title'] == 'Introduction'
+    assert r['clauses'][0]['text'].startswith('FDA has developed')

@@ -209,6 +209,10 @@ eu-mdr:
   enabled: true
   mode: eu
   levels:
+  - name: group
+    pattern: ^(?P<label>CHAPTER|PART)\s+(?P<number>[IVX]+|[A-Z])\s*$
+    require_bold: false
+    number_format: '{annex}.{number} (S3-9)'
   - name: article
     pattern: ^Article\s+(?P<number>\d+)\s*$
     require_bold: false
@@ -241,7 +245,7 @@ eu-mdr:
   - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
   strip_lines:
   - ^L 117/\d+
-  - Official Journal of the European Union
+  - ^Official Journal of the European Union$
   - ^5\.5\.2017
   - ^EN$
   tables: 'off'
@@ -277,6 +281,7 @@ imdrf-n47:
 in-ep:
   enabled: true
   mode: decimal
+  spaced_decimals: true
   levels:
   - name: appendix
     pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
@@ -328,13 +333,17 @@ in-mdr:
   enabled: true
   mode: india
   levels:
+  - name: group
+    pattern: ^(?P<label>PART|Appendix|TABLE)\s+(?P<number>[IVX]+|\d+)\s*$
+    require_bold: true
+    number_format: '{schedule}.{label} {number} (S3-9)'
   - name: schedule
     pattern: ^(?P<number>FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|SEVENTH|EIGHTH)\s+SCHEDULE\s*(?P<title>.*)$
     require_bold: false
     number_format: Schedule {ordinal}
     depth: 1
   - name: rule
-    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
+    pattern: ^\[?(?P<number>\d+[A-Z]?(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
     require_bold: true
     number_format: '{number} / Schedule N.{number}'
     depth: 1
@@ -350,6 +359,7 @@ in-mdr:
   - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
   strip_lines:
   - ^CHAPTER\s+[IVX]+\b
+  - ^Central Drugs Standard Control Organization, Ministry of Health and Family Welfare, Govt\. of India\s+Page \d+ of \d+$
   tables: 'off'
   expected_clauses:
   - 100
@@ -357,6 +367,8 @@ in-mdr:
 epa-63o:
   enabled: true
   mode: epa
+  point_max_x: 65
+  section_max_x: 65
   levels:
   - name: section
     pattern: ^§\s*(?P<number>63\.36\d)(?:\s+(?P<title>.*)|$)

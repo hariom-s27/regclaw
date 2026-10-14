@@ -18,7 +18,7 @@ import yaml
 from .validate import quality_report, validate
 
 ROOT = Path(__file__).resolve().parents[1]
-PARSER_VERSION = '2.0'
+PARSER_VERSION = "2.1"
 TEXT_FLAGS = (fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_LIGATURES &
               ~fitz.TEXT_PRESERVE_IMAGES) | fitz.TEXT_COLLECT_STYLES
 DROP_FIELDS = ['doc', 'number', 'page', 'reason', 'detail', 'text_preview']
@@ -26,7 +26,71 @@ WARNING_FIELDS = ['doc', 'page', 'number', 'code', 'detail']
 
 
 def clean(text):
-    return unicodedata.normalize('NFKC', text.replace('\u00ad', ''))
+    # Known Symbol/Wingdings bullets, not an indiscriminate PUA replacement.
+    translation = dict.fromkeys(map(ord, '\uf0b7\uf0a7'), '•')
+    translation.update(dict.fromkeys(map(ord, '“”„‟«»'), '"'))
+    translation.update(dict.fromkeys(map(ord, '‘’‚‛‹›'), "'"))
+    return unicodedata.normalize('NFKC', text.replace('\u00ad', '').translate(translation))
+
+
+def body_spans(spans):
+    """Remove citation superscripts, preserving signed mathematical exponents."""
+    if len(spans) > 1 and re.fullmatch(r'\d+\s*', spans[0]['text']):
+        rest = ''.join(s['text'] for s in spans[1:])
+        if (re.match(r'\s*\[\d+[A-Z]?\.', rest) and
+                spans[0].get('size', 12) < .85 * max(s.get('size', 12) for s in spans)):
+            spans = spans[1:]
+    return [s for s in spans if not s.get('flags', 0) & 1 or
+            re.fullmatch(r'[-+−]\d+', s['text'].strip())]
+
+
+def wrapped_title(lines, index, h, config, stack):
+    """Collect same-style continuation lines before applying the title-length rule."""
+    title, taken = h['title'], []
+    anchor = lines[index]
+    for following in lines[index + 1:]:
+        adjacent_label = (config['mode'] == 'fda' and not title and
+                          abs(following.bbox[1] - anchor.bbox[1]) < 1 and
+                          0 <= following.bbox[0] - anchor.bbox[2] <= 40)
+        if (following.page != anchor.page or following.role != 'continuation' or
+                re.search(r'[.!?:;,]$', title) or
+                (anchor.bbox[3] > anchor.bbox[1] and following.bbox[1] <= anchor.bbox[1] + 1 and
+                 not adjacent_label) or
+                any(re.match(lv['pattern'], following.text) for lv in config['levels'])):
+            break
+        size = lambda l: max((s.get('size', 12) for s in l.spans), default=12)
+        same_style = abs(size(anchor) - size(following)) < .2 and anchor.bold == following.bold
+        # Number-only Article / Annex labels use a differently styled title row.
+        if not same_style and not (not title and h['kind'] in ('article', 'annex')):
+            break
+        title = (title + ' ' + following.text).strip()
+        taken.append(following)
+        anchor = following
+    return title, taken
+
+
+def position_section_labels(lines, config):
+    """eCFR emits some standalone section labels before the preceding body.
+
+    Move only those labels to their physical position within the same page;
+    preserve the content-stream order of every body line (and every column).
+    """
+    if config['mode'] != 'epa':
+        return lines
+    result = list(lines)
+    for label in lines:
+        if not re.match(r'^§\s*63\.36\d\s', label.text) or label.bbox[0] > config.get('section_max_x', 65):
+            continue
+        i = result.index(label)
+        if i + 1 == len(result) or result[i + 1].page != label.page or result[i + 1].bbox[1] >= label.bbox[1]:
+            continue
+        result.pop(i)
+        j = i
+        while (j < len(result) and result[j].page == label.page and
+               result[j].bbox[1] < label.bbox[1]):
+            j += 1
+        result.insert(j, label)
+    return result
 
 
 def is_bold(span):
@@ -148,12 +212,18 @@ def filter_lines(lines, pages, config):
         for band in bands.values():
             for p, ls in band.items():
                 for l in ls:
+                    # Top/bottom four lines can still be body paragraphs or links.
+                    # Repetition alone is insufficient without a stable margin position.
+                    if .07 * l.height < l.bbox[1] < .93 * l.height:
+                        continue
                     if any(re.match(level['pattern'], l.text) for level in config['levels']):
                         continue
                     key = band_key(l.text)
                     for subset in (list(band), [q for q in band if q % 2 == p % 2]):
                         threshold = max(3, math.ceil(.3 * len(subset)))
                         def similar(other):
+                            if abs(l.bbox[1] / l.height - other.bbox[1] / other.height) > .005:
+                                return False
                             other_key = band_key(other.text)
                             pair = tuple(sorted((key, other_key)))
                             if pair not in similarities:
@@ -201,7 +271,7 @@ def filter_lines(lines, pages, config):
             if role == 'footnote':
                 footnote_chars += len(l.text)
         elif l.role != 'table':
-            l.text = clean(''.join(s['text'] for s in l.spans if not s.get('flags', 0) & 1)).strip() if l.spans else l.text
+            l.text = clean(''.join(s['text'] for s in body_spans(l.spans))).strip() if l.spans else l.text
     return dict(counts), stripped_chars, footnote_chars, body_size
 
 
@@ -226,9 +296,12 @@ def resolve_ambiguous(token, open_values, x0=0, parent_x0=0):
 
 def heading(line, config, stack, previous=''):
     text = line.text.strip()
+    if config.get('spaced_decimals'):
+        text = re.sub(r'^(\d+(?:\.\s*\d+)+)',
+                      lambda m: re.sub(r'\s+', '', m[0]), text)
     if toc_like(text, config) or re.search(r'\b(see|under|with|in|of)\s*$', previous, re.I):
         return None
-    if re.match(r'^\d+(?:\.\d+)*\.?\s+(of|in|and|or|to)\b', text, re.I):
+    if re.match(r'^\d+(?:\.\d+)*\.?\s+(of|in|and|or|to|below\b|above\b)\b', text, re.I):
         return None
     if re.match(r'^\([a-z0-9]+\)(?:\([a-z0-9]+\))*[),]*\s+(of|in|and|or|to)\b', text, re.I):
         return None
@@ -256,11 +329,24 @@ def heading(line, config, stack, previous=''):
     if level.get('require_bold') and not line.bold:
         return None
     kind = level['name']
+    if kind == 'section' and line.bbox[0] > config.get('section_max_x', float('inf')):
+        return None
     token = match.group('number')
     title = (match.groupdict().get('title') or '').strip(' :–—')
     parent = stack[-1] if stack else None
     depth = level.get('depth', 1)
     number = token
+    if kind == 'group':
+        root = next((s for s in stack if s['_kind'] in ('annex', 'schedule')), None)
+        if not root or (mode == 'eu' and root['number'] not in ('Annex XIV', 'Annex XV')):
+            return None
+        label = re.sub(r'\s+', ' ', match.group('label')).title()
+        # Chapter/Part prefixes have document-specific meaning (S3-9).
+        depth = 2 if label in ('Part', 'Chapter', 'Table') else 3
+        ancestor = next((s for s in reversed(stack) if s['_depth'] < depth), root)
+        suffix = token if mode == 'eu' else label + ' ' + token
+        return {'depth': depth, 'number': ancestor['number'] + '.' + suffix,
+                'title': title, 'kind': kind}
     if kind in ('annex', 'attachment', 'appendix', 'schedule', 'article'):
         if kind == 'schedule':
             number = 'Schedule ' + str(['FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'SIXTH', 'SEVENTH', 'EIGHTH'].index(token) + 1)
@@ -288,8 +374,9 @@ def heading(line, config, stack, previous=''):
         else:
             if kind == 'point':
                 return {'depth': 99, 'number': token, 'title': title, 'kind': kind}
-            number = root['number'] + '.' + token.rstrip('.')
-            depth = 1 + len(token.rstrip('.').split('.'))
+            group = next((s for s in reversed(stack) if s['_kind'] == 'group'), root)
+            number = group['number'] + '.' + token.rstrip('.')
+            depth = group['_depth'] + len(token.rstrip('.').split('.'))
     elif mode == 'decimal':
         number = token.rstrip('.')
         if number.endswith('.0'):
@@ -303,7 +390,8 @@ def heading(line, config, stack, previous=''):
         root = next((s for s in stack if s['_kind'] == 'schedule'), None)
         if kind == 'rule' and root:
             token = token[:-2] if token.endswith('.0') else token.rstrip('.')
-            number, depth = root['number'] + '.' + token, 1 + len(token.split('.'))
+            group = next((s for s in reversed(stack) if s['_kind'] == 'group'), root)
+            number, depth = group['number'] + '.' + token, group['_depth'] + len(token.split('.'))
         elif kind != 'rule':
             return {'depth': 99, 'number': token, 'title': title, 'kind': kind}
     elif mode == 'epa':
@@ -317,6 +405,9 @@ def heading(line, config, stack, previous=''):
                 prior = next((s for s in reversed(stack) if s['_kind'] == 'point'), None)
                 values = {'letter': re.search(r'\(([a-z])\)(?:~\d+)?$', prior['number'])[1]} if prior else {}
                 reading, ambiguous = resolve_ambiguous(token, values, line.bbox[0], prior.get('_x0', 0) if prior else 0)
+                # The same letter can be a Roman subitem at the deeper indent.
+                if line.bbox[0] > config.get('point_max_x', float('inf')):
+                    return {'depth': 99, 'number': token, 'title': title, 'kind': 'nested_point'}
                 if prior and line.bbox[0] > prior.get('_x0', 0) + 3 and not (values.get('letter') and
                         ord(token) == ord(values['letter']) + 1):
                     return {'depth': 99, 'number': token, 'title': title, 'kind': 'nested_point'}
@@ -336,6 +427,7 @@ def parse_document(pdf, doc, config, slices=None):
     raw_text = '\n'.join(l.text for l in lines)
     original = {l.line_id: l.text for l in lines}
     filters, stripped_chars, footnote_chars, body_size = filter_lines(lines, pages, config)
+    lines = position_section_labels(lines, config)
     vocabulary = set(re.findall(r'[A-Za-z]+', raw_text.casefold()))
     stats = {'pages': pages, 'raw_headings': 0, 'kept_clauses': 0, 'drops': {},
              'line_filters': filters, 'footnote_chars': footnote_chars, 'body_size': body_size,
@@ -352,6 +444,7 @@ def parse_document(pdf, doc, config, slices=None):
     used_ids = Counter()
     table_counts = Counter()
     previous = ''
+    previous_line = None
 
     def log_drop(c, reason, detail=''):
         drops.append(dict(doc=doc, number=c.get('number', ''), page=c['page'], reason=reason,
@@ -363,6 +456,8 @@ def parse_document(pdf, doc, config, slices=None):
             outside.clear()
 
     for i, line in enumerate(lines):
+        if line.role in ('title', 'consumed_body'):
+            continue
         if line.role in ('toc', 'header_footer', 'page_number', 'footnote', 'source_note'):
             continue
         if marker_parts:
@@ -390,7 +485,7 @@ def parse_document(pdf, doc, config, slices=None):
             active = False
         if not active:
             outside.append(line)
-            line.role = 'noise'
+            line.role = 'outside_markers'
             continue
         for lv in config['levels']:
             if re.match(lv['pattern'], line.text):
@@ -409,20 +504,28 @@ def parse_document(pdf, doc, config, slices=None):
                 candidates.append(c)
                 line.number, line.parent_number = num, parent['number']
             continue
-        h = heading(line, config, stack, previous)
+        inline = (previous_line is not None and previous_line.page == line.page and
+                  abs(previous_line.bbox[1] - line.bbox[1]) < 1 and
+                  line.bbox[0] >= previous_line.bbox[2] - 1)
+        h = None if inline else heading(line, config, stack, previous)
         if h:
             if h.get('ambiguous'):
                 warnings.append(dict(doc=doc, page=line.page, number=h['number'], code='AMBIGUOUS_NUM', detail='fallback to letter reading'))
             stats['raw_headings'] += 1
             cap = config['max_depth']
             if config['mode'] == 'india':
-                cap = 2 if any(s['_kind'] == 'schedule' for s in stack) else 1
+                group = next((s for s in reversed(stack) if s['_kind'] == 'group'), None)
+                cap = group['_depth'] + 1 if group else 2 if any(s['_kind'] == 'schedule' for s in stack) else 1
+                if h['kind'] == 'group':
+                    cap = h['depth']
             if h['depth'] > cap:
                 stats['depth_merges'] += 1
                 h = None
         if h:
             depth = h['depth']
-            while stack and stack[-1]['_depth'] >= depth:
+            while stack and (stack[-1]['_depth'] >= depth or
+                    h['kind'] == 'decimal' and not h['number'].startswith(
+                        stack[-1]['number'] + ('(' if stack[-1]['number'].startswith('Art ') else '.'))):
                 stack.pop()
             parent = stack[-1] if stack else None
             num = h['number']
@@ -447,19 +550,17 @@ def parse_document(pdf, doc, config, slices=None):
             if used_ids[num] > 1:
                 log_drop({'number': num, 'page': line.page, 'text': line.text}, 'id_collision', f'renamed {num}~{used_ids[num]}')
                 num += '~' + str(used_ids[num])
-            title = h['title']
+            title, title_lines = wrapped_title(lines, i, h, config, stack)
             own_body = []
             if (len(title.split()) > 15 or re.search(r'\b(shall|should|must|means)\b', title, re.I) or
+                    re.match(r'^(Where|If)\b', title) or
+                    config['mode'] == 'eu' and h['kind'] in ('paragraph', 'point') or
                     len(title.split()) >= 5 and re.search(r'[.!]$', title)):
                 title = parent['title'] if parent else ''
                 own_body.append(line)
-            if not title and i + 1 < len(lines):
-                following = lines[i + 1]
-                if (following.page == line.page and following.role == 'continuation' and
-                        (following.bold or h['kind'] in ('article', 'annex')) and
-                        not any(re.match(lv['pattern'], following.text) for lv in config['levels'])):
-                    title = following.text
-                    following.role = 'title'
+                own_body.extend(title_lines)
+            for following in title_lines:
+                following.role = 'consumed_body' if own_body else 'title'
             if not title and parent:
                 title = parent['title']
             skip = bool(parent and parent['_skip']) or any(re.search(p, title, re.I) for p in config.get('skip_sections', []))
@@ -467,17 +568,21 @@ def parse_document(pdf, doc, config, slices=None):
                            parent=parent['id'] if parent else None, source_pdf=Path(pdf).name, page=line.page,
                            informative=bool(parent and parent['informative']) or '(informative)' in line.text.casefold(),
                            _depth=depth, _kind=h['kind'], _body=own_body, _skip=skip, _x0=line.bbox[0])
+            current['_heading_lines'] = [line] + title_lines
             candidates.append(current)
             stack.append(current)
             line.role, line.number, line.parent_number = 'clause_start', num, parent['number'] if parent else ''
+            for following in title_lines:
+                following.number, following.parent_number = num, line.parent_number
         elif line.role != 'title':
             if current:
                 current['_body'].append(line)
                 line.number, line.parent_number = current['number'], current['parent'].split(':', 1)[1] if current['parent'] else ''
             else:
                 outside.append(line)
-                line.role = 'noise'
+                line.role = 'outside_markers'
         previous = line.text
+        previous_line = line
     flush_outside()
     kept, seen_text, all_candidates = [], set(), {c['id']: c for c in candidates}
     for c in candidates:
@@ -518,9 +623,55 @@ def parse_document(pdf, doc, config, slices=None):
                                    'require_bold': next(lv.get('require_bold', False) for lv in config['levels'] if lv['name'] == k)}
                                  for k, v in calibration.items()}
     stats['bookmark_matches'] = sum(any(difflib.SequenceMatcher(None, b[1].casefold(), c['title'].casefold()).ratio() >= .8 for c in result) for b in bookmarks)
-    stats['quality_report'] = quality_report(result, raw_text, stripped_chars, pages)
+    # Audit source characters, rather than hiding omissions in a global length ratio.
+    # Whitespace and the documented cleaning operations are not body characters.
+    exclusions = Counter()
+    accounted = {}
+    compact = lambda text: re.sub(r'\s+', '', clean(text))
+    for line in lines:
+        if line.role in ('toc', 'header_footer', 'page_number', 'footnote', 'source_note', 'outside_markers'):
+            accounted[line.line_id] = line.role
+    for c in candidates:
+        body_ids = {l.line_id for l in c['_body']}
+        for l in c.get('_heading_lines', []):
+            if l.line_id not in body_ids:
+                accounted[l.line_id] = 'heading_title'
+        if c not in kept:
+            reason = next((d['reason'] for d in drops if d['number'] == c['number'] and
+                           d['page'] == c['page'] and d['reason'] not in ('id_collision', 'long_clause')), 'other')
+            if reason in ('duplicate', 'skipped_section'):
+                for l in c['_body']:
+                    accounted[l.line_id] = reason
+    owners = {l.line_id: c for c in kept for l in c['_body']}
+    table_clauses = [c for c in kept if c['_kind'] == 'table']
+    body_chars = retained_chars = 0
+    for l in lines:
+        raw = compact(original[l.line_id])
+        if l.line_id in accounted:
+            exclusions[accounted[l.line_id]] += len(raw)
+            continue
+        cleaned = compact(l.text)
+        exclusions['superscript'] += max(0, len(raw) - len(cleaned))
+        body_chars += len(cleaned)
+        owner = owners.get(l.line_id)
+        if not owner and l.role == 'table':
+            owner = next((c for c in table_clauses if c['page'] == l.page and
+                          cleaned in compact(c['text'])), None)
+        if owner:
+            # Conditional hyphen removal is an explicit cleaning operation.
+            target = compact(owner['text'])
+            if cleaned in target:
+                retained_chars += len(cleaned)
+            elif cleaned.endswith('-') and cleaned[:-1] in target:
+                retained_chars += len(cleaned) - 1
+                body_chars -= 1
+                exclusions['conditional_hyphen'] += 1
+    stats['coverage_exclusions'] = dict(exclusions)
+    stats['quality_report'] = quality_report(result, raw_text, stripped_chars, pages,
+                                             body_coverage=(retained_chars, body_chars, dict(exclusions)))
     exported = [dict(line_id=f'{doc}:{l.line_id}', doc=doc, page=l.page, text=original[l.line_id],
-                     pred_role='noise' if l.role in ('source_note', 'title') else l.role,
+                     pred_role=('noise' if l.role in ('source_note', 'title', 'outside_markers') else
+                                'continuation' if l.role == 'consumed_body' else l.role),
                      pred_number=l.number, pred_parent_number=l.parent_number) for l in lines]
     return dict(clauses=result, stats=stats, drops=drops, warnings=warnings, lines=exported,
                 ocr=({'doc': doc, 'file': str(pdf), 'pages': pages,

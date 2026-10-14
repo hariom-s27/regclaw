@@ -35,7 +35,7 @@ def percentile(values, q):
     return values[a] + (values[math.ceil(x)] - values[a]) * (x - a)
 
 
-def quality_report(clauses, raw_text='', stripped_chars=0, pages=None):
+def quality_report(clauses, raw_text='', stripped_chars=0, pages=None, body_coverage=None):
     """Return Q1–Q8 for one document; never reject a clause."""
     pages = pages or max((c['page'] for c in clauses), default=0)
     grams = defaultdict(set)
@@ -49,6 +49,16 @@ def quality_report(clauses, raw_text='', stripped_chars=0, pages=None):
     raw_ids = len(re.findall(r'\d-\d', raw_text))
     kept_ids = len(re.findall(r'\d-\d', text))
     denominator = max(0, len(raw_text) - stripped_chars)
+    legacy_ratio = len(text) / denominator if denominator else 1
+    if body_coverage is not None:
+        retained, body, exclusions = body_coverage
+        coverage = {'ratio': retained / body if body else 1,
+                    'warning': bool(body and retained / body < .98),
+                    'retained_body_chars': retained, 'body_chars': body,
+                    'excluded_chars': exclusions, 'legacy_ratio': legacy_ratio,
+                    'basis': 'non-whitespace source body characters after documented cleaning'}
+    else:
+        coverage = {'ratio': legacy_ratio, 'warning': bool(denominator and legacy_ratio < .98)}
     pairs = [(c['parent'], c['number']) for c in clauses]
     sizes = [len(c['text']) for c in clauses]
     return {
@@ -59,7 +69,6 @@ def quality_report(clauses, raw_text='', stripped_chars=0, pages=None):
                   '\ue000' <= ch <= '\uf8ff' or 0xF0000 <= ord(ch) <= 0x10FFFD for ch in text),
         'Q5': {'raw': raw_ids, 'kept': kept_ids, 'warning': raw_ids > 0 and kept_ids < .8 * raw_ids},
         'Q6': len(re.findall(r'[^\W\d_]\d', text)),
-        'Q7': {'ratio': len(text) / denominator if denominator else 1,
-               'warning': bool(denominator and len(text) / denominator < .98)},
+        'Q7': coverage,
         'Q8': {'p50': percentile(sizes, .5), 'p95': percentile(sizes, .95), 'max': max(sizes, default=0)},
     }
