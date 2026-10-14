@@ -74,10 +74,21 @@ def main():
     ingest.add_argument('--include-optional', action='store_true')
     ingest.add_argument('--pdf')
     ingest.add_argument('--as', dest='as_code')
+    subcommands.add_parser('parse-sample', help='Export pre-filter lines for manual labels.')
+    parse_score = subcommands.add_parser('parse-score', help='Score labelled parse samples.')
+    parse_score.add_argument('--csv')
     args = parser.parse_args()
 
     if args.command == "test":
         return run_tests()
+    if args.command == 'parse-sample':
+        from ingest.parse_eval import sample
+        sample()
+        return 0
+    if args.command == 'parse-score':
+        from ingest.parse_eval import score
+        score(args.csv)
+        return 0
     if args.command == 'ingest':
         from ingest.ingest import run
         if bool(args.pdf) != bool(args.as_code):
