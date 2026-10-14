@@ -77,6 +77,7 @@ def main():
     subcommands.add_parser('parse-sample', help='Export pre-filter lines for manual labels.')
     parse_score = subcommands.add_parser('parse-score', help='Score labelled parse samples.')
     parse_score.add_argument('--csv')
+    subcommands.add_parser('token-stats', help='Count embed input v1 tokens offline.')
     args = parser.parse_args()
 
     if args.command == "test":
@@ -88,6 +89,10 @@ def main():
     if args.command == 'parse-score':
         from ingest.parse_eval import score
         score(args.csv)
+        return 0
+    if args.command == 'token-stats':
+        from embed.token_stats import run
+        run()
         return 0
     if args.command == 'ingest':
         from ingest.ingest import run
