@@ -179,13 +179,19 @@ def test_cache_and_determinism(tmp_path):
     (tmp_path / 'data/corpus_manifest.json').write_text(json.dumps({k: {'status': 'ok'} for k in configs}))
     run(tmp_path)
     first = (tmp_path / 'data/clauses.json').read_bytes()
+    first_notes = (tmp_path / 'data/footnotes.json').read_bytes()
     _, skipped = run(tmp_path)
     assert set(skipped) == set(configs)
     assert (tmp_path / 'data/clauses.json').read_bytes() == first
+    assert (tmp_path / 'data/footnotes.json').read_bytes() == first_notes
     configs['fda-nitinol']['max_depth'] = 2
     (tmp_path / 'ingest/sources.yaml').write_text(yaml.safe_dump(configs))
     _, skipped = run(tmp_path)
     assert skipped == ['fda-iso10993-1']
+    assert {n['clause_id'].split(':')[0] for n in json.loads(
+        (tmp_path / 'data/footnotes.json').read_text())} == set(configs)
+    run(tmp_path, doc='fda-nitinol')
+    assert (tmp_path / 'data/footnotes.json').read_bytes() == first_notes
     scan = tmp_path / 'scan.pdf'; d = fitz.open(); d.new_page(); d.save(scan)
     before = (tmp_path / 'data/clauses.json').read_bytes()
     run(tmp_path, pdf=scan, as_code='scanned-test')
@@ -377,3 +383,170 @@ def test_fda_number_and_adjacent_title_share_a_visual_line(monkeypatch):
                     styled('FDA has developed this guidance document to assist industry.', 12, False, y=474.68)])
     assert r['clauses'][0]['title'] == 'Introduction'
     assert r['clauses'][0]['text'].startswith('FDA has developed')
+
+
+def test_footnotes_link_by_superscript_and_last_body_line(monkeypatch):
+    body = styled('The first clause has a citation and sufficient body text to establish the document body font size.', bold=False, y=150, block=1)
+    body.spans += [dict(text='31', size=8, flags=1)]
+    body.text += '31'
+    r = parse_lines(monkeypatch, 'fda-nitinol', [
+        styled('I. First section', y=100), body,
+        styled('II. Second section', y=200, block=2),
+        styled('The second clause owns the final body line and retains its complete original regulatory requirements.', bold=False, y=230, block=3),
+        styled('31 ISO 10993-4:2017 Biological evaluation.', 8, False, y=650, block=4),
+        styled('30 day continuation of the first footnote.', 8, False, y=663, block=4),
+        styled('32 ISO 18562-3 Another reference.', 8, False, y=680, block=5),
+    ])
+    assert r['stats']['footnotes_linked'] == dict(marker=1, page_fallback=1, unlinked=0)
+    first, fallback = r['footnotes']
+    assert first['clause_id'] == 'fda-nitinol:I' and first['marker'] == '31'
+    assert first['page'] == 1 and '30 day continuation' in first['text']
+    assert fallback['clause_id'] == 'fda-nitinol:II' and fallback['marker'] is None
+    assert all('ISO' not in c['text'] and 'citation.31' not in c['text'] for c in r['clauses'])
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+    validate(r['clauses'], CONFIG)
+
+
+def test_footnote_fallback_uses_same_page_not_clause_start(monkeypatch):
+    lines = [styled('I. Heading', y=100),
+             styled('This body starts on the first page.', bold=False, y=140, block=1),
+             styled('This body continues on the second page.', bold=False, y=140, block=2),
+             styled('1 ISO 10993-10:2021 reference.', 8, False, y=680, block=3)]
+    for i, l in enumerate(lines):
+        l.page = 1 if i < 2 else 2
+        l.line_id = f'{l.page}:{i}'
+    monkeypatch.setattr('ingest.ingest.extract_lines', lambda *args: (lines, 2, []))
+    r = parse_document('sample.pdf', 'fda-nitinol', CONFIG['fda-nitinol'])
+    assert r['footnotes'][0]['clause_id'] == 'fda-nitinol:I'
+    assert r['footnotes'][0]['page'] == 2 and r['footnotes'][0]['marker'] is None
+
+
+def test_small_appendix_table_rows_are_not_footnotes(monkeypatch):
+    r = parse_lines(monkeypatch, 'imdrf-n47', [
+        styled('Appendix B', 14, y=50),
+        styled('Guidance on Essential Principles', 14, y=70),
+        styled('The table below provides guidance on meeting the essential principles of safety and performance. '
+               'The listed standards do not encompass every requirement for each essential principle.',
+               12, False, y=100, block=4),
+        styled('5.12', 10, False, y=550, block=1),
+        styled('IEC 62366-1 IEC/TR 62366-2', 10, False, x=410, y=550, block=1),
+        styled('5.13', 10, False, y=650, block=2),
+        styled('ISO 22442', 10, False, x=410, y=650, block=2),
+        styled('6.1', 10, False, y=680, block=3),
+        styled('ISO 10993', 10, False, x=410, y=680, block=3),
+    ])
+    assert not r['footnotes']
+    cs = {c['number']: c for c in r['clauses']}
+    assert cs['Appendix B.5.13']['text'] == 'ISO 22442'
+    assert cs['Appendix B.6.1']['text'] == 'ISO 10993'
+
+
+def test_styled_footnote_marker_without_space_and_numeric_continuation(monkeypatch):
+    body = styled('The guidance body refers to the available scientific evidence and its citation in this footnote.',
+                  12, False, y=150, block=1)
+    body.spans.append(dict(text='41', size=8, flags=1))
+    body.text += '41'
+    note = styled('41Available at the reference library.', 8, False, y=650, block=2)
+    note.spans = [dict(text='41', size=5, flags=0), dict(text='Available at the reference library.', size=8, flags=0)]
+    r = parse_lines(monkeypatch, 'fda-nitinol', [styled('I. Introduction', y=100), body, note,
+        styled('2012 Sep 4;84(17):7274-82.', 8, False, y=665, block=2)])
+    assert len(r['footnotes']) == 1
+    assert r['footnotes'][0]['marker'] == '41'
+    assert r['footnotes'][0]['text'] == 'Available at the reference library. 2012 Sep 4;84(17):7274-82.'
+
+
+def test_epa_appendix_real_heading_depth_tables_and_detached_labels(monkeypatch):
+    assert heading(styled('Appendix A to Subpart O of Part 63'), CONFIG['epa-63o'], []) is None
+    r = parse_lines(monkeypatch, 'epa-63o', [
+        styled('Subpart O—Ethylene Oxide Emissions Standards', y=20),
+        styled('§ 63.368 Implementation.', x=36, y=50),
+        styled('(c) The final regulatory paragraph shall remain here.', x=60, y=80),
+        styled('Appendix A to Subpart O of Part 63—Monitoring Provisions for EtO CEMS', x=36, y=120),
+        styled('1. Applicability', 13.5, False, x=36, y=150),
+        styled('2. Monitoring of EtO Emissions', 13.5, False, x=36, y=240),
+        styled('These provisions apply to the following facilities.', bold=False, y=180),
+        styled('This is the monitoring section body.', bold=False, y=270),
+        styled('11.5.3 Each electronic quarterly report shall include:', bold=False, y=300),
+        styled('11.5.3.1 The date of report generation;', bold=False, y=325),
+        styled('Field | Value | Unit', bold=False, y=350),
+        styled('EtO | 10 | lb/hr', bold=False, y=375),
+        styled('Refer to the requirements in §', bold=False, y=400),
+        styled('75.20(b)(3)(iv) of this chapter.', bold=False, y=425),
+        styled('11.5.4 Compliance certification shall be submitted.', bold=False, y=450),
+    ])
+    cs = {c['number']: c for c in r['clauses']}
+    assert 'Appendix' not in cs['§63.368(c)']['text']
+    assert cs['Appendix A.1']['text'].startswith('These provisions')
+    assert cs['Appendix A.2']['text'].startswith('This is the monitoring')
+    c = cs['Appendix A.11.5.3']
+    assert '11.5.3.1' in c['text'] and 'EtO | 10 | lb/hr' in c['text']
+    assert '75.20(b)(3)(iv)' in c['text']
+    assert 'Appendix A.11.5.3.1' not in cs and 'Appendix A.75' not in cs
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+    validate(r['clauses'], CONFIG)
+
+
+def test_india_annexure_forms_and_editorial_notes_everywhere(monkeypatch):
+    r = parse_lines(monkeypatch, 'in-mdr', [
+        styled('22. Requirements for licence', 14, y=50),
+        styled('The applicant shall provide the following records.', 14, False, y=80, block=1),
+        styled('1. Inserted vide GSR 30(E) dt. 15-1-2019.', 10, False, y=110, block=2),
+        styled('EIGHTH SCHEDULE', 14, y=160, block=3),
+        styled('9. Import of medical devices', 14, y=180, block=4),
+        styled('All provisions apply to the devices specified here.', 14, False, y=210, block=5),
+        styled('ANNEXURE', 14, y=240, block=6),
+        styled('(See rule 19A)', 14, False, y=260, block=7),
+        styled('1. Disposable hypodermic syringes', 14, y=280, block=8),
+        styled('FORM MD-1', 14, y=310, block=9),
+        styled('1. Name of applicant', 14, y=340, block=10),
+        styled('ANNEXURE', 14, y=360, block=11),
+        styled('2. Manufacturing site', 14, y=380, block=12),
+        styled('Form MD-2', 14, y=400, block=13),
+        styled('The certificate fields remain in this form.', 14, False, y=430, block=14),
+        styled('REFERENCES', 14, y=470, block=15),
+        styled('51.', 10, False, y=500, block=16),
+        styled('Substituted for "former wording" vide GSR 30(E).', 10, False, y=500, block=16),
+        styled('Prior to substitution, the rule read as follows:', 10, False, y=520, block=17),
+        styled('The former rule shall not be retained.', 10, False, y=540, block=18),
+        styled('52. Inserted, ibid.', 10, False, y=560, block=19),
+    ])
+    cs = {c['number']: c for c in r['clauses']}
+    assert r['stats']['amendment_notes'] == 3
+    assert cs['Form MD-1']['parent'] is None
+    assert '1. Name' in cs['Form MD-1']['text'] and '2. Manufacturing' in cs['Form MD-1']['text']
+    assert 'ANNEXURE' in cs['Form MD-1']['text']  # form's own attachment stays inside
+    assert 'See rule 19A' in cs['Annexure (rule 19A)']['text']
+    assert 'FORM MD' not in cs['Schedule 8.9']['text']
+    assert not any('GSR' in c['text'] or 'former rule' in c['text'] or 'REFERENCES' in c['text'] for c in cs.values())
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+    validate(r['clauses'], CONFIG)
+
+
+def test_india_form_with_editorial_superscript_prefix():
+    spans = [dict(text='65', size=9, flags=20), dict(text='[Form MD-41', size=14, flags=20)]
+    text = ''.join(s['text'] for s in body_spans(spans))
+    assert heading(bold_line(text), CONFIG['in-mdr'], [])['number'] == 'Form MD-41'
+
+
+def test_unnumbered_front_matter_only_before_numbered_headings(monkeypatch):
+    r = parse_lines(monkeypatch, 'imdrf-n47', [
+        styled('Preface', 14, y=50),
+        styled('The document was produced by the forum.', 12, False, y=80, block=1),
+        styled('Introduction', 14, y=120, block=2),
+        styled('A course of action is preferred but not necessarily required.', 12, False, y=150, block=3),
+        styled('1.0 Scope', 14, y=200, block=4),
+        styled('The scope covers medical devices and their manufacture.', 12, False, y=230, block=5),
+        styled('Introduction', 14, y=270, block=6),
+        styled('This later word does not open another clause.', 12, False, y=300, block=7),
+    ])
+    cs = {c['number']: c for c in r['clauses']}
+    assert set(cs) == {'Preface', 'Introduction', '1'}
+    assert 'preferred but not necessarily required' in cs['Introduction']['text']
+    assert cs['Introduction']['title'] == 'Introduction' and cs['1']['parent'] is None
+    assert 'Introduction' in cs['1']['text']
+    r = parse_lines(monkeypatch, 'imdrf-n47', [
+        styled('Introduction', 12, False, y=50),  # ordinary body, no heading style
+        styled('1.0 Scope', 14, y=100, block=1),
+        styled('The scope covers medical devices.', 12, False, y=130, block=2),
+    ])
+    assert [c['number'] for c in r['clauses']] == ['1']

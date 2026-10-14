@@ -332,7 +332,13 @@ who-decon:
 in-mdr:
   enabled: true
   mode: india
+  amendment_notes: true
   levels:
+  - name: form
+    pattern: ^\[?(?i:FORM)\s+(?P<number>MD-\d+)\s*\]?$
+    require_bold: true
+    number_format: Form {number}
+    depth: 1
   - name: group
     pattern: ^(?P<label>PART|Appendix|TABLE)\s+(?P<number>[IVX]+|\d+)\s*$
     require_bold: true
@@ -359,6 +365,7 @@ in-mdr:
   - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
   strip_lines:
   - ^CHAPTER\s+[IVX]+\b
+  - ^\*+$
   - ^Central Drugs Standard Control Organization, Ministry of Health and Family Welfare, Govt\. of India\s+Page \d+ of \d+$
   tables: 'off'
   expected_clauses:
@@ -369,7 +376,17 @@ epa-63o:
   mode: epa
   point_max_x: 65
   section_max_x: 65
+  appendix_decimal_levels: 2
   levels:
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>A)\s+to Subpart O of Part 63[—–-](?P<title>Monitoring Provisions for EtO CEMS)$
+    require_bold: true
+    number_format: Appendix {number}
+    depth: 1
+  - name: decimal
+    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.(?:\s+|$)|\s+|$)(?P<title>.*)$
+    require_bold: false
+    number_format: '{appendix}.{number}'
   - name: section
     pattern: ^§\s*(?P<number>63\.36\d)(?:\s+(?P<title>.*)|$)
     require_bold: false

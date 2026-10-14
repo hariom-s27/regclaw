@@ -18,7 +18,7 @@ import yaml
 from .validate import quality_report, validate
 
 ROOT = Path(__file__).resolve().parents[1]
-PARSER_VERSION = "2.1"
+PARSER_VERSION = "2.2"
 TEXT_FLAGS = (fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_LIGATURES &
               ~fitz.TEXT_PRESERVE_IMAGES) | fitz.TEXT_COLLECT_STYLES
 DROP_FIELDS = ['doc', 'number', 'page', 'reason', 'detail', 'text_preview']
@@ -37,7 +37,7 @@ def body_spans(spans):
     """Remove citation superscripts, preserving signed mathematical exponents."""
     if len(spans) > 1 and re.fullmatch(r'\d+\s*', spans[0]['text']):
         rest = ''.join(s['text'] for s in spans[1:])
-        if (re.match(r'\s*\[\d+[A-Z]?\.', rest) and
+        if (re.match(r'\s*\[(?:\d+[A-Z]?\.|Form\s+MD-)', rest) and
                 spans[0].get('size', 12) < .85 * max(s.get('size', 12) for s in spans)):
             spans = spans[1:]
     return [s for s in spans if not s.get('flags', 0) & 1 or
@@ -77,15 +77,20 @@ def position_section_labels(lines, config):
     """
     if config['mode'] != 'epa':
         return lines
-    result = list(lines)
+    labels = []
+    in_appendix = False
     for label in lines:
-        if not re.match(r'^§\s*63\.36\d\s', label.text) or label.bbox[0] > config.get('section_max_x', 65):
+        if re.match(r'^Appendix A to Subpart O of Part 63[—–-]', label.text):
+            in_appendix = True
+        section = re.match(r'^§\s*63\.36\d\s', label.text)
+        appendix_section = in_appendix and re.match(r'^\d+\.\s', label.text)
+        if not (section or appendix_section) or label.bbox[0] > config.get('section_max_x', 65):
             continue
-        i = result.index(label)
-        if i + 1 == len(result) or result[i + 1].page != label.page or result[i + 1].bbox[1] >= label.bbox[1]:
-            continue
-        result.pop(i)
-        j = i
+        labels.append(label)
+    label_ids = {id(l) for l in labels}
+    result = [l for l in lines if id(l) not in label_ids]
+    for label in sorted(labels, key=lambda l: (l.page, l.bbox[1])):
+        j = next((i for i, l in enumerate(result) if l.page >= label.page), len(result))
         while (j < len(result) and result[j].page == label.page and
                result[j].bbox[1] < label.bbox[1]):
             j += 1
@@ -192,6 +197,47 @@ def band_key(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 
+def amendment_lines(lines, config):
+    """Recognise editorial notes, including separately emitted number labels.
+
+    The India PDF's REFERENCES tail includes ibid. entries and quoted former
+    provisions across blocks. Elsewhere only a note's own block is consumed.
+    """
+    if not config.get('amendment_notes'):
+        return {}, set()
+    starts = {}
+    for i, line in enumerate(lines):
+        m = re.match(r'^\d+\.\s*(.*)$', line.text)
+        if not m:
+            continue
+        text = m[1]
+        if not text and i + 1 < len(lines) and lines[i + 1].page == line.page:
+            text = lines[i + 1].text
+        if re.match(r'^(Substituted|Inserted|Omitted)\b.*(?:vide\s+GSR|ibid\.)', text, re.I):
+            starts[i] = line.page
+    marked = set()
+    editorial_tail = False
+    for i, line in enumerate(lines):
+        if line.text == 'REFERENCES' and i + 1 in starts:
+            editorial_tail = True
+            marked.add(line.line_id)
+        if i not in starts:
+            continue
+        size = max((s.get('size', 12) for s in line.spans), default=12)
+        for j in range(i, len(lines)):
+            following = lines[j]
+            if j > i and j in starts:
+                break
+            if following.page != line.page:
+                break
+            if not editorial_tail and following.block != line.block:
+                break
+            if max((s.get('size', 12) for s in following.spans), default=12) > size + .2:
+                break
+            marked.add(following.line_id)
+    return starts, marked
+
+
 def filter_lines(lines, pages, config):
     by_page = defaultdict(list)
     for l in lines:
@@ -237,21 +283,26 @@ def filter_lines(lines, pages, config):
     blocks = defaultdict(list)
     for l in lines:
         blocks[(l.page, l.block)].append(l)
+    note_starts, amendment_ids = amendment_lines(lines, config)
     footnotes = set()
     for ls in blocks.values():
         span_sizes = [s.get('size', 12) for l in ls for s in l.spans]
         if (ls[0].bbox[1] >= .75 * ls[0].height and span_sizes and
                 statistics.median(span_sizes) <= .85 * body_size and
-                re.match(r'^(\d+|[*†‡])', ls[0].text)):
+                re.match(r'^(\d+(?![\d.])|[*†‡])', ls[0].text) and
+                not any(re.search(p, ls[0].text) for p in config.get('strip_lines', []))):
             footnotes.update(l.line_id for l in ls)
     toc_pages = {p for p, ls in by_page.items()
                  if p <= max(config.get('toc_scan_pages', 10), math.ceil(.15 * pages)) and
                  sum(toc_like(l.text, config) for l in ls) / max(1, len(ls)) >= .4}
     counts = Counter()
+    counts['amendment_notes'] = len(note_starts)
     stripped_chars = footnote_chars = 0
     for l in lines:
         role = None
-        if l.page in toc_pages:
+        if l.line_id in amendment_ids:
+            role = 'amendment_note'
+        elif l.page in toc_pages:
             role = 'toc'
         elif re.fullmatch(r'\d{1,4}|Page\s+\d+\s+of\s+\d+|-\s*\d+\s*-', l.text, re.I):
             # A bare number ending in '.' is a heading; a bare integer is a page number.
@@ -306,6 +357,10 @@ def heading(line, config, stack, previous=''):
     if re.match(r'^\([a-z0-9]+\)(?:\([a-z0-9]+\))*[),]*\s+(of|in|and|or|to)\b', text, re.I):
         return None
     mode = config['mode']
+    if mode == 'india' and any(s['_kind'] == 'form' for s in stack):
+        form = next(lv for lv in config['levels'] if lv['name'] == 'form')
+        if not re.match(form['pattern'], text):
+            return None
     if config.get('heading_font') and line.spans and not any(config['heading_font'] in s.get('font', '') for s in line.spans):
         return None
     matches = []
@@ -347,7 +402,9 @@ def heading(line, config, stack, previous=''):
         suffix = token if mode == 'eu' else label + ' ' + token
         return {'depth': depth, 'number': ancestor['number'] + '.' + suffix,
                 'title': title, 'kind': kind}
-    if kind in ('annex', 'attachment', 'appendix', 'schedule', 'article'):
+    if kind == 'form':
+        number, depth = 'Form ' + token, 1
+    elif kind in ('annex', 'attachment', 'appendix', 'schedule', 'article'):
         if kind == 'schedule':
             number = 'Schedule ' + str(['FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'SIXTH', 'SEVENTH', 'EIGHTH'].index(token) + 1)
         else:
@@ -397,6 +454,12 @@ def heading(line, config, stack, previous=''):
     elif mode == 'epa':
         if kind == 'section':
             number = '§' + token
+        elif kind == 'decimal':
+            root = next((s for s in stack if s['_kind'] == 'appendix'), None)
+            if not root:
+                return None
+            number = root['number'] + '.' + token.rstrip('.')
+            depth = 1 + len(token.rstrip('.').split('.'))
         else:
             root = next((s for s in stack if s['_kind'] == 'section'), None)
             if not root:
@@ -422,6 +485,57 @@ def heading(line, config, stack, previous=''):
     return {'depth': depth, 'number': number, 'title': title, 'kind': kind}
 
 
+def link_footnotes(lines, kept, vocabulary):
+    """Link before discarding span metadata; body text remains footnote-free."""
+    groups = []
+    blocks_seen = set()
+    for line in lines:
+        if line.role != 'footnote':
+            continue
+        block = (line.page, line.block)
+        visible = [s for s in line.spans if s['text'].strip()]
+        first = visible[0] if visible else {}
+        separate_marker = (re.fullmatch(r'\d+|[*†‡]', first.get('text', '').strip()) and
+                           (first.get('flags', 0) & 1 or
+                            first.get('size', 12) < .85 * max(
+                                (s.get('size', 12) for s in visible[1:]), default=0)))
+        # Within a block, only a styled marker opens another note: numbers in
+        # wrapped prose (30 day, 21 CFR, 2012 Sep) remain part of that note.
+        pattern = r'^(\d+|[*†‡])\s*' if separate_marker else r'^(\d+|[*†‡])(?:\s+|$)'
+        marker = re.match(pattern, line.text) if separate_marker or block not in blocks_seen else None
+        blocks_seen.add(block)
+        if marker or not groups or groups[-1]['page'] != line.page:
+            groups.append(dict(page=line.page, marker=marker[1] if marker else None, lines=[]))
+        groups[-1]['lines'].append(line.text[marker.end():] if marker else line.text)
+    owners = {l.line_id: c for c in kept for l in c['_body']}
+    page_bodies = defaultdict(list)
+    markers = {}
+    for line in lines:
+        owner = owners.get(line.line_id)
+        if not owner:
+            continue
+        page_bodies[line.page].append(line)
+        for span in line.spans:
+            if span.get('flags', 0) & 1 and not re.fullmatch(r'[-+−]\d+', span['text'].strip()):
+                for marker in re.findall(r'\d+|[*†‡]', span['text']):
+                    markers.setdefault((line.page, marker), owner['id'])
+    counts = dict(marker=0, page_fallback=0, unlinked=0)
+    footnotes = []
+    for group in groups:
+        page, marker = group['page'], group['marker']
+        owner = markers.get((page, marker))
+        if owner:
+            counts['marker'] += 1
+        else:
+            marker = None
+            last = max(page_bodies[page], key=lambda l: (l.bbox[3], l.bbox[0]), default=None)
+            owner = owners[last.line_id]['id'] if last else None
+            counts['page_fallback' if owner else 'unlinked'] += 1
+        footnotes.append(dict(clause_id=owner, page=page, marker=marker,
+                              text=join_text(group['lines'], vocabulary)))
+    return footnotes, counts
+
+
 def parse_document(pdf, doc, config, slices=None):
     lines, pages, bookmarks = extract_lines(pdf, config.get('tables') == 'clause')
     raw_text = '\n'.join(l.text for l in lines)
@@ -431,6 +545,7 @@ def parse_document(pdf, doc, config, slices=None):
     vocabulary = set(re.findall(r'[A-Za-z]+', raw_text.casefold()))
     stats = {'pages': pages, 'raw_headings': 0, 'kept_clauses': 0, 'drops': {},
              'line_filters': filters, 'footnote_chars': footnote_chars, 'body_size': body_size,
+             'amendment_notes': filters.get('amendment_notes', 0),
              'hyphen_joins': 0, 'depth_merges': 0, 'bold_calibration': {}, 'clauses_per_level': {},
              'expected_clauses': config.get('expected_clauses')}
     calibration = defaultdict(lambda: [0, 0])
@@ -445,6 +560,7 @@ def parse_document(pdf, doc, config, slices=None):
     table_counts = Counter()
     previous = ''
     previous_line = None
+    numbered_started = False
 
     def log_drop(c, reason, detail=''):
         drops.append(dict(doc=doc, number=c.get('number', ''), page=c['page'], reason=reason,
@@ -457,8 +573,10 @@ def parse_document(pdf, doc, config, slices=None):
 
     for i, line in enumerate(lines):
         if line.role in ('title', 'consumed_body'):
+            if config['mode'] == 'epa' and line.role == 'consumed_body':
+                previous, previous_line = line.text, line
             continue
-        if line.role in ('toc', 'header_footer', 'page_number', 'footnote', 'source_note'):
+        if line.role in ('toc', 'header_footer', 'page_number', 'footnote', 'source_note', 'amendment_note'):
             continue
         if marker_parts:
             # Each slice can end before its stop marker; a later start resets the range.
@@ -508,11 +626,21 @@ def parse_document(pdf, doc, config, slices=None):
                   abs(previous_line.bbox[1] - line.bbox[1]) < 1 and
                   line.bbox[0] >= previous_line.bbox[2] - 1)
         h = None if inline else heading(line, config, stack, previous)
+        if (not numbered_started and line.text in ('Introduction', 'Preface') and
+                (line.bold or max((s.get('size', 12) for s in line.spans), default=0) > body_size)):
+            h = dict(depth=1, number=line.text, title=line.text, kind='front_matter')
+        if (config['mode'] == 'india' and line.text == 'ANNEXURE' and
+                i + 1 < len(lines) and lines[i + 1].text == '(See rule 19A)'):
+            h = dict(depth=1, number='Annexure (rule 19A)', title='Annexure (rule 19A)', kind='annexure')
         if h:
+            if h['kind'] != 'front_matter':
+                numbered_started = True
             if h.get('ambiguous'):
                 warnings.append(dict(doc=doc, page=line.page, number=h['number'], code='AMBIGUOUS_NUM', detail='fallback to letter reading'))
             stats['raw_headings'] += 1
             cap = config['max_depth']
+            if config['mode'] == 'epa' and h['kind'] == 'decimal':
+                cap = 2 + config['appendix_decimal_levels']
             if config['mode'] == 'india':
                 group = next((s for s in reversed(stack) if s['_kind'] == 'group'), None)
                 cap = group['_depth'] + 1 if group else 2 if any(s['_kind'] == 'schedule' for s in stack) else 1
@@ -550,11 +678,15 @@ def parse_document(pdf, doc, config, slices=None):
             if used_ids[num] > 1:
                 log_drop({'number': num, 'page': line.page, 'text': line.text}, 'id_collision', f'renamed {num}~{used_ids[num]}')
                 num += '~' + str(used_ids[num])
-            title, title_lines = wrapped_title(lines, i, h, config, stack)
+            if h['kind'] in ('front_matter', 'form', 'annexure'):
+                title, title_lines = h['title'] or h['number'], []
+            else:
+                title, title_lines = wrapped_title(lines, i, h, config, stack)
             own_body = []
             if (len(title.split()) > 15 or re.search(r'\b(shall|should|must|means)\b', title, re.I) or
                     re.match(r'^(Where|If)\b', title) or
                     config['mode'] == 'eu' and h['kind'] in ('paragraph', 'point') or
+                    config['mode'] == 'epa' and h['kind'] == 'decimal' and ';' in title or
                     len(title.split()) >= 5 and re.search(r'[.!]$', title)):
                 title = parent['title'] if parent else ''
                 own_body.append(line)
@@ -563,7 +695,8 @@ def parse_document(pdf, doc, config, slices=None):
                 following.role = 'consumed_body' if own_body else 'title'
             if not title and parent:
                 title = parent['title']
-            skip = bool(parent and parent['_skip']) or any(re.search(p, title, re.I) for p in config.get('skip_sections', []))
+            skip = bool(parent and parent['_skip']) or (h['kind'] != 'front_matter' and
+                    any(re.search(p, title, re.I) for p in config.get('skip_sections', [])))
             current = dict(id=f'{doc}:{num}', doc=doc, number=num, title=title, text='',
                            parent=parent['id'] if parent else None, source_pdf=Path(pdf).name, page=line.page,
                            informative=bool(parent and parent['informative']) or '(informative)' in line.text.casefold(),
@@ -623,13 +756,14 @@ def parse_document(pdf, doc, config, slices=None):
                                    'require_bold': next(lv.get('require_bold', False) for lv in config['levels'] if lv['name'] == k)}
                                  for k, v in calibration.items()}
     stats['bookmark_matches'] = sum(any(difflib.SequenceMatcher(None, b[1].casefold(), c['title'].casefold()).ratio() >= .8 for c in result) for b in bookmarks)
+    footnotes, stats['footnotes_linked'] = link_footnotes(lines, kept, vocabulary)
     # Audit source characters, rather than hiding omissions in a global length ratio.
     # Whitespace and the documented cleaning operations are not body characters.
     exclusions = Counter()
     accounted = {}
     compact = lambda text: re.sub(r'\s+', '', clean(text))
     for line in lines:
-        if line.role in ('toc', 'header_footer', 'page_number', 'footnote', 'source_note', 'outside_markers'):
+        if line.role in ('toc', 'header_footer', 'page_number', 'footnote', 'source_note', 'outside_markers', 'amendment_note'):
             accounted[line.line_id] = line.role
     for c in candidates:
         body_ids = {l.line_id for l in c['_body']}
@@ -670,10 +804,10 @@ def parse_document(pdf, doc, config, slices=None):
     stats['quality_report'] = quality_report(result, raw_text, stripped_chars, pages,
                                              body_coverage=(retained_chars, body_chars, dict(exclusions)))
     exported = [dict(line_id=f'{doc}:{l.line_id}', doc=doc, page=l.page, text=original[l.line_id],
-                     pred_role=('noise' if l.role in ('source_note', 'title', 'outside_markers') else
+                     pred_role=('noise' if l.role in ('source_note', 'title', 'outside_markers', 'amendment_note') else
                                 'continuation' if l.role == 'consumed_body' else l.role),
                      pred_number=l.number, pred_parent_number=l.parent_number) for l in lines]
-    return dict(clauses=result, stats=stats, drops=drops, warnings=warnings, lines=exported,
+    return dict(clauses=result, footnotes=footnotes, stats=stats, drops=drops, warnings=warnings, lines=exported,
                 ocr=({'doc': doc, 'file': str(pdf), 'pages': pages,
                       'text_pages': len({l.page for l in lines})} if len({l.page for l in lines}) < .1 * pages else None))
 
@@ -757,6 +891,7 @@ def run(root=ROOT, doc=None, force=False, include_optional=False, pdf=None, as_c
                 all_results[code] = json.loads(cached.read_text(encoding='utf-8'))
     all_results = dict(sorted(all_results.items()))
     json_write(root / 'data/ingest_stats.json', {k: r['stats'] for k, r in all_results.items()})
+    json_write(root / 'data/footnotes.json', [f for r in all_results.values() for f in r.get('footnotes', [])])
     ocr_path = root / 'data/ocr_needed.json'
     previous_ocr = json.loads(ocr_path.read_text()) if ocr_path.exists() else []
     json_write(ocr_path, [r for r in previous_ocr if r['doc'] not in selected] +
@@ -773,6 +908,7 @@ def run(root=ROOT, doc=None, force=False, include_optional=False, pdf=None, as_c
             if b['require_bold'] and b['share'] < .8:
                 print(f"WARN {code}/{level}: bold {b['share']:.1%}; requirement retained")
         print('quality', code, json.dumps(s['quality_report'], ensure_ascii=True))
+        print('footnotes', code, s['footnotes_linked'], 'amendment_notes', s['amendment_notes'])
     print('TOTAL', len(clauses), 'contract valid')
     return results, skipped
 

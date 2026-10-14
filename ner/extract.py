@@ -43,6 +43,11 @@ def key_for(clause, client):
 
 def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep):
     root = Path(root)
+    footnote_path = root / 'data/footnotes.json'
+    footnotes = defaultdict(list)
+    if footnote_path.exists():
+        for note in json.loads(footnote_path.read_text(encoding='utf-8')):
+            footnotes[note['clause_id']].append(note)
     cache_path = root / 'data/ner_cache.json'
     cache = json.loads(cache_path.read_text(encoding='utf-8')) if cache_path.exists() else {}
     previous_path = root / 'data/ner.json'
@@ -113,6 +118,14 @@ def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep):
         key = key_for(c, client)
         cached = raw_results.get(c['id']) if c['id'] in raw_results else cache[key]
         ids, raw_refs = references(c['text'])
+        if footnote_path.exists():
+            raw_refs = [ref + ' [clause text]' for ref in raw_refs]
+            for note in footnotes[c['id']]:
+                note_ids, note_raw = references(note['text'])
+                ids = list(dict.fromkeys(ids + note_ids))
+                source = f"footnote {note['marker']}" if note['marker'] is not None else f"footnote page {note['page']} fallback"
+                raw_refs.extend(ref + f' [{source}]' for ref in note_raw)
+            raw_refs = list(dict.fromkeys(raw_refs))
         row = {'id': c['id'], 'text_sha256': hashlib.sha256(c['text'].encode()).hexdigest(),
                'model': cached['model'], 'effort': client.effort,
                'status': 'error' if 'error' in cached else 'stub' if isinstance(client, FakeClient) else 'ok',

@@ -56,6 +56,31 @@ def test_canonical_ids_and_shorthand():
     assert references('ASTM F1980-21; USP-NF ⟨88⟩')[0] == ['ASTM F1980', 'USP <88>']
 
 
+def test_footnote_references_without_extra_model_calls(tmp_path):
+    c = clause()
+    c['text'] = 'ISO 14971 applies to this clause.'
+    client = FakeClient()
+    rows, _ = run_pipeline([c], client, root=tmp_path)
+    assert rows[0]['iso_refs'] == ['ISO 14971']
+    assert rows[0]['iso_refs_raw'] == ['ISO 14971']  # no side file: old behaviour
+    notes = tmp_path / 'data/footnotes.json'
+    notes.write_text(json.dumps([
+        dict(clause_id=c['id'], page=31, marker='31', text='ISO 10993-4:2017 and ISO 14971.'),
+        dict(clause_id=c['id'], page=32, marker=None, text='ISO 18562-3 applies.'),
+        dict(clause_id='other:1', page=31, marker='31', text='ISO 9001.'),
+    ]))
+    rows, summary = run_pipeline([c], client, root=tmp_path)
+    assert rows[0]['iso_refs'] == ['ISO 14971', 'ISO 10993-4', 'ISO 18562-3']
+    assert rows[0]['iso_refs_raw'] == ['ISO 14971 [clause text]',
+        'ISO 10993-4:2017 [footnote 31]', 'ISO 14971 [footnote 31]',
+        'ISO 18562-3 [footnote page 32 fallback]']
+    assert client.calls == 1 and summary['cache_hits'] == 1
+    assert client.requests[0]['messages'][0]['content'].endswith('ISO 14971 applies to this clause.</clause>')
+    notes.write_text('[]')
+    rows, _ = run_pipeline([c], client, root=tmp_path)
+    assert rows[0]['iso_refs'] == ['ISO 14971'] and client.calls == 1
+
+
 @pytest.mark.parametrize('kind,mention,canonical,evidence,text,reason', [
     ('chemicals', 'nickel', 'nickel', 'nickel', 'There is ethylene oxide.', 'mention_grounding'),
     ('chemicals', 'ethylene oxide', 'ethylene oxide', 'There is', 'There is ethylene oxide.', 'evidence_grounding'),
