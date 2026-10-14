@@ -9,7 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 PLACEHOLDERS = (
-    "ingest", "ner", "obligation", "enrich", "graph", "embed", "retrieve", "eval"
+    "ner", "obligation", "enrich", "graph", "embed", "retrieve", "eval"
 )
 
 # The existing summary file uses script-level assertions, not pytest functions.
@@ -68,10 +68,22 @@ def main():
         subcommands.add_parser(name, help=description)
     for name in PLACEHOLDERS:
         subcommands.add_parser(name, help="Not implemented yet.")
+    ingest = subcommands.add_parser('ingest', help='Parse manifest-listed PDFs offline.')
+    ingest.add_argument('--doc')
+    ingest.add_argument('--force', action='store_true')
+    ingest.add_argument('--include-optional', action='store_true')
+    ingest.add_argument('--pdf')
+    ingest.add_argument('--as', dest='as_code')
     args = parser.parse_args()
 
     if args.command == "test":
         return run_tests()
+    if args.command == 'ingest':
+        from ingest.ingest import run
+        if bool(args.pdf) != bool(args.as_code):
+            parser.error('--pdf and --as must be used together')
+        return 0 if run(doc=args.doc, force=args.force, include_optional=args.include_optional,
+                        pdf=args.pdf, as_code=args.as_code) else 1
     if args.command in ("download", "count"):
         return subprocess.run(
             [sys.executable, "-m", "corpus." + args.command], cwd=ROOT, check=False

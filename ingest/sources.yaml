@@ -1,0 +1,394 @@
+fda-iso10993-1:
+  enabled: true
+  mode: fda
+  levels:
+  - name: attachment
+    pattern: ^Attachment\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Attachment {number}
+    depth: 1
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Appendix {number}
+    depth: 1
+  - name: roman
+    pattern: ^(?P<number>[IVX]+)\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{number}'
+    depth: 1
+  - name: letter
+    pattern: ^(?P<number>[A-Z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 2
+  - name: digit
+    pattern: ^\(?(?P<number>\d+)[.)](?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 3
+  - name: small_letter
+    pattern: ^(?P<number>[a-z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 4
+  max_depth: 4
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^Contains Nonbinding Recommendations
+  - ^Draft\s*[–—-]?\s*Not for Implementation
+  tables: clause
+  expected_clauses:
+  - 120
+  - 250
+fda-sterility-510k:
+  enabled: true
+  mode: fda
+  levels:
+  - name: attachment
+    pattern: ^Attachment\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Attachment {number}
+    depth: 1
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Appendix {number}
+    depth: 1
+  - name: roman
+    pattern: ^(?P<number>[IVX]+)\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{number}'
+    depth: 1
+  - name: letter
+    pattern: ^(?P<number>[A-Z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 2
+  - name: digit
+    pattern: ^\(?(?P<number>\d+)[.)](?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 3
+  - name: small_letter
+    pattern: ^(?P<number>[a-z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 4
+  max_depth: 3
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^Contains Nonbinding Recommendations
+  - ^Draft\s*[–—-]?\s*Not for Implementation
+  tables: 'off'
+  expected_clauses:
+  - 15
+  - 45
+fda-chem-analysis:
+  enabled: true
+  mode: fda
+  levels:
+  - name: attachment
+    pattern: ^Attachment\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Attachment {number}
+    depth: 1
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Appendix {number}
+    depth: 1
+  - name: roman
+    pattern: ^(?P<number>[IVX]+)\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{number}'
+    depth: 1
+  - name: letter
+    pattern: ^(?P<number>[A-Z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 2
+  - name: digit
+    pattern: ^\(?(?P<number>\d+)[.)](?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 3
+  - name: small_letter
+    pattern: ^(?P<number>[a-z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 4
+  max_depth: 3
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^Contains Nonbinding Recommendations
+  - ^Draft\s*[–—-]?\s*Not for Implementation
+  tables: clause
+  expected_clauses:
+  - 40
+  - 100
+fda-nitinol:
+  enabled: true
+  mode: fda
+  levels:
+  - name: attachment
+    pattern: ^Attachment\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Attachment {number}
+    depth: 1
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: Appendix {number}
+    depth: 1
+  - name: roman
+    pattern: ^(?P<number>[IVX]+)\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{number}'
+    depth: 1
+  - name: letter
+    pattern: ^(?P<number>[A-Z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 2
+  - name: digit
+    pattern: ^\(?(?P<number>\d+)[.)](?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 3
+  - name: small_letter
+    pattern: ^(?P<number>[a-z])\.(?:\s+(?P<title>.*))?$
+    require_bold: true
+    number_format: '{parent}.{number}'
+    depth: 4
+  max_depth: 3
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^Contains Nonbinding Recommendations
+  - ^Draft\s*[–—-]?\s*Not for Implementation
+  tables: 'off'
+  expected_clauses:
+  - 15
+  - 45
+fda-knee:
+  enabled: true
+  mode: decimal
+  levels:
+  - name: decimal
+    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
+    require_bold: true
+    number_format: '{number} (normalize final .0)'
+    depth: 1
+  max_depth: 2
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^https?://
+  - ^\d{1,2}/\d{1,2}/\d{2,4}
+  - ^(Back to the top|Feedback)$
+  tables: 'off'
+  expected_clauses:
+  - 10
+  - 40
+  heading_font: Merriweather
+eu-mdr:
+  enabled: true
+  mode: eu
+  levels:
+  - name: article
+    pattern: ^Article\s+(?P<number>\d+)\s*$
+    require_bold: false
+    number_format: Art {number}
+    depth: 1
+  - name: annex
+    pattern: ^ANNEX\s+(?P<number>[IVX]+)\s*$
+    require_bold: false
+    number_format: Annex {number}
+    depth: 1
+  - name: paragraph
+    pattern: ^\((?P<number>\d+)\)\s*(?P<title>.*)$
+    require_bold: false
+    number_format: '{parent}({number})'
+    depth: 2
+  - name: decimal
+    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
+    require_bold: false
+    number_format: Art N(n) / Annex R.n
+    depth: 1
+  - name: point
+    pattern: ^\((?P<number>[a-z])\)\s*(?P<title>.*)$
+    require_bold: false
+    number_format: '{parent}({number})'
+    depth: 1
+  max_depth: 5
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^L 117/\d+
+  - Official Journal of the European Union
+  - ^5\.5\.2017
+  - ^EN$
+  tables: 'off'
+  expected_clauses:
+  - 250
+  - 450
+imdrf-n47:
+  enabled: true
+  mode: decimal
+  levels:
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: false
+    number_format: Appendix {number}
+    depth: 1
+  - name: decimal
+    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
+    require_bold: false
+    number_format: '{number} (normalize final .0)'
+    depth: 1
+  max_depth: 8
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^IMDRF GRRP
+  - ^31 October 2018
+  tables: 'off'
+  expected_clauses:
+  - 100
+  - 200
+in-ep:
+  enabled: true
+  mode: decimal
+  levels:
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: false
+    number_format: Appendix {number}
+    depth: 1
+  - name: decimal
+    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
+    require_bold: false
+    number_format: '{number} (normalize final .0)'
+    depth: 1
+  max_depth: 8
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^IMDRF GRRP
+  - ^31 October 2018
+  tables: 'off'
+  expected_clauses:
+  - 70
+  - 140
+who-decon:
+  enabled: false
+  mode: decimal
+  levels:
+  - name: appendix
+    pattern: ^Appendix\s+(?P<number>[A-Z])(?:\s*[:–—-]?\s+(?P<title>.*))?$
+    require_bold: false
+    number_format: Appendix {number}
+    depth: 1
+  - name: decimal
+    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
+    require_bold: false
+    number_format: '{number} (normalize final .0)'
+    depth: 1
+  max_depth: 2
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^IMDRF GRRP
+  - ^31 October 2018
+  tables: 'off'
+  expected_clauses: null
+in-mdr:
+  enabled: true
+  mode: india
+  levels:
+  - name: schedule
+    pattern: ^(?P<number>FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|SEVENTH|EIGHTH)\s+SCHEDULE\s*(?P<title>.*)$
+    require_bold: false
+    number_format: Schedule {ordinal}
+    depth: 1
+  - name: rule
+    pattern: ^(?P<number>\d+(?:\.\d+)*)(?:\.\s*|\s+|$)(?P<title>.*)$
+    require_bold: true
+    number_format: '{number} / Schedule N.{number}'
+    depth: 1
+  - name: subrule
+    pattern: ^\((?P<number>\d+|[a-z]+|[A-Z])\)\s*(?P<title>.*)$
+    require_bold: false
+    number_format: merged into parent
+    depth: 2
+  max_depth: 2
+  body_start_marker: null
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^CHAPTER\s+[IVX]+\b
+  tables: 'off'
+  expected_clauses:
+  - 100
+  - 220
+epa-63o:
+  enabled: true
+  mode: epa
+  levels:
+  - name: section
+    pattern: ^§\s*(?P<number>63\.36\d)(?:\s+(?P<title>.*)|$)
+    require_bold: false
+    number_format: §{number}
+    depth: 1
+  - name: point
+    pattern: ^\((?P<number>[a-z])\)\s*(?P<title>.*)$
+    require_bold: false
+    number_format: '{section}({number})'
+    depth: 2
+  - name: subpoint
+    pattern: ^\((?P<number>[ivx]{2,})\)\s*(?P<title>.*)$
+    require_bold: false
+    number_format: merged into parent
+    depth: 3
+  - name: subpoint
+    pattern: ^\((?P<number>\d+|[ivx]+)\)\s*(?P<title>.*)$
+    require_bold: false
+    number_format: merged into parent
+    depth: 3
+  max_depth: 2
+  body_start_marker: ^Subpart O[—–-]Ethylene Oxide Emissions Standards
+  body_stop_marker: null
+  skip_sections:
+  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  strip_lines:
+  - ^40 CFR
+  - '^Source:'
+  - ^This content is from
+  - ^Ethylene Oxide Emissions Standards
+  tables: 'off'
+  expected_clauses:
+  - 40
+  - 120

@@ -1,11 +1,11 @@
 # CLAUDE.md — instructions for coding agents (Claude Code, Codex, Copilot)
 
-**Project:** `regclaw-rebuild` — an independent rebuild, on public substitute documents, of two regulatory-retrieval systems I worked on during my internship:
+**Project:** `regclaw` — an independent rebuild, on public substitute documents, of two regulatory-retrieval systems I worked on during my internship:
 - **Part I (RegClaw Literature Agent):** PDF ingestion → entities + obligation (LegalBERT) → Neo4j knowledge graph + pgvector → 4-stage hybrid retrieval → FastMCP stdio server.
 - **Part II (PageIndex):** vectorless tree retrieval over the ICMR GTP 2019 guideline → Sonnet navigation agent + Haiku citation check → Ragas evaluation.
 - **Observability:** Langfuse v4 tracing + run summaries.
 
-Python 3.11 · Windows (PowerShell) laptop · repo root = `D:\sem_iitk\sem9\meril` · private GitHub repo `regclaw-rebuild`.
+Python 3.11 · Windows (PowerShell) laptop · repo root = `D:\sem_iitk\sem9\meril` · private GitHub repo `regclaw`.
 
 ## Rules for every task
 1. **Follow the data contracts below exactly.** Never rename labels, properties, relationship types, tables, columns, JSON fields or doc codes.
