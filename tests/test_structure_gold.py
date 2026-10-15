@@ -1,6 +1,6 @@
 """Synthetic official-source fixtures, independent of the frozen PDF parser."""
 import pytest
-from ingest.structure_gold import parse_ecfr, parse_eurlex, score, wilson, normalise, coverage
+from ingest.structure_gold import parse_ecfr, parse_eurlex, score, wilson, normalise, coverage, first_difference
 
 
 def test_ecfr_projection(tmp_path):
@@ -58,3 +58,58 @@ def test_reject_unrecognised_sources(tmp_path):
         parse_eurlex(path)
     with pytest.raises(ValueError):
         parse_ecfr(path)
+
+
+def test_details_reports_all_parents_and_first_differences():
+    gold = [dict(official_id=f'd:{i}', number=str(i), parent=None,
+                 text='Heading. Official body ' + 'x'*140) for i in range(25)]
+    actual = [dict(id=f'd:{i}', doc='d', parent='d:group', title='Heading',
+                   text='Official body ' + 'x'*10) for i in range(25)]
+    actual.append(dict(id='d:group', doc='d', parent=None, title='Group', text='Grouping caption'))
+    baseline = score(gold, actual, 'd')
+    detailed = score(gold, actual, 'd', details=True)
+    assert len(detailed['parent_mismatches']) == len(detailed['low_coverage']) == 25
+    for finding in detailed['parent_mismatches']:
+        assert finding['expected_parent'] is None and finding['ours_parent'] == 'd:group'
+        assert finding['expected_parent_preview'] == ''
+        assert finding['ours_parent_preview'] == 'Grouping caption'
+        assert finding['official_preview'].startswith('Heading.')
+        assert finding['ours_preview'].startswith('Official body')
+        assert 'Parent projection' in finding['likely_cause']
+    for finding in detailed['low_coverage']:
+        assert finding['first_difference']['official'].startswith('heading.')
+        assert finding['first_difference']['ours'].startswith('official body')
+        assert len(finding['first_difference']['official']) == 120
+        assert 'Title/body boundary' in finding['likely_cause']
+    for metric in ('matched', 'parent_accuracy', 'coverage', 'precision', 'recall', 'f1', 'coverage_by_id'):
+        assert detailed[metric] == baseline[metric]
+
+
+@pytest.mark.parametrize('official,ours,operation', [('abc', 'ab', 'delete'), ('ab', 'abc', 'insert'),
+                                                    ('abc', 'adc', 'replace')])
+def test_first_difference_offsets_and_end_of_string(official, ours, operation):
+    finding, _ = first_difference(official, ours)
+    assert finding['operation'] == operation
+    assert finding['official'] == official[finding['official_offset']:][:120]
+    assert finding['ours'] == ours[finding['ours_offset']:][:120]
+    assert first_difference('ABC', 'abc') == (None, [])
+
+
+def test_details_cli_keeps_all_findings_and_groups_causes(monkeypatch, capsys):
+    from ingest import structure_gold as module
+    import json
+    gold = [dict(official_id=f'd:{i}', number=str(i), parent=None, text='Official body') for i in range(25)]
+    actual = [dict(id=f'd:{i}', doc='d', parent='d:group', text='ours') for i in range(25)]
+    monkeypatch.setattr(module, 'parse_ecfr', lambda _: gold)
+    monkeypatch.setattr(module, 'parse_eurlex', lambda _: gold)
+    monkeypatch.setattr(module.Path, 'exists', lambda _: True)
+    monkeypatch.setattr(module.Path, 'read_text', lambda _, **kw: json.dumps(actual))
+    from types import SimpleNamespace
+    monkeypatch.setattr(module.Path, 'stat', lambda _: SimpleNamespace(st_size=100))
+    original_score = module.score
+    monkeypatch.setattr(module, 'score', lambda expected, clauses, doc, **kw: original_score(expected, clauses, 'd', **kw))
+    assert module.main(['--details']) == 0
+    output = capsys.readouterr().out
+    assert output.count('All parent_mismatches (25), grouped by likely cause:') == 2
+    assert output.count('All low_coverage (25), grouped by likely cause:') == 2
+    assert '"id": "d:24"' in output

@@ -281,7 +281,43 @@ def coverage(expected, actual):
     return sum(m.size for m in SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks()) / len(a) if a else 1.
 
 
-def score(expected, clauses, doc):
+def first_difference(expected, actual):
+    """First differing 120-character windows in the normalised coverage text.
+
+    Offsets refer to each normalised string, not PDF character positions. An
+    empty window denotes the end of that string. Keep the first difference even
+    if it is only a paragraph marker; likely causes consider all differences.
+    """
+    official, ours = normalise(expected), normalise(actual)
+    differences = [op for op in SequenceMatcher(None, official, ours, autojunk=False).get_opcodes()
+                   if op[0] != 'equal']
+    if not differences:
+        return None, differences
+    operation, i, _, j, _ = differences[0]
+    return dict(operation=operation, official_offset=i, ours_offset=j,
+                official=official[i:i+120], ours=ours[j:j+120]), differences
+
+
+def coverage_cause(official, ours, differences):
+    """Evidence-based reporting hints, not definitive parser diagnoses."""
+    a, b = normalise(official['text']), normalise(ours['text'])
+    removed = ' '.join(a[i:j] for op, i, j, _, _ in differences if op in {'delete', 'replace'})
+    causes = []
+    title = normalise(ours.get('title', '')).rstrip('.:')
+    if title and title in a and title not in b:
+        causes.append('Title/body boundary: heading stored in our title but counted in the official body')
+    if 'where:' in removed:
+        causes.append('Equation extraction: variable definitions omitted or reordered in PDF text')
+    if re.search(r'\(\s*\d+\s*\) (?:regulation|directive)', removed):
+        causes.append('Footnote handling: official footnote text omitted or moved in PDF text')
+    if ':Table ' in official['official_id']:
+        causes.append('Table extraction: row/column order, headers and footnotes differ')
+    if not causes:
+        causes.append('Body truncation or source-version difference: numbered text absent; inspect paragraph boundaries')
+    return '; '.join(causes)
+
+
+def score(expected, clauses, doc, *, details=False):
     gold = {u['official_id']: u for u in expected}
     actual = {c['id']: c for c in clauses if c['doc'] == doc}
     matched = sorted(gold.keys() & actual.keys())
@@ -295,7 +331,7 @@ def score(expected, clauses, doc):
     def finding(key, source, cause):
         return dict(id=key, preview=source[key]['text'][:120], likely_cause=cause)
 
-    return dict(doc=doc, expected=len(gold), actual=len(actual), matched=tp,
+    result = dict(doc=doc, expected=len(gold), actual=len(actual), matched=tp,
                 precision=precision, precision_ci=pc, recall=recall, recall_ci=rc,
                 f1=harmonic(precision, recall), f1_ci=[harmonic(*v) for v in zip(pc, rc)],
                 parent_accuracy=sum(gold[k]['parent'] == actual[k]['parent'] for k in matched)/tp if tp else None,
@@ -303,11 +339,35 @@ def score(expected, clauses, doc):
                 missing=[finding(k, gold, 'Missed heading, source-version difference, or parser filtering; inspect preview') for k in sorted(gold.keys()-actual.keys())],
                 extra=[finding(k, actual, 'False heading, numbering/group mapping, or source-version difference; inspect preview') for k in sorted(actual.keys()-gold.keys())],
                 low_coverage=[dict(id=k, coverage=v, preview=gold[k]['text'][:120]) for k, v in cover.items() if v < .9])
+    if details:
+        result['parent_mismatches'] = []
+        for key in matched:
+            expected_parent, ours_parent = gold[key]['parent'], actual[key]['parent']
+            if expected_parent == ours_parent:
+                continue
+            grouping = ours_parent is not None and ours_parent not in gold
+            cause = ('Parent projection: official scoring removes an empty/title-only grouping retained in our corpus'
+                     if grouping else 'Parent hierarchy: parser attachment differs from projected official ancestry')
+            result['parent_mismatches'].append(dict(
+                id=key, expected_parent=expected_parent, ours_parent=ours_parent,
+                official_preview=gold[key]['text'][:120], ours_preview=actual[key]['text'][:120],
+                expected_parent_preview=gold.get(expected_parent, {}).get('text', '')[:120],
+                ours_parent_preview=actual.get(ours_parent, {}).get('text', '')[:120], likely_cause=cause))
+        for finding in result['low_coverage']:
+            key = finding['id']
+            difference, operations = first_difference(gold[key]['text'], actual[key]['text'])
+            finding.update(first_difference=difference,
+                           official_preview=gold[key]['text'][:120], ours_preview=actual[key]['text'][:120],
+                           likely_cause=coverage_cause(gold[key], actual[key], operations))
+    return result
 
 
 def main(argv=None):
     import argparse
-    argparse.ArgumentParser(description=__doc__).parse_args(argv)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--details', action='store_true',
+                        help='List every parent mismatch and low-coverage finding, grouped by likely cause.')
+    args = parser.parse_args(argv)
     paths = [(ROOT/'data/gold_structure/ecfr_40cfr63_subpartO.xml', 'epa-63o', parse_ecfr),
              (ROOT/'data/gold_structure/eurlex_32017R0745.html', 'eu-mdr', parse_eurlex)]
     missing = [str(p) for p, _, _ in paths if not p.exists()]
@@ -318,9 +378,19 @@ def main(argv=None):
     for path, doc, parse in paths:
         content = path.read_text(encoding='utf-8-sig')
         metadata = re.findall(r'.{0,40}(?:5\.5\.2017|2017/745|89 FR 24172|Apr\. 5, 2024|_SUBSTITUTE_DATE_|current as of).{0,65}', content, re.I)
-        result = score(parse(path), clauses, doc)
-        summary = {k: v for k, v in result.items() if k not in {'coverage_by_id', 'missing', 'extra'}}
+        result = score(parse(path), clauses, doc, details=args.details)
+        excluded = {'coverage_by_id', 'missing', 'extra', 'parent_mismatches'}
+        if args.details:
+            excluded.add('low_coverage')
+        summary = {k: v for k, v in result.items() if k not in excluded}
         print(json.dumps(dict(file=path.name, size=path.stat().st_size, version_evidence=metadata[:20], **summary), indent=2, ensure_ascii=False))
         print('Top 20 missing:', json.dumps(result['missing'][:20], ensure_ascii=False))
         print('Top 20 extra:', json.dumps(result['extra'][:20], ensure_ascii=False))
+        if args.details:
+            for kind in ('parent_mismatches', 'low_coverage'):
+                grouped = {}
+                for finding in result[kind]:
+                    grouped.setdefault(finding['likely_cause'], []).append(finding)
+                print(f'All {kind} ({len(result[kind])}), grouped by likely cause:')
+                print(json.dumps(grouped, indent=2, ensure_ascii=False))
     return 0
