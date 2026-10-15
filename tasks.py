@@ -9,7 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 PLACEHOLDERS = (
-    "obligation", "enrich", "graph", "embed", "retrieve", "eval"
+    "obligation", "graph", "embed", "retrieve", "eval"
 )
 
 # The existing summary file uses script-level assertions, not pytest functions.
@@ -56,6 +56,21 @@ def run_tests():
 
 
 def main():
+    # Keep command-specific options with their implementation modules.
+    if len(sys.argv) > 1 and sys.argv[1] == 'obligation-weak':
+        argparse.ArgumentParser(description='Run the frozen offline weak labeler.').parse_args(sys.argv[2:])
+        return subprocess.run([sys.executable, str(ROOT / 'obligation/weak_labeler.py'),
+                               str(ROOT / 'data/clauses.json'), str(ROOT / 'data/weak_labels.json')],
+                              cwd=ROOT, check=False).returncode
+    if len(sys.argv) > 1 and sys.argv[1] == 'gold-sample':
+        argparse.ArgumentParser(description='Prepare seeded gold ids and blind annotation files.').parse_args(sys.argv[2:])
+        from goldset.sample import run
+        run()
+        return 0
+    handlers = {'gold-score': 'goldset.score', 'enrich': 'ner.merge'}
+    if len(sys.argv) > 1 and sys.argv[1] in handlers:
+        from importlib import import_module
+        return import_module(handlers[sys.argv[1]]).main(sys.argv[2:])
     parser = argparse.ArgumentParser(description="Run regclaw-rebuild tasks.")
     subcommands = parser.add_subparsers(dest="command", required=True)
     for name, description in (
@@ -68,6 +83,8 @@ def main():
         subcommands.add_parser(name, help=description)
     for name in PLACEHOLDERS:
         subcommands.add_parser(name, help="Not implemented yet.")
+    for name in ('obligation-weak', 'gold-sample', *handlers):
+        subcommands.add_parser(name, help='Offline preparation; use command --help for options.')
     ingest = subcommands.add_parser('ingest', help='Parse manifest-listed PDFs offline.')
     ingest.add_argument('--doc')
     ingest.add_argument('--force', action='store_true')

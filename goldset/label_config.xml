@@ -1,0 +1,15 @@
+<View>
+  <Text name="text" value="$text"/>
+  <Choices name="label" toName="text" choice="single" showInline="true">
+    <Choice value="SHALL" hotkey="1"/>
+    <Choice value="SHOULD" hotkey="2"/>
+    <Choice value="MAY" hotkey="3"/>
+    <Choice value="NONE" hotkey="4"/>
+  </Choices>
+  <Choices name="flags" toName="text" choice="multiple" showInline="true">
+    <Choice value="mixed"/>
+    <Choice value="restated_reg"/>
+    <Choice value="low_confidence"/>
+  </Choices>
+  <TextArea name="note" toName="text" rows="1"/>
+</View>

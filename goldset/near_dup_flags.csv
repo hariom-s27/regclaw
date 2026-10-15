@@ -1,0 +1,18 @@
+gold_id,train_id,jaccard
+eu-mdr:Annex I.11.4,imdrf-n47:5.4.3,0.80430528
+imdrf-n47:5.3.2,in-ep:5.1.2,0.80636605
+imdrf-n47:5.4.2,eu-mdr:Annex I.11.3,0.8203125
+imdrf-n47:5.8.4,eu-mdr:Annex I.17.4,0.86580087
+imdrf-n47:6.4,eu-mdr:Annex I.21,0.86666667
+in-ep:5.10.3,eu-mdr:Annex I.20.3,0.88461538
+in-ep:5.11.3,eu-mdr:Annex I.21.3,0.94137931
+in-ep:5.12,eu-mdr:Annex I.22,0.93333333
+in-ep:5.4.4,in-ep:5.4.3,0.8
+in-ep:5.5.1,eu-mdr:Annex I.14.1,0.81212121
+in-ep:5.9.5,in-ep:6.8.2,0.93726937
+in-ep:6.10.1,in-ep:5.12.1,0.88619855
+in-ep:6.11,eu-mdr:Annex I.23,0.96296296
+in-ep:6.4.5,in-ep:5.5.5,0.83211679
+in-mdr:Form MD-7,in-mdr:Form MD-3,0.88075658
+in-mdr:Form MD-7,in-mdr:Form MD-4,0.82300163
+in-mdr:Form MD-7,in-mdr:Form MD-8,0.9199663

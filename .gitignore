@@ -7,6 +7,9 @@ data/pdfs/
 data/*.json
 data/cache/
 data/parse_eval/
+data/gold/
+data/retrieval_eval/
+data/.pytest_tmp/
 pageindex/store/
 pageindex/logs/
 pageindex/results/
