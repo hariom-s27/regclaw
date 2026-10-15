@@ -46,8 +46,13 @@ def unit(doc, number, parent, text):
                 parent=f'{doc}:{parent}' if parent else None, text=text.strip())
 
 
-def project(units):
-    """Merge capped units, remove empty groups, then repair parent pointers."""
+def project(units, policy_ids=None):
+    """Merge capped units and repair parents.
+
+    Raw removes empty headings. Policy retains official empty headings only
+    when their ids occur in the parser output. Unknown extras remain errors.
+    This changes the scoring projection, never the frozen clause data.
+    """
     out = {}
     for u, keep in units:
         if keep:
@@ -61,14 +66,14 @@ def project(units):
                 raise ValueError(f'No capped ancestor for {u["official_id"]}')
             out[parent]['text'] += '\n' + u['text']
     parents = {k: v['parent'] for k, v in out.items()}
-    out = {k: v for k, v in out.items() if normalise(v['text'])}
+    out = {k: v for k, v in out.items() if normalise(v['text']) or k in (policy_ids or ())}
     for v in out.values():
         while v['parent'] and v['parent'] not in out:
             v['parent'] = parents[v['parent']]
     return list(out.values())
 
 
-def parse_ecfr(path):
+def parse_ecfr(path, *, policy_ids=None):
     root = ET.fromstring(Path(path).read_bytes())
     units = []
     for el in root.iter():
@@ -133,7 +138,7 @@ def parse_ecfr(path):
             units[current][0]['text'] += '\n' + text
     if not units:
         raise ValueError('No supported eCFR structural units found')
-    return project(units)
+    return project(units, policy_ids)
 
 
 @dataclass
@@ -196,7 +201,7 @@ def html_blocks(node):
             yield from html_blocks(child)
 
 
-def parse_eurlex(path):
+def parse_eurlex(path, *, policy_ids=None):
     blocks = html_blocks(HTMLTree(Path(path).read_text(encoding='utf-8-sig')).root)
     units, stack = [], []
     active = False
@@ -261,7 +266,7 @@ def parse_eurlex(path):
             units[-1][0]['text'] += '\n' + text
     if not units:
         raise ValueError('No supported EUR-Lex structural units found')
-    return project(units)
+    return project(units, policy_ids)
 
 
 def wilson(success, total):
@@ -386,6 +391,15 @@ def main(argv=None):
         print(json.dumps(dict(file=path.name, size=path.stat().st_size, version_evidence=metadata[:20], **summary), indent=2, ensure_ascii=False))
         print('Top 20 missing:', json.dumps(result['missing'][:20], ensure_ascii=False))
         print('Top 20 extra:', json.dumps(result['extra'][:20], ensure_ascii=False))
+        # Keep the official raw view visible; structural extras are admitted
+        # only by the independent official parse, not by the actual parents.
+        actual_ids = {c['id'] for c in clauses if c['doc'] == doc}
+        policy = score(parse(path, policy_ids=actual_ids), clauses, doc)
+        structural = sorted({u['official_id'] for u in parse(path, policy_ids=actual_ids)}
+                            - {u['official_id'] for u in parse(path)})
+        print('Policy score:', json.dumps({k: policy[k] for k in
+              ('doc', 'expected', 'actual', 'matched', 'precision', 'recall', 'f1', 'parent_accuracy')}, ensure_ascii=False))
+        print('Structural extras (by design):', json.dumps(structural, ensure_ascii=False))
         if args.details:
             for kind in ('parent_mismatches', 'low_coverage'):
                 grouped = {}

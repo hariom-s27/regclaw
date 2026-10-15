@@ -13,7 +13,8 @@ tiktoken>=0.7
 torch==2.14.1               # R3 (CPU wheel: --index-url https://download.pytorch.org/whl/cpu)
 transformers==5.19.0        # R3 — LegalBERT
 scikit-learn==1.9.1         # R3 — frozen-embedding baseline + metrics
-numpy==2.5.3
+numpy==2.5.3; python_version >= "3.12"
+numpy==2.4.6; python_version < "3.12"
 fastmcp==4.0.11             # R6 — NOT >=2.0: unpinned installs 4.x whose API differs from 2.x tutorials
 pytest>=8                   # R6 tests
 hypothesis==6.169.1         # S10 applicability invariants (offline)

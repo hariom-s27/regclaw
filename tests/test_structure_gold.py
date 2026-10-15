@@ -51,6 +51,20 @@ def test_score_and_intervals():
     assert normalise('Ａ  B') == 'a b'
 
 
+def test_policy_accepts_official_headings_only_and_repairs_parents(tmp_path):
+    path = tmp_path / 'headings.xml'
+    path.write_text('''<ROOT><DIV9 TYPE="APPENDIX"><HEAD>Appendix A to Subpart O</HEAD>
+      <HD>5. Heading</HD><HD>5.3. Caption</HD><P>5.3.1 Real body</P></DIV9></ROOT>''', encoding='utf-8')
+    actual = [dict(id='epa-63o:Appendix A'+n, doc='epa-63o', text='body',
+                   parent='epa-63o:Appendix A'+parent if parent is not None else None)
+              for n, parent in [('.5', None), ('.5.3', '.5'), ('.5.3.1', '.5.3'), ('.99', None)]]
+    raw = score(parse_ecfr(path), actual, 'epa-63o')
+    policy = score(parse_ecfr(path, policy_ids={c['id'] for c in actual}), actual, 'epa-63o')
+    assert raw['precision'] == .25 and raw['parent_accuracy'] == 0
+    assert policy['precision'] == .75 and policy['recall'] == policy['parent_accuracy'] == 1
+    assert [r['id'] for r in policy['extra']] == ['epa-63o:Appendix A.99']
+
+
 def test_reject_unrecognised_sources(tmp_path):
     path = tmp_path/'empty'
     path.write_text('<html><p>No structure</p></html>', encoding='utf-8')
@@ -100,8 +114,8 @@ def test_details_cli_keeps_all_findings_and_groups_causes(monkeypatch, capsys):
     import json
     gold = [dict(official_id=f'd:{i}', number=str(i), parent=None, text='Official body') for i in range(25)]
     actual = [dict(id=f'd:{i}', doc='d', parent='d:group', text='ours') for i in range(25)]
-    monkeypatch.setattr(module, 'parse_ecfr', lambda _: gold)
-    monkeypatch.setattr(module, 'parse_eurlex', lambda _: gold)
+    monkeypatch.setattr(module, 'parse_ecfr', lambda _, **kw: gold)
+    monkeypatch.setattr(module, 'parse_eurlex', lambda _, **kw: gold)
     monkeypatch.setattr(module.Path, 'exists', lambda _: True)
     monkeypatch.setattr(module.Path, 'read_text', lambda _, **kw: json.dumps(actual))
     from types import SimpleNamespace

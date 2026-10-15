@@ -108,3 +108,38 @@ def test_all_thirteen_checks_and_thresholds():
     assert evaluate(12, [], plan, dict(nodes_created=0, relationships_created=0))[1] == 'PASS'
     constraints = [dict(labelsOrTypes=[label], properties=['id' if label in ('Clause', 'Standard') else 'name'], type='UNIQUENESS') for label in NODE_LABELS]
     assert evaluate(11, constraints, plan)[1] == 'PASS'
+
+
+@pytest.mark.parametrize('reload_value,expected', [(0, 0), (1, 1)])
+def test_load_checks_measures_reload_without_verify_flag(monkeypatch, tmp_path, reload_value, expected):
+    import json
+    import sys
+    from graph import build_graph, checks
+    rows, standards = fixture()
+    path = tmp_path / 'rows.json'
+    path.write_text(json.dumps(rows))
+    metadata = tmp_path / 'standards.yaml'
+    metadata.write_text(json.dumps(standards))
+    driver = FakeDriver()
+    class Context:
+        def __enter__(self):
+            return driver
+        def __exit__(self, *args):
+            pass
+    def factory(*args, **kwargs):
+        assert kwargs['notifications_disabled_classifications'] == ['UNRECOGNIZED']
+        return Context()
+    monkeypatch.setitem(sys.modules, 'neo4j', SimpleNamespace(GraphDatabase=SimpleNamespace(driver=factory)))
+    monkeypatch.setenv('NEO4J_URI', 'bolt://localhost:7687')
+    monkeypatch.setenv('NEO4J_PASSWORD', 'fake')
+    loads = []
+    def fake_load(*args):
+        loads.append(args)
+        return dict(nodes_created=8 if len(loads) == 1 else reload_value, relationships_created=0)
+    monkeypatch.setattr(build_graph, 'load', fake_load)
+    def run(_driver, plan, reload_counts):
+        assert len(loads) == 2
+        assert reload_counts == dict(nodes_created=reload_value, relationships_created=0)
+        return [dict(status=evaluate(12, [], plan, reload_counts)[1])]
+    monkeypatch.setattr(checks, 'run', run)
+    assert build_graph.main(['--load', '--checks', '--input', str(path), '--standards', str(metadata)]) == expected

@@ -152,13 +152,14 @@ def main(argv=None):
     from dotenv import load_dotenv
     from neo4j import GraphDatabase
     load_dotenv(ROOT / '.env')
-    with GraphDatabase.driver(os.environ['NEO4J_URI'], auth=(os.environ.get('NEO4J_USER', 'neo4j'), os.environ['NEO4J_PASSWORD'])) as driver:
+    with GraphDatabase.driver(os.environ['NEO4J_URI'], auth=(os.environ.get('NEO4J_USER', 'neo4j'), os.environ['NEO4J_PASSWORD']),
+                              notifications_disabled_classifications=['UNRECOGNIZED']) as driver:
         print('load:', load(driver, plan))
         reload_counts = None
-        if args.verify_idempotent:
+        if args.verify_idempotent or args.checks:
             reload_counts = load(driver, plan)
             print('reload:', reload_counts)
-            if any(reload_counts.values()):
+            if args.verify_idempotent and not args.checks and any(reload_counts.values()):
                 raise RuntimeError('Idempotent reload created nodes/relationships')
         if args.checks:
             from graph.checks import run
