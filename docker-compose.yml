@@ -1,6 +1,6 @@
 services:
   neo4j:
-    image: neo4j:5
+    image: neo4j:5.26.32-community
     container_name: regclaw-neo4j
     ports:
       - "7474:7474"   # browser UI -> http://localhost:7474
@@ -12,7 +12,7 @@ services:
       - neo4j_data:/data
 
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
     container_name: regclaw-pgvector
     ports:
       - "5432:5432"

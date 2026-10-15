@@ -1,0 +1,59 @@
+# Titles/editions read offline from data/pdfs title pages on 2026-10-15.
+# FDA numbers also checked in each PDF's Additional Copies preface.
+- id: fda-iso10993-1
+  number: GUI00001811
+  title: 'Use of International Standard ISO 10993-1, "Biological evaluation of medical devices - Part 1: Evaluation and testing within a risk management process"'
+  edition: 2023
+  authority: FDA
+- id: fda-sterility-510k
+  number: GUI00001615
+  title: Submission and Review of Sterility Information in Premarket Notification (510(k)) Submissions for Devices Labeled as Sterile
+  edition: 2024
+  authority: FDA
+- id: fda-chem-analysis
+  number: GUI00020037
+  title: Chemical Analysis for Biocompatibility Assessment of Medical Devices
+  # Draft - Not for Implementation, as stated on the title page.
+  edition: 2024
+  authority: FDA
+- id: fda-nitinol
+  number: 17013-R1
+  title: Technical Considerations for Non-Clinical Assessment of Medical Devices Containing Nitinol
+  edition: 2021
+  authority: FDA
+- id: fda-knee
+  number: '1418'
+  title: Knee Joint Patellofemorotibial and Femorotibial Metal/Polymer Porous-Coated Uncemented Prostheses - Class II Special Controls Guidance Document for Industry and FDA
+  edition: 2003
+  authority: FDA
+- id: eu-mdr
+  number: Regulation (EU) 2017/745
+  title: Regulation (EU) 2017/745 of the European Parliament and of the Council of 5 April 2017 on medical devices, amending Directive 2001/83/EC, Regulation (EC) No 178/2002 and Regulation (EC) No 1223/2009 and repealing Council Directives 90/385/EEC and 93/42/EEC
+  edition: 2017
+  authority: EU
+  # Title checked in eu-mdr_full.pdf; the sliced eu-mdr.pdf starts at OJ L117/13.
+- id: imdrf-n47
+  number: 'IMDRF/GRRP WG/N47 FINAL:2018'
+  title: Essential Principles of Safety and Performance of Medical Devices and IVD Medical Devices
+  edition: 2018
+  authority: IMDRF
+- id: in-ep
+  number: Essential Principles for Safety and Performance of Medical Devices
+  # UNVERIFIED number: descriptive reference; no official number on cover/title page.
+  title: Draft Guidance Document on Essential Principles for Safety and Performance of Medical Devices
+  edition: 2017
+  authority: CDSCO
+  # UNVERIFIED authority attribution: title page names MoHFW, Government of India;
+  # CDSCO is the contract's Indian authority code. Title/date are on physical page 2.
+- id: in-mdr
+  number: G.S.R. 78(E)
+  title: The Medical Devices Rules, 2017
+  edition: 2022
+  authority: CDSCO
+  # Title page: 2017 rules, compilation amended through GSR 777(E), 14-10-2022.
+- id: epa-63o
+  number: 40 CFR Part 63 Subpart O
+  title: Ethylene Oxide Emissions Standards for Sterilization Facilities
+  edition: 2026
+  authority: EPA
+  # Title page: eCFR compilation as of 2026-10-06, source rule 89 FR 24172 (2024).

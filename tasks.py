@@ -9,7 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 PLACEHOLDERS = (
-    "obligation", "graph", "embed", "retrieve", "eval"
+    "obligation", "embed", "retrieve", "eval"
 )
 
 # The existing summary file uses script-level assertions, not pytest functions.
@@ -67,7 +67,8 @@ def main():
         from goldset.sample import run
         run()
         return 0
-    handlers = {'gold-score': 'goldset.score', 'enrich': 'ner.merge'}
+    handlers = {'gold-score': 'goldset.score', 'enrich': 'ner.merge',
+                'graph': 'graph.build_graph', 'near-dups': 'graph.near_dups'}
     if len(sys.argv) > 1 and sys.argv[1] in handlers:
         from importlib import import_module
         return import_module(handlers[sys.argv[1]]).main(sys.argv[2:])
