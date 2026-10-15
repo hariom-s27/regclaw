@@ -1,7 +1,7 @@
 # Rebuild results and evidence
 
 > All numbers below are from **this rebuild**, on the public substitute corpus
-> described in CORPUS.md, run on 2026-10-16 at commit a6bc968. They are **not** the
+> described in CORPUS.md, run on 2026-10-16 at commits a6bc968 and f6a461a. They are **not** the
 > numbers from the original internship system and should not be compared to them.
 
 ### Limitations — read before quoting any number
@@ -54,31 +54,46 @@ python tasks.py graph --load --from-clauses --checks
 ```
 
 Producer: [graph/build_graph.py](../graph/build_graph.py).
-Captured plan output on the recorded date:
+Live verification was repeated on 2026-10-16 at commit `f6a461a` with
+`python tasks.py graph --load --from-clauses --checks`. Captured counts:
 
 | Label or relationship | Planned count | Fresh live inventory |
 |---|---:|---|
-| Module | 1 | TBD |
-| Standard | 10 | TBD |
-| Clause | 1,143 | TBD |
-| RegulatoryAuthority | 5 | TBD |
-| LifecyclePhase, Chemical, BiologicalEffect, DeviceType, RegulatoryActor | 0 each | TBD |
-| BELONGS_TO | 1,153 | TBD |
-| REGULATED_BY | 10 | TBD |
-| MENTIONS, REFERENCES | 0 each | TBD |
-| Total nodes | 1,159 | TBD |
-| Total relationships | 1,163 | TBD |
+| Module | 1 | 1 |
+| Standard | 10 | 10 |
+| Clause | 1,143 | 1,143 |
+| RegulatoryAuthority | 5 | 5 |
+| LifecyclePhase, Chemical, BiologicalEffect, DeviceType, RegulatoryActor | 0 each | 0 each |
+| BELONGS_TO | 1,153 | 1,153 |
+| REGULATED_BY | 10 | 10 |
+| MENTIONS, REFERENCES | 0 each | 0 each |
+| Total nodes | 1,159 | 1,159 |
+| Total relationships | 1,163 | 1,163 |
 
-Docker reported the local containers up, but the live load failed with
-`ServiceUnavailable` while waiting for the Bolt handshake on localhost:7687.
-It failed before a transaction opened. The printed plan is not a live inventory.
-Fresh graph check statuses and check #13 are **TBD**, because checks were not reached.
-Re-run the load/check command once the local Bolt service responds.
+The live inventory matches the plan with no unexplained gaps. Both loader passes
+reported `nodes_created=0, relationships_created=0` against the existing graph.
+The same command produced these check results:
+
+| Check | Measured value | Status |
+|---|---|---|
+| 1. Counts by label/type | Matches the counts above; no gaps | PASS |
+| 2. Orphan clauses | 0 | PASS |
+| 3. Standards without Module except stubs | 0 | PASS |
+| 4. Clauses without MENTIONS | 1,143/1,143; share 1.0 | WARN, expected: no S4 entities yet |
+| 5. Never-mentioned entities | 0 | PASS |
+| 6. Entity degree distribution | Empty result; no entities | PASS, vacuous |
+| 7. Name collisions and singleton share | Empty result; no entities | PASS, vacuous |
+| 8. Empty text or null number | 0 | PASS |
+| 9. Duplicate MENTIONS | 0 | PASS |
+| 10. Self references | 0 | PASS |
+| 11. Orphan LifecyclePhase | 0 | PASS |
+| 12. Uniqueness constraints | All 9 present; none missing | PASS |
+| 13. Idempotent reload | 0 nodes and 0 relationships created | PASS |
 
 Check #13 performs a second load and evaluates its actual creation counters
 ([graph/checks.py](../graph/checks.py)).
-[The regression tests](../tests/test_graph.py) cover both zero and nonzero reloads.
-Those offline tests do not establish a fresh live PASS.
+[The regression tests](../tests/test_graph.py) separately cover both zero and nonzero
+reloads. The live PASS above comes from the second loader invocation in this run.
 
 ## Matrix cross-check
 
@@ -130,6 +145,7 @@ Producer: [tasks.py](../tasks.py). Captured local test totals:
 | `f9b9e69`, S14, isolated checkout | 12 | 1 | 272 | 285 |
 | `a6bc968`, driver fix | 12 | 1 | 273 | 286 |
 | Final S15b documentation validation | 12 | 1 | 273 | 286 |
+| Live-results documentation refresh | 12 | 1 | 273 | 286 |
 
 The runner selects stub mode. Fakes test contracts and guard behavior;
 the totals above are test outcomes, not retrieval or model-quality metrics.
@@ -161,7 +177,8 @@ explicitly rejects `Query` objects, which explains the original bug.
 [tests/test_retrieval_driver.py](../tests/test_retrieval_driver.py) uses a rejecting
 fake ManagedTransaction and verifies timeout, parameters, ids, and eager consumption.
 
-The fixed `_run_ids` helper was called with this query and `term='ethylene oxide'`:
+The real `_run_ids` helper was called on 2026-10-16 at commit `f6a461a` with
+this query and `term='ethylene oxide'`:
 
 ```cypher
 MATCH (c:Clause)
@@ -169,8 +186,26 @@ WHERE toLower(c.text) CONTAINS $term
 RETURN DISTINCT c.id AS clause_id
 ```
 
-Fresh smoke row count is **TBD**: the same localhost Bolt handshake failure
-prevented the helper from opening its read transaction. No model was called.
+Reproducing command, with credentials loaded locally and tracing disabled:
+
+```powershell
+$env:LANGFUSE_ENABLED = 'false'
+@'
+import os
+from dotenv import load_dotenv
+from neo4j import GraphDatabase
+from retrieval.hybrid_retriever import HybridRetriever
+load_dotenv('.env')
+with GraphDatabase.driver('bolt://localhost:7687', auth=(os.environ.get('NEO4J_USER', 'neo4j'), os.environ['NEO4J_PASSWORD'])) as driver:
+    retriever = HybridRetriever.__new__(HybridRetriever)
+    retriever.driver, retriever.db, retriever.timeout = driver, 'neo4j', 5
+    ids = retriever._run_ids('MATCH (c:Clause) WHERE toLower(c.text) CONTAINS $term RETURN DISTINCT c.id AS clause_id', {'term': 'ethylene oxide'})
+    print('SMOKE _run_ids stage-1 rows:', len(ids))
+'@ | python -
+```
+
+Captured output: `SMOKE _run_ids stage-1 rows: 6`.
+This exercises the helper's managed read transaction and timeout. No model was called.
 The other retrieval stages were not run live; production vectors are still pending.
 
 ## Remaining measurements
@@ -180,8 +215,6 @@ The other retrieval stages were not run live; production vectors are still pendi
 | Manual parser gold for the remaining sources | TBD | Author annotation is not complete |
 | Full entity extraction and grounded accuracy | TBD | Live extraction and human evaluation not run |
 | Obligation agreement and LegalBERT quality | TBD | Gold annotation, independent second annotation, training and evaluation pending |
-| Fresh graph inventory, checks and reload counters | TBD | Local Bolt handshake failed |
-| Fixed-helper smoke row count | TBD | Local Bolt handshake failed |
 | Visual matrix verification | TBD | Human visual comparison not completed |
 | Production embedding reconciliation | TBD | Production vectors not loaded |
 | Retrieval quality and pipeline latency | TBD | Judged queries and complete live run pending |
@@ -198,6 +231,8 @@ Source dates and decision chronology are recorded in the journal without publish
 |---|---|
 | Structural ids, P/R/F1, parent scores and counts | `python tasks.py structure-score`; captured above |
 | Clause and graph-plan counts | `python tasks.py graph --dry-run --from-clauses`; captured above |
+| Live graph counts, check statuses and reload counters | `python tasks.py graph --load --from-clauses --checks`; captured above |
+| Helper smoke row count | `_run_ids` reproducing command above |
 | Matrix rows, cells, mismatch count and source-page numbers | `standards.crosscheck.crosscheck`; captured above |
 | Token totals, maximum and guard count | `python tasks.py embed --dry-run`; captured above |
 | Test totals | `python tasks.py test`; captured above |

@@ -165,7 +165,8 @@ No synthetic fixture timing or fixture quality metric is reported here.
 
 | Measurement | Rebuild result | Command and captured output |
 |---|---|---|
-| Parsed clauses | 1,143 | [`python tasks.py graph --dry-run --from-clauses`](docs/results.md#graph-plan-and-live-verification) |
+| Parsed clauses | 1,143 | [`python tasks.py graph --load --from-clauses --checks`](docs/results.md#graph-plan-and-live-verification) |
+| Live graph and reload | 1,159 nodes / 1,163 relationships; check #13 PASS | [`python tasks.py graph --load --from-clauses --checks`](docs/results.md#graph-plan-and-live-verification) |
 | EPA raw / policy F1 | 0.992593 / 1.000000 | [`python tasks.py structure-score`](docs/results.md#structure-scoring) |
 | EU MDR raw / policy F1 | 0.989101 / 0.998650 | [`python tasks.py structure-score`](docs/results.md#structure-scoring) |
 | Policy parent accuracy | 100% for both scored documents | [`python tasks.py structure-score`](docs/results.md#structure-scoring) |
@@ -242,7 +243,7 @@ Source files remain local; check the source-specific conditions before reuse.
 - Run entity extraction and inspect grounding failures before loading the enriched graph.
 - Load production vectors and judge retrieval results before publishing quality or latency.
 - Confirm the Part II document and complete indexing, citation checks, and evaluation.
-- Resolve live Neo4j connectivity and repeat the current smoke/reload checks; see [results](docs/results.md).
+- Recheck graph quality after entity loading; the current clauses-only graph has the expected check #4 WARN ([results](docs/results.md)).
 
 ## Licence and contact
 
