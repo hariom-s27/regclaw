@@ -16,6 +16,7 @@ scikit-learn==1.9.1         # R3 — frozen-embedding baseline + metrics
 numpy==2.5.3
 fastmcp==4.0.11             # R6 — NOT >=2.0: unpinned installs 4.x whose API differs from 2.x tutorials
 pytest>=8                   # R6 tests
+hypothesis==6.169.1         # S10 applicability invariants (offline)
 pytest-asyncio>=0.24        # R6 tests (asyncio_mode = auto in mcp/pytest.ini)
 
 # ---------- PART II: PageIndex ----------

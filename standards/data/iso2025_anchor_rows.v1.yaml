@@ -1,0 +1,64 @@
+version: 1
+other_rows_unverified: true
+indirect_path_mapping_unverified: true
+rows:
+- contact: intact_skin
+  duration: A
+  nature: null
+  endpoints:
+  - Cyto
+  - Sens
+  - Irr
+  source: PMDA examples via R9
+  verified_by_human: false
+- contact: intact_mucosal
+  duration: C
+  nature: null
+  endpoints:
+  - Cyto
+  - Sens
+  - Irr
+  - Systemic
+  - Impl
+  - Geno
+  - Carc
+  source: PMDA examples via R9
+  verified_by_human: false
+- contact: breached_or_internal_tissue
+  duration: B
+  nature: null
+  endpoints:
+  - Cyto
+  - Sens
+  - Irr
+  - Systemic
+  - Impl
+  - Geno
+  source: PMDA examples via R9
+  verified_by_human: false
+- contact: circulating_blood
+  duration: A
+  nature: externally_communicating
+  endpoints:
+  - Cyto
+  - Sens
+  - Irr
+  - Systemic
+  - Geno
+  - Hemo
+  source: PMDA examples via R9
+  verified_by_human: false
+- contact: circulating_blood
+  duration: C
+  nature: null
+  endpoints:
+  - Cyto
+  - Sens
+  - Irr
+  - Systemic
+  - Impl
+  - Geno
+  - Carc
+  - Hemo
+  source: PMDA examples via R9
+  verified_by_human: false

@@ -1,0 +1,108 @@
+version: 1
+parts:
+- part: ISO 10993-1
+  edition: '2025'
+  edition_verified: true
+  endpoints:
+  - Framework
+- part: ISO 10993-5
+  edition: '2009'
+  edition_verified: true
+  endpoints:
+  - Cyto
+- part: ISO 10993-10
+  edition: '2021'
+  edition_verified: true
+  endpoints:
+  - Sens
+- part: ISO 10993-23
+  edition: 2021 + Amd 1:2025
+  edition_verified: true
+  endpoints:
+  - Irr
+- part: ISO 10993-11
+  edition: '2017'
+  edition_verified: true
+  endpoints:
+  - AST
+  - MMP
+  - SubA
+  - Chr
+  - Systemic
+- part: ISO 10993-3
+  edition: '2026'
+  edition_verified: true
+  endpoints:
+  - Geno
+  - Carc
+  - Repro
+- part: ISO 10993-6
+  edition: '2026'
+  edition_verified: true
+  endpoints:
+  - Impl
+- part: ISO 10993-4
+  edition: 2017 + Amd 1:2025
+  edition_verified: true
+  endpoints:
+  - Hemo
+- part: ISO 10993-12
+  edition: 2021 + Amd 1:2025
+  edition_verified: true
+  endpoints:
+  - Sample
+- part: ISO 10993-18
+  edition: 2020 + Amd 1:2022
+  edition_verified: true
+  endpoints:
+  - Chemical
+- part: ISO 10993-17
+  edition: 2023 + Amd 1:2025
+  edition_verified: true
+  endpoints:
+  - TRA
+- part: ISO 10993-7
+  edition: '2026'
+  edition_verified: true
+  endpoints:
+  - EO
+- part: ISO 10993-9
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - Degradation
+- part: ISO 10993-13
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - DegradationPolymer
+- part: ISO 10993-14
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - DegradationCeramic
+- part: ISO 10993-15
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - DegradationMetal
+- part: ISO 10993-16
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - Toxicokinetics
+- part: ISO/TS 10993-19
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - Physicochemical
+- part: ISO/TS 10993-20
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - Immune
+- part: ISO 11737-3
+  edition: UNVERIFIED
+  edition_verified: false
+  endpoints:
+  - Endotoxin

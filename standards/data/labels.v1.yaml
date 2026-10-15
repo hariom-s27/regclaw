@@ -1,0 +1,16 @@
+version: 1
+labels:
+  mandatory: Must be addressed in the biological evaluation; may be met by existing
+    data, chemical characterisation with toxicological risk assessment, a rationale,
+    or a test.
+  recommended: Consider; address if the stated trigger applies.
+  not_applicable: Not indicated for this contact and duration, and no trigger applies;
+    a risk assessment may still bring it back.
+caveat: FDA guidance is nonbinding and "should" means recommended. Conformance to
+  recognised standards is voluntary unless incorporated by reference. In the EU, MDR
+  Annex I §10.1 makes material toxicity a general safety and performance requirement.
+banned_phrases:
+- test required
+- must be tested
+- compliant
+- approved

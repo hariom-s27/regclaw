@@ -1,0 +1,2312 @@
+version: 1
+rows:
+- nature: surface
+  site: intact_skin
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / A, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: intact_skin
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / B, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: intact_skin
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Intact skin / C, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: mucosal_membrane
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / A, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: mucosal_membrane
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / B, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: mucosal_membrane
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Mucosal membrane / C, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: breached_compromised_surface
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / A, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: breached_compromised_surface
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / B, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: surface
+  site: breached_compromised_surface
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Surface / Breached/compromised / C, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: blood_path_indirect
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / A, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: blood_path_indirect
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / B, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: blood_path_indirect
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Blood path, indirect / C, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: tissue_bone_dentin
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / A, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: tissue_bone_dentin
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / B, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: tissue_bone_dentin
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Tissue/bone/dentin / C, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: circulating_blood
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: extracorporeal
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / A, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: circulating_blood
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / B, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: externally_communicating
+  site: circulating_blood
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Ext. communicating / Circulating blood / C, column
+          Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: implant
+  site: tissue_bone
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / A, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: implant
+  site: tissue_bone
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / B, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: implant
+  site: tissue_bone
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Tissue/bone / C, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: implant
+  site: blood
+  duration: A
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / A, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: implant
+  site: blood
+  duration: B
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: false
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / B, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+- nature: implant
+  site: blood
+  duration: C
+  cells:
+    Cyto:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Cyto
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Sens:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Sens
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Irr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Irr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    AST:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column AST
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    MMP:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column MMP
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    SubA:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column SubA
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Geno:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Geno
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Impl:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Impl
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Hemo:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Hemo
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Chr:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Chr
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+    Carc:
+      consider: true
+      provenance:
+        doc: fda-iso10993-1
+        locator: Attachment A, Implant / Blood / C, column Carc
+        source: FDA web page via R9; PDF cross-check below
+        verified_by_human: false
+      footnote: null
+footnotes:
+  extracorporeal: Genotoxicity for externally communicating circulating blood A only
+    for devices used in extracorporeal circuits.
