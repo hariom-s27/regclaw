@@ -67,7 +67,7 @@ def main():
         from goldset.sample import run
         run()
         return 0
-    handlers = {'gold-score': 'goldset.score', 'enrich': 'ner.merge',
+    handlers = {'structure-score': 'ingest.structure_gold', 'gold-score': 'goldset.score', 'enrich': 'ner.merge',
                 'graph': 'graph.build_graph', 'near-dups': 'graph.near_dups', 'embed': 'embed.embed',
                 'pool': 'retrieval_eval.pool', 'retrieval-metrics': 'retrieval_eval.metrics'}
     if len(sys.argv) > 1 and sys.argv[1] in handlers:
