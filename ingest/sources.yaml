@@ -238,7 +238,13 @@ eu-mdr:
     require_bold: false
     number_format: '{parent}({number})'
     depth: 1
+  - name: roman_point
+    pattern: ^\((?P<number>[ivxlcdm]+)\)\s*(?P<title>.*)$
+    require_bold: false
+    number_format: '{letter}({number}) (merged below Article depth cap)'
+    depth: 4
   max_depth: 5
+  article_max_depth: 3
   body_start_marker: null
   body_stop_marker: null
   skip_sections:
@@ -297,7 +303,8 @@ in-ep:
   body_start_marker: null
   body_stop_marker: null
   skip_sections:
-  - ^(Preface|Public Comment|Additional Copies|Paperwork Reduction Act)\b
+  # p3 Preface states binding rule-6 guidance and its regulatory scope.
+  - ^(Public Comment|Additional Copies|Paperwork Reduction Act)\b
   strip_lines:
   - ^IMDRF GRRP
   - ^31 October 2018
@@ -378,6 +385,11 @@ epa-63o:
   section_max_x: 65
   appendix_decimal_levels: 2
   levels:
+  - name: subpart_table
+    pattern: ^Table\s+(?P<number>\d+)\s+to Subpart O of Part 63[—–-](?P<title>.+)$
+    require_bold: true
+    number_format: Table {number}
+    depth: 1
   - name: appendix
     pattern: ^Appendix\s+(?P<number>A)\s+to Subpart O of Part 63[—–-](?P<title>Monitoring Provisions for EtO CEMS)$
     require_bold: true

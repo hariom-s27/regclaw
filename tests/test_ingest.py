@@ -540,7 +540,8 @@ def test_unnumbered_front_matter_only_before_numbered_headings(monkeypatch):
         styled('This later word does not open another clause.', 12, False, y=300, block=7),
     ])
     cs = {c['number']: c for c in r['clauses']}
-    assert set(cs) == {'Preface', 'Introduction', '1'}
+    assert set(cs) == {'Introduction', '1'}
+    assert any(d['number'] == 'Preface' and d['reason'] == 'skipped_section' for d in r['drops'])
     assert 'preferred but not necessarily required' in cs['Introduction']['text']
     assert cs['Introduction']['title'] == 'Introduction' and cs['1']['parent'] is None
     assert 'Introduction' in cs['1']['text']
@@ -550,3 +551,179 @@ def test_unnumbered_front_matter_only_before_numbered_headings(monkeypatch):
         styled('The scope covers medical devices.', 12, False, y=130, block=2),
     ])
     assert [c['number'] for c in r['clauses']] == ['1']
+
+
+def test_eu_real_definition_wrap_updates_previous(monkeypatch):
+    # eu-mdr.pdf p4, lines 25–27. The first line ends in "of";
+    # the consumed continuation ends in ";" before the next definition.
+    r = parse_lines(monkeypatch, 'eu-mdr', [
+        styled('Article 2', y=50), styled('Definitions', y=70),
+        styled("(7) 'generic device group' means a set of devices having the same or similar intended purposes or a commonality of",
+               bold=False, x=72.57, y=477.58),
+        styled('technology allowing them to be classified in a generic manner not reflecting specific characteristics;',
+               bold=False, x=87.53, y=488.13),
+        styled("(8) 'single-use device' means a device that is intended to be used on one individual during a single procedure;",
+               bold=False, x=72.57, y=512.16),
+    ])
+    cs = {c['number']: c for c in r['clauses']}
+    assert set(cs) == {'Art 2(7)', 'Art 2(8)'}
+    assert cs['Art 2(7)']['text'].endswith('specific characteristics;')
+    assert "'single-use device'" not in cs['Art 2(7)']['text']
+    assert cs['Art 2(8)']['text'].startswith("(8) 'single-use device'")
+    assert not r['warnings']
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+
+
+def test_eu_real_article_5_letter_return_after_capped_romans(monkeypatch):
+    # eu-mdr.pdf p9, lines 18–38, with the physical Roman/letter indents.
+    label = styled('5.', bold=False, x=67.35, y=322.41)
+    label.bbox = (67.35, 322.41, 76.69, 332.41)
+    r = parse_lines(monkeypatch, 'eu-mdr', [
+        styled('Article 5', y=50),
+        styled('Placing on the market and putting into service', y=70), label,
+        styled('With the exception of the relevant general safety and performance requirements set out in Annex I, the',
+               bold=False, x=88.95, y=322.41),
+        styled('requirements of this Regulation shall not apply to devices, manufactured and used only within health institutions',
+               bold=False, x=67.35, y=333.02),
+        styled('established in the Union, provided that all of the following conditions are met:',
+               bold=False, x=67.35, y=343.56),
+        styled('(a)  the devices are not transferred to another legal entity,', bold=False, x=67.35, y=363.91),
+        styled('(b)  manufacture and use of the devices occur under appropriate quality management systems,',
+               bold=False, x=67.35, y=384.27),
+        styled("(c)  the health institution justifies in its documentation that the target patient group's specific needs cannot be met, or",
+               bold=False, x=67.35, y=404.62),
+        styled('cannot be met at the appropriate level of performance by an equivalent device available on the market,',
+               bold=False, x=82.26, y=415.16),
+        styled('(d)  the health institution provides information upon request on the use of such devices to its competent authority,',
+               bold=False, x=67.35, y=435.52),
+        styled('which shall include a justification of their manufacturing, modification and use;',
+               bold=False, x=82.26, y=446.06),
+        styled('(e)  the health institution draws up a declaration which it shall make publicly available, including:',
+               bold=False, x=67.35, y=466.41),
+        styled('(i)  the name and address of the manufacturing health institution;', bold=False, x=82.26, y=486.77),
+        styled('(ii)  the details necessary to identify the devices;', bold=False, x=82.26, y=507.12),
+        styled('(iii)  a declaration that the devices meet the general safety and performance requirements set out in Annex I to this',
+               bold=False, x=82.26, y=527.47),
+        styled('Regulation and, where applicable, information on which requirements are not fully met with a reasoned justifi',
+               bold=False, x=99.27, y=538.02),
+        styled('cation therefor,', bold=False, x=99.27, y=548.56),
+        styled('(f)  the health institution draws up documentation that makes it possible to have an understanding of the manufacturing',
+               bold=False, x=67.35, y=568.91),
+        styled('facility, the manufacturing process, the design and performance data of the devices, including the intended purpose,',
+               bold=False, x=82.26, y=579.46),
+        styled('and that is sufficiently detailed to enable the competent authority to ascertain that the general safety and',
+               bold=False, x=82.26, y=590.06),
+        styled('performance requirements set out in Annex I to this Regulation are met;', bold=False, x=82.26, y=600.61),
+    ])
+    cs = {c['number']: c for c in r['clauses']}
+    assert set(cs) == {'Art 5(5)'} | {'Art 5(5)(' + t + ')' for t in 'abcdef'}
+    assert all('(' + t + ')' in cs['Art 5(5)(e)']['text'] for t in ('i', 'ii', 'iii'))
+    assert '(i)' not in cs['Art 5(5)(f)']['text']
+    assert all(cs['Art 5(5)(' + t + ')']['parent'] == 'eu-mdr:Art 5(5)' for t in 'abcdef')
+    assert r['stats']['depth_merges'] == 3
+    assert not r['warnings']
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+
+
+def test_eu_real_article_2_roman_v_and_short_points(monkeypatch):
+    # eu-mdr.pdf p7, lines 23–32. Short (a) and nested (v) are real text.
+    r = parse_lines(monkeypatch, 'eu-mdr', [
+        styled('Article 2', y=50), styled('Definitions', y=70),
+        styled("(58) 'serious adverse event' means any adverse event that led to any of the following:",
+               bold=False, x=67.46, y=402.52),
+        styled('(a)  death,', bold=False, x=87.53, y=426.56),
+        styled('(b)  serious deterioration in the health of the subject, that resulted in any of the following:',
+               bold=False, x=87.53, y=450.60),
+        styled('(i)  life-threatening illness or injury,', bold=False, x=102.27, y=474.63),
+        styled('(ii)  permanent impairment of a body structure or a body function,', bold=False, x=102.27, y=498.67),
+        styled('(iii)  hospitalisation or prolongation of patient hospitalisation,', bold=False, x=102.27, y=522.77),
+        styled('(iv)  medical or surgical intervention to prevent life-threatening illness or injury or permanent impairment to',
+               bold=False, x=102.27, y=546.80),
+        styled('a body structure or a body function,', bold=False, x=119.28, y=557.35),
+        styled('(v)  chronic disease,', bold=False, x=102.27, y=581.39),
+        styled('(c)  foetal distress, foetal death or a congenital physical or mental impairment or birth defect;',
+               bold=False, x=87.53, y=605.42),
+    ])
+    cs = {c['number']: c for c in r['clauses']}
+    assert set(cs) == {'Art 2(58)', 'Art 2(58)(a)', 'Art 2(58)(b)', 'Art 2(58)(c)'}
+    assert cs['Art 2(58)(a)']['text'] == '(a) death,'
+    assert cs['Art 2(58)(b)']['text'].endswith('(v) chronic disease,')
+    assert r['stats']['depth_merges'] == 5 and not r['warnings']
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+
+
+def test_eu_ambiguous_successor_precedes_indent_and_first_child():
+    stack = [node('Art 5', 1, 'article'), node('Art 5(5)', 2, 'decimal'),
+             dict(node('Art 5(5)(h)', 3, 'point'), _x0=67.35)]
+    assert heading(styled('(i) Successor', x=82.26), CONFIG['eu-mdr'], stack)['number'] == 'Art 5(5)(i)'
+    stack[-1] = dict(node('Art 5(5)(b)', 3, 'point'), _x0=67.35)
+    assert heading(styled('(ii) Cannot open here', x=82.26), CONFIG['eu-mdr'], stack) is None
+    h = heading(styled('(i) First Roman child', x=82.26), CONFIG['eu-mdr'], stack)
+    assert (h['number'], h['kind'], h['depth']) == ('Art 5(5)(b)(i)', 'roman_point', 4)
+
+
+def test_epa_named_tables_are_separate_and_keep_rows_and_citations(monkeypatch):
+    assert heading(styled('Table 1 to Subpart O of Part 63'), CONFIG['epa-63o'], []) is None
+    r = parse_lines(monkeypatch, 'epa-63o', [
+        styled('Subpart O—Ethylene Oxide Emissions Standards', y=20),
+        styled('§ 63.368 Implementation.', x=36.75, y=50),
+        styled('(c)', bold=False, x=60.93, y=80),
+        styled('The authorities that cannot be delegated to State, local, or Tribal agencies are as specified in paragraphs',
+               bold=False, x=82.08, y=100),
+        styled('(c)(1) through (5) of this section.', bold=False, x=82.08, y=120),
+        styled('(1) Approval of alternatives to the requirements in § 63.362 and § 63.363.', bold=False, x=84, y=140),
+        styled('Table 1 to Subpart O of Part 63—Standards for SCVs', x=36.75, y=160),
+        styled('For which . . .', bold=False, y=180),
+        styled('1. Existing SCV', bold=False, x=36.75, y=200),
+        styled('(a) A table row remains inside the named table.', bold=False, x=60.93, y=220),
+        styled('§ 63.365.', bold=False, x=36.75, y=240),
+        styled('Continuously reduce EtO emissions by 99 percent.', bold=False, y=260),
+        styled('Table 2 to Subpart O of Part 63—Standards for ARVs', x=36.75, y=280),
+        styled('Continuously reduce EtO emissions by 99.9 percent.', bold=False, y=300),
+        styled('Appendix A to Subpart O of Part 63—Monitoring Provisions for EtO CEMS', x=36.75, y=340),
+        styled('1. Applicability', x=36.75, y=360),
+        styled('These provisions apply to the following facilities.', bold=False, y=380),
+    ])
+    cs = {c['number']: c for c in r['clauses']}
+    assert set(cs) == {'§63.368(c)', 'Table 1', 'Table 2', 'Appendix A.1'}
+    assert all(cs[t]['parent'] is None for t in ('Table 1', 'Table 2'))
+    assert '(1) Approval' in cs['§63.368(c)']['text']
+    assert 'Table' not in cs['§63.368(c)']['text']
+    assert all(t in cs['Table 1']['text'] for t in ('1. Existing SCV', '(a) A table row', '§ 63.365.'))
+    assert '99.9 percent' not in cs['Table 1']['text']
+    assert cs['Table 2']['title'] == 'Standards for ARVs'
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+    validate(r['clauses'], CONFIG)
+
+
+@pytest.mark.parametrize('doc', ['fda-iso10993-1', 'fda-sterility-510k', 'fda-chem-analysis',
+                                 'fda-nitinol', 'fda-knee', 'imdrf-n47'])
+def test_boilerplate_preface_is_logged_as_skipped_section(monkeypatch, doc):
+    text = '1. Introduction' if doc == 'fda-knee' else '1.0 Scope' if doc == 'imdrf-n47' else 'I. Introduction'
+    body_heading = styled(text, 14, y=150, block=2)
+    if doc == 'fda-knee':
+        body_heading.spans[0]['font'] = 'Merriweather-Bold'
+    r = parse_lines(monkeypatch, doc, [
+        styled('Preface', 14, y=50),
+        styled('Public Comment: submit comments and request additional copies.', bold=False, y=80, block=1),
+        body_heading,
+        styled('The guidance provides regulatory recommendations for medical devices.', bold=False, y=180, block=3),
+    ])
+    assert len(r['clauses']) == 1 and r['clauses'][0]['number'] != 'Preface'
+    assert not any('Public Comment' in c['text'] for c in r['clauses'])
+    assert any(d['number'] == 'Preface' and d['reason'] == 'skipped_section' for d in r['drops'])
+    assert r['stats']['quality_report']['Q7']['ratio'] == 1
+
+
+def test_india_ep_regulatory_preface_is_retained(monkeypatch):
+    r = parse_lines(monkeypatch, 'in-ep', [
+        styled('Preface', 14, y=50),
+        styled('This document is prepared under the provisions of rule 6 of Medical Devices', bold=False, y=80),
+        styled('Rules, 2017 to provide binding guidance for use in the manufacturing of', bold=False, y=100),
+        styled('medical devices which are intended to be sold in India. This document provides', bold=False, y=120),
+        styled('1. Introduction', 14, y=180, block=1),
+        styled('The essential principles apply to medical devices and their manufacture.', bold=False, y=210, block=2),
+    ])
+    assert r['clauses'][0]['number'] == 'Preface'
+    assert 'rule 6' in r['clauses'][0]['text'] and 'binding guidance' in r['clauses'][0]['text']
+    assert not any(d['reason'] == 'skipped_section' for d in r['drops'])

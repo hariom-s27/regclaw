@@ -18,7 +18,7 @@ import yaml
 from .validate import quality_report, validate
 
 ROOT = Path(__file__).resolve().parents[1]
-PARSER_VERSION = "2.2"
+PARSER_VERSION = "2.3"
 TEXT_FLAGS = (fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_LIGATURES &
               ~fitz.TEXT_PRESERVE_IMAGES) | fitz.TEXT_COLLECT_STYLES
 DROP_FIELDS = ['doc', 'number', 'page', 'reason', 'detail', 'text_preview']
@@ -334,7 +334,7 @@ def resolve_ambiguous(token, open_values, x0=0, parent_x0=0):
         prev = open_values.get(kind)
         if prev is not None and prev in values and values.index(prev) + 1 < len(values) and values[values.index(prev) + 1] == token:
             return kind, False
-    if token == 'i' and 'letter' in open_values:
+    if token == 'i' and 'letter' in open_values and 'roman' not in open_values:
         return 'roman', False
     if token == 'a':
         return 'letter', False
@@ -384,6 +384,10 @@ def heading(line, config, stack, previous=''):
     if level.get('require_bold') and not line.bold:
         return None
     kind = level['name']
+    if (mode == 'epa' and any(s['_kind'] == 'subpart_table' for s in stack) and
+            kind not in ('subpart_table', 'appendix')):
+        # Citations and row labels belong to the named table, across pages.
+        return None
     if kind == 'section' and line.bbox[0] > config.get('section_max_x', float('inf')):
         return None
     token = match.group('number')
@@ -404,11 +408,12 @@ def heading(line, config, stack, previous=''):
                 'title': title, 'kind': kind}
     if kind == 'form':
         number, depth = 'Form ' + token, 1
-    elif kind in ('annex', 'attachment', 'appendix', 'schedule', 'article'):
+    elif kind in ('annex', 'attachment', 'appendix', 'schedule', 'article', 'subpart_table'):
         if kind == 'schedule':
             number = 'Schedule ' + str(['FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'SIXTH', 'SEVENTH', 'EIGHTH'].index(token) + 1)
         else:
-            number = {'article': 'Art ', 'annex': 'Annex ', 'attachment': 'Attachment ', 'appendix': 'Appendix '}[kind] + token
+            number = {'article': 'Art ', 'annex': 'Annex ', 'attachment': 'Attachment ',
+                      'appendix': 'Appendix ', 'subpart_table': 'Table '}[kind] + token
         depth = 1
     elif mode == 'fda':
         if depth > 1:
@@ -421,15 +426,31 @@ def heading(line, config, stack, previous=''):
         if not root:
             return None
         if root['number'].startswith('Art '):
-            if kind == 'point':
+            if kind in ('point', 'roman_point'):
                 para = next((s for s in reversed(stack) if s['_depth'] == 2), None)
                 if not para:
                     return None
-                number, depth = para['number'] + '(' + token + ')', 3
+                prior = next((s for s in reversed(stack) if s['_kind'] == 'point'), None)
+                values = {'letter': re.search(r'\(([a-z])\)(?:~\d+)?$', prior['number'])[1]} if prior else {}
+                if prior and prior.get('_roman'):
+                    values['roman'] = prior['_roman']
+                reading, ambiguous = resolve_ambiguous(token, values, line.bbox[0],
+                                                      prior.get('_x0', 0) if prior else 0)
+                if reading is None:
+                    return None
+                if reading == 'roman':
+                    if not prior:
+                        return None
+                    return {'depth': 4, 'number': prior['number'] + '(' + token + ')',
+                            'title': title, 'kind': 'roman_point', 'token': token}
+                number, depth, kind = para['number'] + '(' + token + ')', 3, 'point'
+                if ambiguous and token in ('i', 'v', 'x', 'c', 'd', 'l', 'm'):
+                    return {'depth': depth, 'number': number, 'title': title, 'kind': kind,
+                            'ambiguous': True}
             else:
                 number, depth = root['number'] + '(' + token.strip('().') + ')', 2
         else:
-            if kind == 'point':
+            if kind in ('point', 'roman_point'):
                 return {'depth': 99, 'number': token, 'title': title, 'kind': kind}
             group = next((s for s in reversed(stack) if s['_kind'] == 'group'), root)
             number = group['number'] + '.' + token.rstrip('.')
@@ -573,8 +594,9 @@ def parse_document(pdf, doc, config, slices=None):
 
     for i, line in enumerate(lines):
         if line.role in ('title', 'consumed_body'):
-            if config['mode'] == 'epa' and line.role == 'consumed_body':
-                previous, previous_line = line.text, line
+            # The cross-reference guard must see the last physical text line,
+            # including wrapped heading bodies and titles already collected.
+            previous, previous_line = line.text, line
             continue
         if line.role in ('toc', 'header_footer', 'page_number', 'footnote', 'source_note', 'amendment_note'):
             continue
@@ -639,6 +661,8 @@ def parse_document(pdf, doc, config, slices=None):
                 warnings.append(dict(doc=doc, page=line.page, number=h['number'], code='AMBIGUOUS_NUM', detail='fallback to letter reading'))
             stats['raw_headings'] += 1
             cap = config['max_depth']
+            if config['mode'] == 'eu' and any(s['_kind'] == 'article' for s in stack):
+                cap = config['article_max_depth']
             if config['mode'] == 'epa' and h['kind'] == 'decimal':
                 cap = 2 + config['appendix_decimal_levels']
             if config['mode'] == 'india':
@@ -648,6 +672,11 @@ def parse_document(pdf, doc, config, slices=None):
                     cap = h['depth']
             if h['depth'] > cap:
                 stats['depth_merges'] += 1
+                if config['mode'] == 'eu' and h['kind'] == 'roman_point':
+                    # Remember capped Roman successors without opening a clause
+                    # or replacing the open letter sibling with a Roman value.
+                    prior = next(s for s in reversed(stack) if s['_kind'] == 'point')
+                    prior['_roman'] = h['token']
                 h = None
         if h:
             depth = h['depth']
@@ -685,7 +714,7 @@ def parse_document(pdf, doc, config, slices=None):
             own_body = []
             if (len(title.split()) > 15 or re.search(r'\b(shall|should|must|means)\b', title, re.I) or
                     re.match(r'^(Where|If)\b', title) or
-                    config['mode'] == 'eu' and h['kind'] in ('paragraph', 'point') or
+                    config['mode'] == 'eu' and h['kind'] in ('paragraph', 'point', 'roman_point') or
                     config['mode'] == 'epa' and h['kind'] == 'decimal' and ';' in title or
                     len(title.split()) >= 5 and re.search(r'[.!]$', title)):
                 title = parent['title'] if parent else ''
@@ -695,8 +724,8 @@ def parse_document(pdf, doc, config, slices=None):
                 following.role = 'consumed_body' if own_body else 'title'
             if not title and parent:
                 title = parent['title']
-            skip = bool(parent and parent['_skip']) or (h['kind'] != 'front_matter' and
-                    any(re.search(p, title, re.I) for p in config.get('skip_sections', [])))
+            skip = bool(parent and parent['_skip']) or any(
+                re.search(p, title, re.I) for p in config.get('skip_sections', []))
             current = dict(id=f'{doc}:{num}', doc=doc, number=num, title=title, text='',
                            parent=parent['id'] if parent else None, source_pdf=Path(pdf).name, page=line.page,
                            informative=bool(parent and parent['informative']) or '(informative)' in line.text.casefold(),
