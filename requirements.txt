@@ -38,7 +38,7 @@ langchain-community<0.4     # ragas 0.4.3 import breaks with 0.4.x
 # langchain-openai          # report's original evaluator wiring; deprecated path in ragas 0.4 (not needed)
 
 # ---------- Observability (R8) ----------
-langfuse>=4.7               # v4 SDK; >=4.7 needed for real-time reads
+langfuse==5.0.1             # S14: inspected manual observation API; compatible with R19 pattern
 langchain>=1.0              # langfuse.langchain needs full langchain, not only langchain-core
 langgraph>=1.0
 langchain-anthropic>=1.0

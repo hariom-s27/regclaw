@@ -31,8 +31,13 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from dotenv import load_dotenv
+# Preserve the documented direct-script entry point for the shared tracer.
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from observability.tracing import stage, traced, record_response
 
 load_dotenv()
 log = logging.getLogger("hybrid")
@@ -273,11 +278,13 @@ class HybridRetriever:
             msgs.append({"role": "assistant", "content": f"Previous attempt:\n{prev}"})
             msgs.append({"role": "user", "content":
                          f"That query failed: {feedback}\nFix it. Follow every HARD RULE. Question: {question}"})
-        resp = self.llm.messages.create(
-            model=HAIKU, max_tokens=800, temperature=0,
-            system=SYSTEM_PROMPT.format(schema=self.schema, examples=examples, ft=FULLTEXT_INDEX),
-            tools=[CYPHER_TOOL], tool_choice={"type": "tool", "name": "emit_cypher"},
-            messages=msgs)
+        with stage('cypher.generate', as_type='generation', model=HAIKU) as observation:
+            resp = self.llm.messages.create(
+                model=HAIKU, max_tokens=800, temperature=0,
+                system=SYSTEM_PROMPT.format(schema=self.schema, examples=examples, ft=FULLTEXT_INDEX),
+                tools=[CYPHER_TOOL], tool_choice={"type": "tool", "name": "emit_cypher"},
+                messages=msgs)
+            record_response(observation, resp)
         block = next(b for b in resp.content if b.type == "tool_use")
         return block.input["cypher"], dict(block.input.get("params") or {})
 
@@ -409,27 +416,42 @@ class HybridRetriever:
         return hits
 
     # ---------- orchestration ----------
+    @traced('retriever', as_type='retriever')
     def retrieve(self, question: str, top_k: int = 10, inject_limit: int | None = None,
                  per_seed: int = 2, neighbour_cap: int = 5, rel_floor: float = 0.85) -> tuple[list[Hit], RunLog]:
         run = RunLog(query=question)
         t = time.perf_counter()
-        ids = self.stage1_filter(question, run, inject_limit)
+        with stage('neo4j.cypher') as observation:
+            ids = self.stage1_filter(question, run, inject_limit)
+            if observation is not None:
+                observation.update(metadata={'rows': len(ids), 'candidate_count': len(ids)})
         run.candidates = len(ids)
         run.ms["stage1"] = round((time.perf_counter() - t) * 1000)
 
         t = time.perf_counter()
-        qvec = self.embed(question)
-        ranked = self.stage2_rank(qvec, ids, top_k)
+        with stage('embed.query'):
+            qvec = self.embed(question)
+        with stage('pgvector.rank') as observation:
+            ranked = self.stage2_rank(qvec, ids, top_k)
+            if observation is not None:
+                observation.update(metadata={'rows': len(ranked), 'candidate_count': len(ids),
+                                             'max_score': ranked[0].score if ranked else None})
         run.max_score = round(ranked[0].score, 4) if ranked else None
         run.ms["stage2"] = round((time.perf_counter() - t) * 1000)
 
         t = time.perf_counter()
-        neigh = self.stage3_expand(qvec, ranked, per_seed, neighbour_cap, rel_floor)
+        with stage('neighbour.expand') as observation:
+            neigh = self.stage3_expand(qvec, ranked, per_seed, neighbour_cap, rel_floor)
+            if observation is not None:
+                observation.update(metadata={'expanded': len(neigh)})
         run.neighbours_added = len(neigh)
         run.ms["stage3"] = round((time.perf_counter() - t) * 1000)
 
         t = time.perf_counter()
-        hits = self.stage4_fetch(ranked + neigh)
+        with stage('text.fetch') as observation:
+            hits = self.stage4_fetch(ranked + neigh)
+            if observation is not None:
+                observation.update(metadata={'rows': len(hits), 'docs': sorted({h.standard for h in hits})})
         run.ms["stage4"] = round((time.perf_counter() - t) * 1000)
 
         log.info("query=%r path=%s candidates=%d max_score=%s neighbours=%d attempts=%d ms=%s warnings=%s",

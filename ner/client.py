@@ -90,7 +90,10 @@ class AnthropicClient:
         self.client = sdk_client or anthropic.Anthropic(max_retries=0)
 
     def extract(self, clause, *, max_tokens=4000):
-        response = self.client.messages.create(**request(clause, effort=self.effort, mode=self.mode, max_tokens=max_tokens))
+        from observability.tracing import stage, record_response
+        with stage('ner.extract', as_type='generation', model=self.model) as observation:
+            response = self.client.messages.create(**request(clause, effort=self.effort, mode=self.mode, max_tokens=max_tokens))
+            record_response(observation, response)
         if self.mode == 'strict_tool':
             blocks = [b for b in response.content if b.type == 'tool_use' and b.name == 'emit_entities']
             data = blocks[0].input if blocks else {}

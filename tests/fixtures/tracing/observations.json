@@ -1,0 +1,185 @@
+[
+  {
+    "data": [
+      {
+        "id": "root-1",
+        "traceId": "trace-1",
+        "name": "retriever",
+        "type": "RETRIEVER",
+        "startTime": "2026-10-15T00:00:01+00:00",
+        "endTime": "2026-10-15T00:00:01.100000+00:00",
+        "parentObservationId": null
+      },
+      {
+        "id": "1-neo4j.cypher",
+        "traceId": "trace-1",
+        "name": "neo4j.cypher",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:01+00:00",
+        "endTime": "2026-10-15T00:00:01.010000+00:00",
+        "parentObservationId": "root-1"
+      },
+      {
+        "id": "1-embed.query",
+        "traceId": "trace-1",
+        "name": "embed.query",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:01.010000+00:00",
+        "endTime": "2026-10-15T00:00:01.020000+00:00",
+        "parentObservationId": "root-1"
+      },
+      {
+        "id": "1-pgvector.rank",
+        "traceId": "trace-1",
+        "name": "pgvector.rank",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:01.020000+00:00",
+        "endTime": "2026-10-15T00:00:01.040000+00:00",
+        "parentObservationId": "root-1"
+      },
+      {
+        "id": "1-neighbour.expand",
+        "traceId": "trace-1",
+        "name": "neighbour.expand",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:01.040000+00:00",
+        "endTime": "2026-10-15T00:00:01.070000+00:00",
+        "parentObservationId": "root-1"
+      },
+      {
+        "id": "1-text.fetch",
+        "traceId": "trace-1",
+        "name": "text.fetch",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:01.070000+00:00",
+        "endTime": "2026-10-15T00:00:01.080000+00:00",
+        "parentObservationId": "root-1"
+      }
+    ],
+    "meta": {
+      "cursor": "1"
+    }
+  },
+  {
+    "data": [
+      {
+        "id": "root-2",
+        "traceId": "trace-2",
+        "name": "retriever",
+        "type": "RETRIEVER",
+        "startTime": "2026-10-15T00:00:02+00:00",
+        "endTime": "2026-10-15T00:00:02.200000+00:00",
+        "parentObservationId": null
+      },
+      {
+        "id": "2-neo4j.cypher",
+        "traceId": "trace-2",
+        "name": "neo4j.cypher",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:02+00:00",
+        "endTime": "2026-10-15T00:00:02.020000+00:00",
+        "parentObservationId": "root-2"
+      },
+      {
+        "id": "2-embed.query",
+        "traceId": "trace-2",
+        "name": "embed.query",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:02.020000+00:00",
+        "endTime": "2026-10-15T00:00:02.040000+00:00",
+        "parentObservationId": "root-2"
+      },
+      {
+        "id": "2-pgvector.rank",
+        "traceId": "trace-2",
+        "name": "pgvector.rank",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:02.040000+00:00",
+        "endTime": "2026-10-15T00:00:02.080000+00:00",
+        "parentObservationId": "root-2"
+      },
+      {
+        "id": "2-neighbour.expand",
+        "traceId": "trace-2",
+        "name": "neighbour.expand",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:02.080000+00:00",
+        "endTime": "2026-10-15T00:00:02.140000+00:00",
+        "parentObservationId": "root-2"
+      },
+      {
+        "id": "2-text.fetch",
+        "traceId": "trace-2",
+        "name": "text.fetch",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:02.140000+00:00",
+        "endTime": "2026-10-15T00:00:02.160000+00:00",
+        "parentObservationId": "root-2"
+      }
+    ],
+    "meta": {
+      "cursor": "2"
+    }
+  },
+  {
+    "data": [
+      {
+        "id": "root-3",
+        "traceId": "trace-3",
+        "name": "retriever",
+        "type": "RETRIEVER",
+        "startTime": "2026-10-15T00:00:03+00:00",
+        "endTime": "2026-10-15T00:00:03.300000+00:00",
+        "parentObservationId": null
+      },
+      {
+        "id": "3-neo4j.cypher",
+        "traceId": "trace-3",
+        "name": "neo4j.cypher",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:03+00:00",
+        "endTime": "2026-10-15T00:00:03.030000+00:00",
+        "parentObservationId": "root-3"
+      },
+      {
+        "id": "3-embed.query",
+        "traceId": "trace-3",
+        "name": "embed.query",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:03.030000+00:00",
+        "endTime": "2026-10-15T00:00:03.060000+00:00",
+        "parentObservationId": "root-3"
+      },
+      {
+        "id": "3-pgvector.rank",
+        "traceId": "trace-3",
+        "name": "pgvector.rank",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:03.060000+00:00",
+        "endTime": "2026-10-15T00:00:03.120000+00:00",
+        "parentObservationId": "root-3"
+      },
+      {
+        "id": "3-neighbour.expand",
+        "traceId": "trace-3",
+        "name": "neighbour.expand",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:03.120000+00:00",
+        "endTime": "2026-10-15T00:00:03.210000+00:00",
+        "parentObservationId": "root-3"
+      },
+      {
+        "id": "3-text.fetch",
+        "traceId": "trace-3",
+        "name": "text.fetch",
+        "type": "SPAN",
+        "startTime": "2026-10-15T00:00:03.210000+00:00",
+        "endTime": "2026-10-15T00:00:03.240000+00:00",
+        "parentObservationId": "root-3"
+      }
+    ],
+    "meta": {
+      "cursor": null
+    }
+  }
+]

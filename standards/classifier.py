@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from typing import Protocol
+from observability.tracing import stage, record_response
 
 from .data_loader import obj
 
@@ -84,6 +85,8 @@ class AnthropicLLM:
         self.client = client
 
     def classify(self, request):
-        response = self.client.messages.create(**request)
+        with stage('standards.classify', as_type='generation', model=request['model']) as observation:
+            response = self.client.messages.create(**request)
+            record_response(observation, response)
         return LLMResponse(''.join(block.text for block in response.content if block.type == 'text'),
                            response.stop_reason)

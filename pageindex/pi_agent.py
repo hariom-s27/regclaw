@@ -14,8 +14,12 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 
 import anthropic
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from observability.tracing import stage, traced, record_response
 
 from pi_common import (Settings, fetch_pages, load_manifest, load_settings, load_tree,
                        node_map, outline, parse_page_spec, resolve_edition, subtree_span)
@@ -79,6 +83,7 @@ class Session:
     tool_calls: list[dict] = field(default_factory=list)
 
 
+@traced('pageindex.tool', as_type='tool')
 def _run_tool(sess: Session, name: str, args: dict) -> tuple[str, bool]:
     try:
         if name == "get_tree_overview":
@@ -137,10 +142,12 @@ def run_agent(client: anthropic.Anthropic, sess: Session, question: str,
 
     for turn in range(s.agent_max_turns + 1):
         last = turn == s.agent_max_turns
-        resp = client.messages.create(
-            model=s.agent_model, max_tokens=4096, system=system, tools=TOOLS,
-            tool_choice={"type": "none"} if last else {"type": "auto"},
-            messages=messages)
+        with stage('pageindex.navigate', as_type='generation', model=s.agent_model) as observation:
+            resp = client.messages.create(
+                model=s.agent_model, max_tokens=4096, system=system, tools=TOOLS,
+                tool_choice={"type": "none"} if last else {"type": "auto"},
+                messages=messages)
+            record_response(observation, resp)
         usage["input_tokens"] += resp.usage.input_tokens
         usage["output_tokens"] += resp.usage.output_tokens
         usage["turns"] += 1
@@ -231,10 +238,12 @@ def verify(client: anthropic.Anthropic, s: Settings, answer: str,
         f"{c['id']}. {c['text']}\n   cited pages: {c['pages'] or 'NONE'}"
         + ("" if all(p in fetched for p in c["pages"]) else "  (WARNING: cites a page that was never fetched)")
         for c in claims)
-    resp = client.messages.create(
-        model=s.verifier_model, max_tokens=4096, tools=[VERDICT_TOOL],
-        tool_choice={"type": "tool", "name": "report_verdicts"},
-        messages=[{"role": "user", "content": VERIFY_PROMPT.format(pages=page_block, claims=claim_block)}])
+    with stage('pageindex.verify', as_type='generation', model=s.verifier_model) as observation:
+        resp = client.messages.create(
+            model=s.verifier_model, max_tokens=4096, tools=[VERDICT_TOOL],
+            tool_choice={"type": "tool", "name": "report_verdicts"},
+            messages=[{"role": "user", "content": VERIFY_PROMPT.format(pages=page_block, claims=claim_block)}])
+        record_response(observation, resp)
     block = next(b for b in resp.content if b.type == "tool_use")
     by_id = {v["claim_id"]: v for v in block.input.get("verdicts", [])}
     out = []
@@ -256,6 +265,7 @@ def verify(client: anthropic.Anthropic, s: Settings, answer: str,
 FAIL = {"unsupported", "partially_supported", "needs_citation"}
 
 
+@traced('pageindex.agent', as_type='agent')
 def answer_question(question: str, family: str, version: str | None = None,
                     as_of: date | None = None, s: Settings | None = None) -> dict:
     s = s or load_settings()
