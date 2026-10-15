@@ -1,8 +1,8 @@
 """Pure R9 rules. No files, clocks, databases, model calls, or mutable inputs.
 
-Unrepresentable R9 triggers remain explicit assumptions: v1 has no planned
-extraction, chemical release, immune plausibility, or fluid-administration
-fields. In particular -12 stays recommended pending extraction planning.
+Unrepresentable R9 triggers remain explicit assumptions: v1 has no chemical
+release, immune plausibility, or fluid-administration fields. R08 derives
+extraction planning from mandatory chemical characterisation or endpoints.
 Device-specific standards do not suppress the general rule floor.
 """
 from dataclasses import dataclass, field
@@ -134,6 +134,8 @@ def rule_06(c):
         if indirect and any(m.novel for m in comp.materials):
             detail = 'hemolysis, complement, thrombogenicity; novel material broadens indirect-contact review'
         c.notes.append(f'{comp.name}: R06 {detail}.')
+        if indirect:
+            c.assumptions.append(f'{comp.name}: R06 chemical release into blood is not represented in v1; if present, broaden haemocompatibility beyond hemolysis.')
         c.traces.setdefault('Hemo', set()).add('R06')
 
 
@@ -150,10 +152,32 @@ def rule_07(c):
 
 
 def rule_08(c):
+    """R08: -1, -17, -18 mandatory for any contacting component; -12 mandatory
+    if any extract-based test or chemical extraction is planned, else recommended.
+
+    D1 derives planned extraction per component: mandatory -18 (always set by
+    R08; chemical characterisation uses extraction), OR a mandatory extract-based
+    endpoint: cytotoxicity, sensitisation, irritation, acute/sub-acute/chronic
+    systemic toxicity, genotoxicity, implantation, haemocompatibility tested on
+    extracts (Cyto, Sens, Irr, AST, SubA, Chr, Geno, Impl, Hemo). No new profile
+    field is needed. Thus every contacting component currently makes -12
+    mandatory; the else branch remains recommended if neither trigger applies.
+    """
     for ep in ['Framework', 'TRA', 'Chemical']:
         c.set(ep, 'mandatory', 8)
-    c.set('Sample', 'recommended', 8)
-    c.assumptions.append(f'{c.component.name}: R08 DESIGN CONFLICT: v1 cannot express planned extraction; ISO 10993-12 remains recommended pending a plan.')
+    extract_endpoints = ['Cyto', 'Sens', 'Irr', 'AST', 'SubA', 'Chr', 'Geno', 'Impl', 'Hemo']
+    chemical = c.endpoints.get('Chemical') == 'mandatory'
+    mandatory_extracts = [ep for ep in extract_endpoints if c.endpoints.get(ep) == 'mandatory']
+    planned = chemical or bool(mandatory_extracts)
+    c.set('Sample', 'mandatory' if planned else 'recommended', 8)
+    c.traces['Sample'].add(
+        f'R08: -12 mandatory if any extract-based test or chemical extraction is planned, else recommended; '
+        f'derived per component {c.component.name}: -18 mandatory={chemical} '
+        f'(R08 always makes -18 mandatory; chemical characterisation uses extraction), '
+        f'OR any mandatory extract-based endpoint (cytotoxicity, sensitisation, irritation, '
+        f'acute/sub-acute/chronic systemic toxicity, genotoxicity, implantation, '
+        f'haemocompatibility tested on extracts); mandatory endpoints={mandatory_extracts}; '
+        f'extraction planned={planned}.')
 
 
 def rule_09(c):

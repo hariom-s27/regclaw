@@ -35,6 +35,11 @@ from pydantic import BaseModel, Field
 # Load .env by absolute path, NOT from cwd: Claude Desktop launches the
 # process with an unpredictable working directory. mcp/.env wins, then rebuild/.env.
 HERE = Path(__file__).resolve().parent
+if str(HERE.parent) not in sys.path:
+    sys.path.insert(0, str(HERE.parent))
+from standards.profile import DeviceProfile
+from standards.tool import get_applicable_standards as classify_profile
+
 load_dotenv(HERE / ".env")
 load_dotenv(HERE.parent / ".env")
 
@@ -72,29 +77,6 @@ class RetrievalResult(BaseModel):
     clauses: list[Clause]
 
 
-class DeviceProfile(BaseModel):
-    device_name: str
-    device_type: str = Field(description="e.g. 'knee implant', 'catheter'")
-    body_contact: Literal["surface", "externally_communicating", "implant"]
-    contact_tissue: str = Field(description="e.g. 'bone', 'blood', 'mucosal membrane'")
-    contact_duration: Literal["limited", "prolonged", "long_term"] = Field(
-        description="ISO 10993-1 categories: <=24 h, >24 h to 30 d, >30 d"
-    )
-    sterilization: str | None = Field(None, description="e.g. 'ethylene oxide'")
-    materials: list[str] = Field(default_factory=list)
-
-
-class StandardDecision(BaseModel):
-    standard: str
-    classification: Literal["mandatory", "recommended", "not_applicable"]
-    rationale: str
-
-
-class ApplicableStandards(BaseModel):
-    device_name: str
-    decisions: list[StandardDecision]
-
-
 # ---------------------------------------------------------------- backend
 @dataclass
 class Backend:
@@ -105,6 +87,8 @@ class Backend:
     neo4j: Any = None
     pg: Any = None
     retriever: Any = None
+    standards_retriever: Any = None
+    standards_llm: Any = None
     # HybridRetriever shares ONE psycopg connection; FastMCP runs sync tools in worker
     # threads, so serialise access. Fine for stdio (one client); use a pool if you go HTTP.
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -160,24 +144,15 @@ class Backend:
             }
         raise NotImplementedError("Neo4j: MATCH (c:Clause) WHERE c.id IN $ids RETURN c")
 
-    def classify_standards(self, profile: DeviceProfile) -> list[StandardDecision]:
-        if STUB:
-            out = [StandardDecision(standard="ISO 10993-1", classification="mandatory",
-                                    rationale="Framework standard; applies to every patient-contacting device.")]
-            out.append(StandardDecision(
-                standard="ISO 10993-7",
-                classification="mandatory" if (profile.sterilization or "").lower().startswith("ethylene") else "not_applicable",
-                rationale="EO sterilization residuals.",
-            ))
-            out.append(StandardDecision(
-                standard="ISO 10993-6",
-                classification="recommended" if profile.body_contact == "implant" else "not_applicable",
-                rationale="Local effects after implantation.",
-            ))
-            return out
-        # TODO (Phase 6b): Claude Sonnet forced-tool output, rules from the R9 report.
-        raise ToolError("get_applicable_standards is not implemented in real mode yet "
-                        "(needs the R9 device-categorisation rules).")
+    def classify_standards(self, profile: DeviceProfile) -> dict:
+        """DeviceProfile.v1 -> rules/classifier/guard -> assembled response.
+
+        Retrieval and classifier can be injected independently of DB startup.
+        An unavailable retriever is reported by the tool as unsupported citations.
+        """
+        with self.lock:
+            return classify_profile(profile, self.standards_retriever or self.retriever,
+                                    llm=self.standards_llm)
 
     # ---- resource data ----
     def modules(self) -> list[dict]:
@@ -280,10 +255,14 @@ def query_regulatory_knowledge(
 
 
 @mcp.tool(annotations=READ_ONLY, timeout=120)
-def get_applicable_standards(device_profile: DeviceProfile, ctx: Context) -> ApplicableStandards:
-    """Classify ISO 10993 standards as mandatory / recommended / not_applicable for a medical device profile."""
-    decisions = _backend(ctx).classify_standards(device_profile)
-    return ApplicableStandards(device_name=device_profile.device_name, decisions=decisions)
+def get_applicable_standards(device_profile: DeviceProfile, ctx: Context) -> dict:
+    """Classify DeviceProfile.v1 using mandatory / recommended / not_applicable.
+
+    mandatory = must be addressed in the biological evaluation, not necessarily tested.
+    recommended = consider; address if the stated trigger applies.
+    not_applicable = not indicated for this contact/duration and current triggers.
+    """
+    return _backend(ctx).classify_standards(device_profile)
 
 
 # ---------------------------------------------------------------- resources

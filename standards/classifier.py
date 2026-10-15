@@ -1,11 +1,4 @@
-"""Sonnet request contract and offline fixtures; no implicit live calls.
-
-DESIGN CONFLICT: anthropic is absent from the repository's Python 3.11
-environment. Its installed output_config/effort signature cannot be inspected.
-The live adapter is deliberately unavailable until that inspection is possible.
-The fake captures only the structured-output contract stated in the batch spec;
-it does not guess thinking/effort SDK parameters.
-"""
+"""Sonnet request contract, installed anthropic 1.14.0 adapter, offline fixtures."""
 import copy
 from dataclasses import dataclass
 import hashlib
@@ -56,7 +49,8 @@ def make_request(profile, data, rules, candidates):
                    part_map=data['part_map'], rule_labels=rules, clauses=candidates)
     return dict(model=MODEL, max_tokens=8000, system=PROMPT,
                 messages=[{'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, sort_keys=True)}],
-                output_config={'format': {'type': 'json_schema', 'schema': copy.deepcopy(OUTPUT_SCHEMA)}})
+                output_config={'format': {'type': 'json_schema', 'schema': copy.deepcopy(OUTPUT_SCHEMA)},
+                               'effort': 'low'})
 
 
 class FakeLLM:
@@ -82,6 +76,14 @@ class FakeLLM:
 class AnthropicLLM:
     model = MODEL
 
-    def __init__(self):
-        raise NotImplementedError('DESIGN CONFLICT: installed anthropic SDK unavailable; '
-                                  'live adapter deferred until output_config.format/effort inspection. No parameters guessed.')
+    def __init__(self, client=None):
+        # Creating the SDK client does not send a request. Tests inject a spec'd mock.
+        if client is None:
+            from anthropic import Anthropic
+            client = Anthropic()
+        self.client = client
+
+    def classify(self, request):
+        response = self.client.messages.create(**request)
+        return LLMResponse(''.join(block.text for block in response.content if block.type == 'text'),
+                           response.stop_reason)

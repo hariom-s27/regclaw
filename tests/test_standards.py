@@ -46,8 +46,7 @@ def endpoint_labels(result):
 def test_golden_expressible_labels(key):
     result = evaluate(EXAMPLES[key], DATA)
     actual = labels(result)
-    # The sole differing listed label is a separately tested contract conflict.
-    expected = {**GOLD[key], 'ISO 10993-12': 'recommended'}
+    expected = GOLD[key]
     assert {p: actual[p] for p in expected} == expected
     if key == 'E2':
         assert any('Attachment G' in n for n in result['notes'])
@@ -58,8 +57,7 @@ def test_golden_expressible_labels(key):
 
 
 @pytest.mark.parametrize('key', list(EXAMPLES))
-@pytest.mark.xfail(strict=True, reason='DESIGN CONFLICT: R9 v1 has no extraction-planned field; §D8 cannot reproduce §E -12 mandatory')
-def test_exact_r9_golden_pending_extraction_field(key):
+def test_exact_r9_golden(key):
     actual = labels(evaluate(EXAMPLES[key], DATA))
     assert {p: actual[p] for p in GOLD[key]} == GOLD[key]
 
@@ -165,8 +163,19 @@ def test_property_adding_eo_only_changes_part7_for_sterile_devices(comp):
     assert {k: v for k, v in before.items() if k != 'ISO 10993-7'} == {k: v for k, v in after.items() if k != 'ISO 10993-7'}
 
 
-@pytest.mark.xfail(strict=True, reason='DESIGN CONFLICT: EO also changes sterile status and may trigger R07 MMP')
-def test_unqualified_eo_only_part7_property_conflicts_with_rule7():
+@PROPERTY
+@given(components(), st.sampled_from(['non_sterile', 'gamma', 'e_beam', 'steam', 'vhp', 'other', 'ethylene_oxide']))
+def test_property_adding_eo_never_removes_or_downgrades_any_part(comp, sterilization):
+    comp['sterilization'] = sterilization
+    profile = dict(device_name='test', components=[comp])
+    before = labels(evaluate(profile, DATA))
+    comp['sterilization'] = 'ethylene_oxide'
+    after = labels(evaluate(profile, DATA))
+    assert before.keys() <= after.keys()
+    assert all(RANK[after[p]] >= RANK[label] for p, label in before.items())
+
+
+def test_eo_sterile_status_retains_rule7():
     profile = copy.deepcopy(EXAMPLES['E4'])
     comp = profile['components'][0]
     comp.update(sterilization='non_sterile', contacts_csf_lymph_or_cardiovascular=True)
@@ -174,7 +183,35 @@ def test_unqualified_eo_only_part7_property_conflicts_with_rule7():
     before = labels(evaluate(profile, DATA))
     comp['sterilization'] = 'ethylene_oxide'
     after = labels(evaluate(profile, DATA))
-    assert {k for k in before if before[k] != after[k]} == {'ISO 10993-7'}
+    assert {k for k in before if before[k] != after[k]} == {'ISO 10993-7', 'ISO 10993-11'}
+    assert after['ISO 10993-11'] == 'mandatory'
+
+
+def test_unlisted_contact_combination_uses_conservative_union():
+    profile = copy.deepcopy(EXAMPLES['E2'])
+    comp = profile['components'][0]
+    comp['contact_site'] = 'blood'
+    result = evaluate(profile, DATA)
+    assert result['framework_row_unverified']
+    assert any('conservative union at duration A' in a for a in result['assumptions'])
+    expected = {ep for r in DATA['matrix']['rows'] if r['duration'] == 'A'
+                for ep, cell in r['cells'].items() if cell['consider']}
+    assert all(endpoint_labels(result)[ep] == 'mandatory' for ep in expected)
+
+
+def test_r08_derivation_and_missing_triggers_are_visible_in_tool_response():
+    profile = copy.deepcopy(EXAMPLES['E3'])
+    profile['target_markets'] = ['EU']
+    comp = profile['components'][0]
+    comp['contact_mode'] = 'indirect'
+    comp['materials'][0]['novel'] = True
+    result = get_applicable_standards(profile, FakeRetriever(), llm=FakeLLM(), data=DATA)
+    sample = bypart(result)['ISO 10993-12']
+    assert sample['label'] == 'mandatory'
+    assert any('chemical characterisation uses extraction' in r and 'extraction planned=True' in r
+               for r in sample['rule_trace'])
+    for trigger in ['chemical release', 'immune-effect plausibility', 'invasiveness']:
+        assert any(trigger in a for a in result['assumptions'])
 
 
 @PROPERTY
@@ -350,13 +387,39 @@ def test_fake_request_contract_and_provenance():
     assert len(result['provenance']['prompt_sha256']) == 64
 
 
-def test_sdk_adapter_explicitly_blocked_without_guessing():
-    with pytest.raises(NotImplementedError, match='DESIGN CONFLICT'):
-        AnthropicLLM()
+@pytest.mark.parametrize('stop', ['end_turn', 'refusal', 'max_tokens'])
+def test_sdk_request_contract_with_real_types(stop):
+    import inspect
+    from unittest.mock import create_autospec
+    from anthropic import Anthropic
+    from anthropic.resources.messages import Messages
+    from anthropic.types import Message, TextBlock, Usage, OutputConfigParam, JSONOutputFormatParam
+    client = create_autospec(Anthropic, instance=True)
+    client.messages = create_autospec(Messages, instance=True)
+    payload = dict(standards=[decision()], notes=[])
+    client.messages.create.return_value = Message(
+        id='msg_fixture', content=[TextBlock(type='text', text=json.dumps(payload))],
+        model='claude-sonnet-5-5', role='assistant', type='message', stop_reason=stop,
+        usage=Usage(input_tokens=1, output_tokens=1))
+    result = get_applicable_standards(EXAMPLES['E2'], FakeRetriever(), llm=AnthropicLLM(client), data=DATA)
+    request = client.messages.create.call_args.kwargs
+    inspect.signature(Messages.create).bind(client.messages, **request)
+    assert 'output_config' in inspect.signature(Messages.create).parameters
+    assert {'format', 'effort'} <= OutputConfigParam.__annotations__.keys()
+    assert {'schema', 'type'} <= JSONOutputFormatParam.__annotations__.keys()
+    from standards.classifier import OUTPUT_SCHEMA
+    assert request['model'] == 'claude-sonnet-5-5'
+    assert request['output_config'] == dict(format=dict(type='json_schema', schema=OUTPUT_SCHEMA), effort='low')
+    assert 'temperature' not in request and 'tool_choice' not in request
+    assert result['provenance']['llm_status'] == ('ok' if stop == 'end_turn' else 'fallback')
+    assert bypart(result)['ISO 10993-12']['label'] == 'mandatory'
+    if stop != 'end_turn':
+        assert dict(type='fallback', stop_reason=stop) in result['provenance']['disagreements']
 
 
 @pytest.mark.asyncio
-async def test_mcp_legacy_contract_with_fake_backend(monkeypatch):
+@pytest.mark.parametrize('use_fake', [True, False])
+async def test_mcp_v1_engine_with_injected_retriever(monkeypatch, use_fake):
     from fastmcp import Client
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'mcp'))
     try:
@@ -364,10 +427,17 @@ async def test_mcp_legacy_contract_with_fake_backend(monkeypatch):
     finally:
         sys.path.pop(0)
     monkeypatch.setattr(server, 'STUB', True)
-    def fake_backend(self, profile):
-        return [server.StandardDecision(standard='ISO 10993-1', classification='mandatory', rationale='Injected fake backend.')]
-    monkeypatch.setattr(server.Backend, 'classify_standards', fake_backend)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    retriever = FakeRetriever([dict(clause_id='fda-iso10993-1:III.A', text='Evaluation', doc='fda-iso10993-1')])
+    fake = FakeLLM() if use_fake else None
+    backend_class = server.Backend
+    monkeypatch.setattr(server, 'Backend', lambda: backend_class(standards_retriever=retriever, standards_llm=fake))
     async with Client(server.mcp) as client:
-        result = await client.call_tool('get_applicable_standards', dict(device_profile=dict(device_name='test',
-            device_type='implant', body_contact='implant', contact_tissue='bone', contact_duration='long_term')))
-    assert result.structured_content['decisions'][0]['classification'] == 'mandatory'
+        result = await client.call_tool('get_applicable_standards', dict(device_profile=EXAMPLES['E1']))
+    body = result.structured_content
+    assert body['provenance']['llm_status'] == ('ok' if use_fake else 'fallback')
+    assert bypart(body)['ISO 10993-12']['label'] == 'mandatory'
+    assert body['framework'] == 'FDA_2023_ATTACHMENT_A'
+    assert 'assumptions' in body and retriever.requests
+    if not use_fake:
+        assert all(p['reason'] == DATA['labels']['labels'][p['label']] for p in body['standards'])

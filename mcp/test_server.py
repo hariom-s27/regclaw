@@ -58,13 +58,31 @@ async def test_input_validation_rejects_bad_args(client):
 
 
 async def test_get_applicable_standards(client):
-    profile = {"device_name": "Knee X", "device_type": "knee implant", "body_contact": "implant",
-               "contact_tissue": "bone", "contact_duration": "long_term", "sterilization": "ethylene oxide"}
+    profile = {"device_name": "Knee X", "components": [{"name": "implant", "contact_nature": "implant",
+               "contact_site": "tissue_bone", "exposure": {"pattern": "single", "hours_per_use": 8760},
+               "materials": [{"name": "Ti", "material_class": "metal_alloy"}], "sterilization": "ethylene_oxide"}]}
     res = await client.call_tool("get_applicable_standards", {"device_profile": profile})
-    by_std = {d["standard"]: d["classification"] for d in res.structured_content["decisions"]}
+    by_std = {d["part"]: d["label"] for d in res.structured_content["standards"]}
     assert by_std["ISO 10993-1"] == "mandatory"
     assert by_std["ISO 10993-7"] == "mandatory"
-    assert by_std["ISO 10993-6"] == "recommended"
+    assert by_std["ISO 10993-6"] == "mandatory"
+
+
+async def test_standards_v1_schema_and_description(client):
+    tool = next(t for t in await client.list_tools() if t.name == 'get_applicable_standards')
+    assert 'mandatory = must be addressed in the biological evaluation, not necessarily tested' in tool.description
+    # FastMCP resolves local schema references into the wire input schema.
+    profile = tool.input_schema['properties']['device_profile']
+    assert 'components' in profile['required']
+    assert 'contact_nature' in profile['properties']['components']['items']['properties']
+    assert profile['additionalProperties'] is False
+
+
+async def test_standards_rejects_legacy_profile(client):
+    with pytest.raises(ToolError):
+        await client.call_tool('get_applicable_standards', {'device_profile': {
+            'device_name': 'legacy', 'device_type': 'implant', 'body_contact': 'implant',
+            'contact_tissue': 'bone', 'contact_duration': 'long_term'}})
 
 
 async def test_resources(client):
