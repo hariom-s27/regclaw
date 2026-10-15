@@ -295,9 +295,10 @@ class HybridRetriever:
             raise CypherRejected(f"EXPLAIN says query_type={summary.query_type!r}, not read-only")
 
     def _run_ids(self, q: str, params: dict) -> list[str]:
-        from neo4j import Query
+        from neo4j import unit_of_work
+        @unit_of_work(timeout=self.timeout)
         def work(tx):
-            return [r["clause_id"] for r in tx.run(Query(q, timeout=self.timeout), params) if r["clause_id"]]
+            return [r["clause_id"] for r in tx.run(q, params) if r["clause_id"]]
         with self.driver.session(database=self.db) as s:
             return s.execute_read(work)
 

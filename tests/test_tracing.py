@@ -85,7 +85,7 @@ class Cursor:
 def retriever(monkeypatch, fail=None):
     # CI needs no database drivers. These stand-ins only implement constructors
     # used by the production stage bodies; query and result handling stay real.
-    monkeypatch.setitem(sys.modules, 'neo4j', NS(Query=lambda text, **kw: text))
+    monkeypatch.setitem(sys.modules, 'neo4j', NS(unit_of_work=lambda **kw: lambda fn: fn))
     monkeypatch.setitem(sys.modules, 'pgvector', NS(Vector=lambda value: value))
     r = HybridRetriever.__new__(HybridRetriever)
     r.db, r.timeout, r.max_retries = 'neo4j', 5, 0
