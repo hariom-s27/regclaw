@@ -8,6 +8,7 @@ data/*.json
 data/cache/
 data/parse_eval/
 data/gold/
+data/models/legalbert_obl_v1/
 data/gold_structure/
 data/retrieval_eval/
 data/.pytest_tmp/
