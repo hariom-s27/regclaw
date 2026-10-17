@@ -1,8 +1,11 @@
 """Paired annotation/model scoring. Empty annotation templates are not gold."""
 import argparse
 import csv
+import hashlib
 import json
 import math
+import random
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -109,6 +112,57 @@ def retest_report(round1, round2, resamples=10000, seed=20261016):
     return result
 
 
+def agreement_report(a_path, b_path, gold_path, labels_path, ids_path, resamples=5000, seed=1):
+    """Validate the locked round and reuse the retest math for two annotators."""
+    def rows(path):
+        with Path(path).open(encoding='utf-8-sig', newline='') as stream:
+            return list(csv.DictReader(stream))
+
+    gold, exported = rows(gold_path), rows(labels_path)
+    fields = ['clause_id', 'text', 'label', 'mixed', 'restated_reg', 'low_confidence', 'note', 'source']
+    if len(gold) != 184 or list(gold[0]) != fields:
+        raise ValueError('Expected 184 gold rows and the exact gold_final columns')
+    gold_map = read_gold(gold_path)
+    ids = [r['id'] for r in rows(ids_path)]
+    if len(ids) != len(set(ids)) or set(ids) != gold_map.keys():
+        raise ValueError('Gold ids do not equal gold_ids.csv')
+    for row in gold + exported:
+        if any(row[key] not in ('0', '1') for key in ('mixed', 'restated_reg', 'low_confidence')):
+            raise ValueError('Flags must be 0/1')
+    keys = ['clause_id', 'label', 'mixed', 'restated_reg', 'low_confidence', 'source']
+    project = lambda data: {r['clause_id']: tuple(r[k] for k in keys) for r in data}
+    read_gold(labels_path)  # Reject duplicates before projecting.
+    if project(gold) != project(exported):
+        raise ValueError('Tracked label export differs from gold_final')
+    a_rows, b_rows = rows(a_path), rows(b_path)
+    a, b = read_gold(a_path), read_gold(b_path)
+    for data, mapping in ((a_rows, a), (b_rows, b)):
+        if mapping.keys() != gold_map.keys() or [int(r['row']) for r in data] != list(range(1, 185)):
+            raise ValueError('Annotators must contain the gold ids in numbered rows 1..184')
+    if [r['clause_id'] for r in a_rows] != [r['clause_id'] for r in b_rows]:
+        raise ValueError('Annotator row order differs')
+    remaining = {r['clause_id']: b[r['clause_id']] for r in b_rows[20:]}
+    # Explain the expected Claude intervals without changing the retest defaults.
+    rng_check = {}
+    for name, data in [('all', a_rows), ('rows_21_184', a_rows[20:])]:
+        order = [r['clause_id'] for r in data]
+        x, y = np.array([a[i] for i in order]), np.array([b[i] for i in order])
+        rng = random.Random(seed)
+        indices = np.array([[rng.randrange(len(order)) for _ in order] for _ in range(resamples)])
+        rng_check[name] = {'cohen_kappa_ci95': ci(agreement_values(x[indices], y[indices])[1])}
+    paths = [a_path, b_path, gold_path, labels_path, ids_path]
+    return {'validation': {'rows': len(gold), 'ids_match': True, 'export_matches': True,
+                           'label_counts': dict(Counter(gold_map.values())),
+                           'source_counts': dict(Counter(r['source'] for r in gold)),
+                           'label_disagreements': sum(a[i] != b[i] for i in a)},
+            'sha256': {str(p): hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths},
+            'all': retest_report(a, b, resamples, seed),
+            'rows_21_184': retest_report(a, remaining, resamples, seed),
+            'python_rng_original_order_check': {'method': 'random.Random(seed).randrange; original CSV order',
+                                                'seed': seed, 'resamples': resamples, **rng_check},
+            'method': 'Paired row bootstrap; sorted clause ids within subset; nominal alpha; percentile CI'}
+
+
 def score(gold, weak, allocation, predictions=None, flagged=()):
     weak_map = {r['id']: r for r in weak}
     cells = {(r['weak_label'], r['doc_type']): (int(r['pool_size']), int(r['sampled'])) for r in allocation}
@@ -167,7 +221,11 @@ def print_tables(result):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('gold')
+    parser.add_argument('gold', nargs='?')
+    parser.add_argument('--agreement', nargs=2, metavar=('A', 'B'))
+    parser.add_argument('--gold-final', default=ROOT / 'data/gold/gold_final.csv')
+    parser.add_argument('--labels-export', default=ROOT / 'goldset/gold_labels_round1.csv')
+    parser.add_argument('--gold-ids', default=ROOT / 'goldset/gold_ids.csv')
     parser.add_argument('--weak', default=ROOT / 'data/weak_labels.json')
     parser.add_argument('--predictions')
     parser.add_argument('--allocation', default=ROOT / 'goldset/allocation.csv')
@@ -175,6 +233,14 @@ def main(argv=None):
     parser.add_argument('--retest')
     parser.add_argument('--output', default=ROOT / 'data/gold/scores.json')
     args = parser.parse_args(argv)
+    if args.agreement:
+        result = agreement_report(*args.agreement, args.gold_final, args.labels_export, args.gold_ids)
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(json.dumps(result, indent=2, allow_nan=False) + '\n', encoding='utf-8')
+        print(json.dumps(result, indent=2, allow_nan=False))
+        return 0
+    if not args.gold:
+        parser.error('gold is required unless --agreement is used')
     gold = read_gold(args.gold)
     read_csv = lambda p: list(csv.DictReader(Path(p).open(encoding='utf-8-sig', newline='')))
     predictions = None

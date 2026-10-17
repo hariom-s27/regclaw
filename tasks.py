@@ -67,6 +67,11 @@ def main():
         from goldset.sample import run
         run()
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == 'gold-agreement':
+        from goldset.score import main as agreement_main
+        options = sys.argv[2:] or ['--agreement', 'goldset/annotator_a_round1.csv',
+                                  'goldset/annotator_b_round1.csv', '--output', 'data/gold/agreement.json']
+        return agreement_main(options)
     handlers = {'run-summary': 'observability.run_summary',
                 'structure-score': 'ingest.structure_gold', 'standards-demo': 'standards.demo',
                 'gold-score': 'goldset.score', 'enrich': 'ner.merge',
@@ -87,7 +92,7 @@ def main():
         subcommands.add_parser(name, help=description)
     for name in PLACEHOLDERS:
         subcommands.add_parser(name, help="Not implemented yet.")
-    for name in ('obligation-weak', 'gold-sample', *handlers):
+    for name in ('obligation-weak', 'gold-sample', 'gold-agreement', *handlers):
         subcommands.add_parser(name, help='Offline preparation; use command --help for options.')
     ingest = subcommands.add_parser('ingest', help='Parse manifest-listed PDFs offline.')
     ingest.add_argument('--doc')

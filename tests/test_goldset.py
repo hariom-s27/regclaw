@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from goldset.sample import allocate, char_grams, jaccard, run
-from goldset.score import agreement_values, paired_comparison, read_gold, report, retest_report, score, print_tables
+from goldset.score import agreement_report, agreement_values, paired_comparison, read_gold, report, retest_report, score, print_tables
 
 
 def test_allocation_floor_cap_and_redistribution():
@@ -57,6 +57,64 @@ def test_scoring_pairing_and_nominal_alpha():
     assert alpha[0] == pytest.approx(1 - .25 / (30 / 56))
     result = retest_report(dict(zip(map(str, range(16)), g)), dict(zip(map(str, range(16)), g)))
     assert result['krippendorff_alpha']['value'] == 1 and result['decision'] == 'rely'
+
+
+def test_agreement_known_chance_and_degenerate_cases():
+    from sklearn.metrics import cohen_kappa_score
+    a = np.array([['SHALL', 'SHALL', 'NONE', 'NONE']])
+    b = np.array([['SHALL', 'NONE', 'SHALL', 'NONE']])
+    raw, kappa, alpha = agreement_values(a, b)
+    assert raw[0] == .5
+    assert kappa[0] == cohen_kappa_score(a[0], b[0]) == 0
+    assert alpha[0] == pytest.approx(.125)
+    mapping = {str(i): 'NONE' for i in range(4)}
+    result = retest_report(mapping, mapping, resamples=20, seed=1)
+    assert result['raw_agreement']['value'] == 1
+    assert result['cohen_kappa']['value'] is None
+    assert result['krippendorff_alpha']['ci95'] is None
+    assert result['cohen_kappa']['undefined_resamples'] == 20
+
+
+def test_paired_bootstrap_sign_symmetry_and_mcnemar():
+    g = ['SHALL', 'SHOULD', 'MAY', 'NONE'] * 3
+    bad = ['NONE'] * len(g)
+    forward = paired_comparison(g, bad, g, resamples=100, seed=42)
+    reverse = paired_comparison(g, g, bad, resamples=100, seed=42)
+    assert reverse['delta_macro_f1'] == -forward['delta_macro_f1']
+    assert reverse['ci95'] == pytest.approx([-forward['ci95'][1], -forward['ci95'][0]])
+    assert forward['mcnemar_exact_p'] == reverse['mcnemar_exact_p'] == pytest.approx(2 / 2**9)
+    tied = paired_comparison(g, g, g, resamples=100, seed=42)
+    assert tied['ci95'] == [0, 0] and tied['mcnemar_exact_p'] == 1
+
+
+def test_agreement_validation_and_practice_rows(tmp_path):
+    fields = ['clause_id', 'text', 'label', 'mixed', 'restated_reg', 'low_confidence', 'note', 'source']
+    gold, a, b = [], [], []
+    for i in range(184):
+        cid, label = f'in-mdr:{183-i}', ('SHALL', 'NONE')[i % 2]
+        gold.append(dict(clause_id=cid, text='fixture', label=label, mixed='0', restated_reg='0',
+                         low_confidence='0', note='', source='agree'))
+        a.append(dict(row=i+1, clause_id=cid, label=label))
+        b.append(dict(row=i+1, clause_id=cid, label='NONE' if i in (0, 20) else label))
+    def write(name, columns, rows):
+        path = tmp_path / name
+        with path.open('w', newline='', encoding='utf-8') as stream:
+            writer = csv.DictWriter(stream, fieldnames=columns, extrasaction='ignore')
+            writer.writeheader(); writer.writerows(rows)
+        return path
+    gp = write('gold.csv', fields, gold)
+    ep = write('export.csv', [k for k in fields if k not in ('text', 'note')], gold)
+    ip = write('ids.csv', ['id'], [dict(id=r['clause_id']) for r in gold])
+    ap = write('a.csv', ['row', 'clause_id', 'label'], a)
+    bp = write('b.csv', ['row', 'clause_id', 'label'], b)
+    result = agreement_report(ap, bp, gp, ep, ip, resamples=20)
+    assert result['all']['raw_agreement']['value'] == pytest.approx(182 / 184)
+    assert result['rows_21_184']['raw_agreement']['value'] == pytest.approx(163 / 164)
+    assert result['validation']['label_disagreements'] == 2
+    gold[0]['mixed'] = '2'
+    write('gold.csv', fields, gold)
+    with pytest.raises(ValueError, match='Flags must be 0/1'):
+        agreement_report(ap, bp, gp, ep, ip, resamples=20)
 
 
 def test_weighting_near_dup_subset_and_import(tmp_path, capsys):

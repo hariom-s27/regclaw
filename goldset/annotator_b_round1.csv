@@ -1,0 +1,185 @@
+row,clause_id,label,mixed,restated_reg,low_confidence
+1,fda-iso10993-1:Attachment D,NONE,0,0,0
+2,in-ep:5.9.1,SHOULD,0,0,0
+3,fda-iso10993-1:Attachment G.B,MAY,0,0,1
+4,eu-mdr:Annex I.17,NONE,0,0,0
+5,fda-iso10993-1:V.C,SHOULD,1,0,0
+6,in-mdr:26,SHALL,0,0,0
+7,in-mdr:56,MAY,0,0,0
+8,imdrf-n47:6.2.1,SHOULD,0,0,0
+9,in-mdr:Schedule 7.Table 10.4,MAY,0,0,0
+10,eu-mdr:Art 2(71),NONE,0,0,0
+11,eu-mdr:Art 2(15),NONE,0,0,0
+12,fda-chem-analysis:VIII,SHOULD,0,0,0
+13,fda-chem-analysis:V,SHOULD,1,0,0
+14,eu-mdr:Annex I.19.1,SHALL,0,0,0
+15,in-mdr:Schedule 7.Table 10.5,MAY,0,0,0
+16,imdrf-n47:5.8.4,SHOULD,0,0,0
+17,fda-knee:2,SHOULD,1,1,0
+18,eu-mdr:Art 2(65),NONE,0,0,0
+19,in-mdr:Schedule 4.Part III.Appendix III.21,SHOULD,0,0,0
+20,in-mdr:54,MAY,0,0,0
+21,fda-iso10993-1:Attachment G.C,NONE,0,0,0
+22,in-mdr:Form MD-7,SHALL,0,0,1
+23,imdrf-n47:5.7.2,SHOULD,0,0,0
+24,epa-63o:§63.362(j),SHALL,1,0,0
+25,fda-iso10993-1:VI.A,SHOULD,0,0,0
+26,eu-mdr:Annex I.21.1,SHALL,0,0,0
+27,imdrf-n47:3.13,NONE,0,0,0
+28,fda-knee:6,SHOULD,0,0,0
+29,imdrf-n47:3.44,NONE,0,0,0
+30,in-ep:7,SHALL,0,0,0
+31,in-mdr:16,MAY,0,0,0
+32,imdrf-n47:3.17,NONE,0,0,0
+33,in-mdr:5,MAY,0,0,0
+34,in-mdr:Form MD-15,SHALL,0,0,1
+35,fda-iso10993-1:Attachment G.A,SHOULD,0,0,0
+36,in-mdr:Schedule 4.Part III.Appendix III.19,SHOULD,0,0,0
+37,eu-mdr:Annex XV.II.3.3,NONE,0,0,1
+38,eu-mdr:Annex XV.II.4.4,NONE,0,0,0
+39,in-mdr:Form MD-30,NONE,0,0,0
+40,epa-63o:Appendix A.9.1,SHALL,0,0,1
+41,in-ep:6.10.1,SHOULD,0,0,0
+42,in-mdr:Schedule 7.Table 4.6,NONE,0,0,0
+43,eu-mdr:Annex XV.II.1.7,NONE,0,0,0
+44,imdrf-n47:5.8.1,SHOULD,0,0,0
+45,imdrf-n47:5.11.6,SHOULD,0,0,0
+46,epa-63o:Appendix A.11.4.3,NONE,0,0,0
+47,in-mdr:Schedule 7.Table 4.4,NONE,0,0,0
+48,in-ep:5.6.1,SHOULD,0,0,0
+49,in-mdr:48,SHALL,0,0,0
+50,in-mdr:Form MD-1,SHALL,0,0,1
+51,in-mdr:4,SHALL,1,0,0
+52,imdrf-n47:3.31,NONE,0,0,0
+53,in-ep:4.5,SHOULD,0,0,0
+54,in-mdr:Schedule 4.Part III.Appendix III.2,SHOULD,1,0,0
+55,imdrf-n47:3.30,NONE,0,0,0
+56,imdrf-n47:5.1.3,SHOULD,0,0,0
+57,in-mdr:27,SHALL,1,0,0
+58,imdrf-n47:3.27,NONE,0,0,0
+59,in-ep:5.9.5,SHOULD,0,0,0
+60,in-mdr:80,SHALL,1,0,0
+61,in-mdr:Schedule 4.Part III.Appendix III.13,SHOULD,0,0,0
+62,eu-mdr:Art 2(33),NONE,0,0,0
+63,in-mdr:Schedule 7.Table 4.3,SHALL,0,0,0
+64,fda-nitinol:IV.A.1,SHOULD,0,0,0
+65,in-ep:5.10.3,SHOULD,0,0,0
+66,imdrf-n47:5.13.3,SHOULD,0,0,0
+67,eu-mdr:Annex XV.II.2.4,NONE,0,0,0
+68,eu-mdr:Art 10(6),SHALL,0,0,0
+69,in-mdr:10,SHALL,0,0,0
+70,eu-mdr:Art 6(1),SHALL,0,0,0
+71,imdrf-n47:6.3,NONE,0,0,0
+72,eu-mdr:Annex XV.II.2.1,NONE,0,0,0
+73,in-ep:5.2.7,SHOULD,0,0,0
+74,eu-mdr:Art 2(65)(a),NONE,0,0,0
+75,eu-mdr:Annex XV.II.1.16,NONE,0,0,0
+76,in-mdr:70,SHALL,0,0,0
+77,eu-mdr:Art 9(4),SHALL,0,0,0
+78,imdrf-n47:3.11,NONE,0,0,0
+79,in-mdr:43A,MAY,0,0,0
+80,fda-nitinol:IV.E,SHOULD,0,0,0
+81,fda-iso10993-1:Attachment G.D,NONE,0,0,0
+82,epa-63o:Appendix A.9.4,SHALL,0,0,1
+83,epa-63o:Appendix A.8.2,NONE,0,0,0
+84,in-ep:5.11.3,SHOULD,0,0,0
+85,eu-mdr:Art 10(1),SHALL,0,0,0
+86,epa-63o:§63.363(c),SHALL,1,0,1
+87,eu-mdr:Annex I.10.4.4,SHALL,0,0,0
+88,eu-mdr:Annex XV.II.1.5,NONE,0,0,0
+89,in-ep:6.4.5,SHOULD,0,0,0
+90,in-ep:5.7.3,SHOULD,0,0,0
+91,in-mdr:Schedule 7.Table 1,SHALL,1,0,0
+92,imdrf-n47:6.4,NONE,0,0,0
+93,imdrf-n47:3.18,NONE,0,0,0
+94,fda-iso10993-1:Attachment F,SHOULD,1,0,1
+95,eu-mdr:Annex I.20,NONE,0,0,0
+96,fda-nitinol:II,NONE,0,0,0
+97,epa-63o:§63.366(h),SHALL,1,0,0
+98,in-ep:6.11,NONE,0,0,0
+99,imdrf-n47:5.5.1,SHOULD,0,0,0
+100,eu-mdr:Art 5(4),NONE,0,0,1
+101,epa-63o:§63.367(d),MAY,0,0,0
+102,eu-mdr:Annex XV.I.2.5,SHALL,0,0,0
+103,eu-mdr:Annex XV.I.2.4,SHALL,0,0,0
+104,eu-mdr:Art 10(9)(f),NONE,0,0,0
+105,in-mdr:Schedule 4.Part III.Appendix I.10,NONE,0,0,0
+106,eu-mdr:Art 5(1),SHALL,0,0,1
+107,in-mdr:Schedule 7.Table 7.5,NONE,0,0,0
+108,in-ep:5.14.1,SHOULD,0,0,0
+109,in-mdr:52,MAY,0,0,0
+110,fda-iso10993-1:III.C,SHOULD,1,0,0
+111,fda-nitinol:IV,SHOULD,0,0,0
+112,imdrf-n47:5.3.2,SHOULD,0,0,0
+113,eu-mdr:Art 9(3),SHALL,0,0,0
+114,eu-mdr:Annex XV.II.2,SHALL,0,0,0
+115,fda-chem-analysis:III,NONE,0,0,1
+116,imdrf-n47:3.25,NONE,0,0,0
+117,imdrf-n47:6.4.2,SHOULD,0,0,0
+118,fda-chem-analysis:IV,SHOULD,1,0,0
+119,in-mdr:Form MD-20,NONE,0,0,0
+120,eu-mdr:Annex I.11.4,SHALL,0,0,0
+121,epa-63o:§63.363(a),SHALL,1,0,0
+122,in-ep:2,SHALL,0,0,1
+123,eu-mdr:Art 2(65)(b),NONE,0,0,0
+124,in-mdr:Schedule 7.Table 6.3,SHALL,1,0,0
+125,fda-chem-analysis:IX,SHOULD,1,0,0
+126,imdrf-n47:3.26,NONE,0,0,0
+127,imdrf-n47:5.4,NONE,0,0,0
+128,eu-mdr:Art 6(4),MAY,0,0,0
+129,fda-iso10993-1:VI,SHOULD,0,0,0
+130,epa-63o:§63.366(d),SHALL,1,0,0
+131,in-ep:6.3.3,SHOULD,0,0,0
+132,eu-mdr:Art 1(2),SHALL,0,0,1
+133,imdrf-n47:5.8.5,SHOULD,0,0,0
+134,in-ep:5.9.2,SHOULD,0,0,0
+135,eu-mdr:Art 2(66),NONE,0,0,0
+136,fda-chem-analysis:X.T1,NONE,0,0,0
+137,fda-nitinol:III,NONE,0,0,0
+138,imdrf-n47:5.5.3,SHOULD,0,0,0
+139,eu-mdr:Annex II.2,NONE,0,0,0
+140,in-ep:6.2.1,SHOULD,0,0,0
+141,in-ep:6.4.2,SHOULD,0,0,0
+142,epa-63o:Appendix A.10.1,SHALL,0,0,0
+143,eu-mdr:Art 2(60),NONE,0,0,0
+144,epa-63o:Appendix A.11.4.9,NONE,0,0,0
+145,imdrf-n47:5.5.2,SHOULD,0,0,0
+146,imdrf-n47:2,NONE,0,0,0
+147,imdrf-n47:5.4.5,SHOULD,0,0,0
+148,in-ep:6.6.1,SHOULD,0,0,0
+149,imdrf-n47:5.4.2,SHOULD,0,0,0
+150,in-mdr:39,SHALL,0,0,0
+151,epa-63o:Appendix A.8.2.1,SHALL,0,0,1
+152,fda-iso10993-1:V.E,SHOULD,1,0,0
+153,in-mdr:Form MD-35,NONE,0,0,0
+154,in-ep:Preface,NONE,0,0,0
+155,fda-sterility-510k:II,SHOULD,0,0,1
+156,in-ep:5.5.1,SHOULD,0,0,0
+157,in-ep:5.12,NONE,0,0,0
+158,in-mdr:Schedule 7.Table 10.3,MAY,0,0,0
+159,in-ep:5.2.6,SHOULD,0,0,0
+160,in-ep:5.4.4,SHOULD,0,0,0
+161,epa-63o:Appendix A.3.1,SHALL,0,0,0
+162,imdrf-n47:5.2.2,SHALL,1,0,0
+163,imdrf-n47:3.15,NONE,0,0,0
+164,in-mdr:Schedule 1.Part II,SHALL,1,0,0
+165,eu-mdr:Annex XV.II.4,NONE,0,0,0
+166,eu-mdr:Art 2(58)(b),NONE,0,0,0
+167,fda-chem-analysis:II,NONE,0,0,0
+168,imdrf-n47:3.42,NONE,0,0,0
+169,in-mdr:Schedule 7.Table 10.8,MAY,0,0,0
+170,epa-63o:§63.367(a),SHALL,0,0,0
+171,eu-mdr:Art 2(54),NONE,0,0,0
+172,imdrf-n47:5.8.3,SHOULD,0,0,0
+173,eu-mdr:Art 10(9)(c),NONE,0,0,0
+174,eu-mdr:Art 1(6)(c),NONE,0,0,0
+175,imdrf-n47:3.34,NONE,0,0,0
+176,fda-sterility-510k:IV.A,NONE,0,0,0
+177,fda-iso10993-1:Attachment G.D.2,SHOULD,0,0,0
+178,epa-63o:§63.365(c),SHALL,1,0,1
+179,in-mdr:Schedule 5,SHALL,1,0,0
+180,epa-63o:§63.360(g),NONE,0,0,0
+181,imdrf-n47:Appendix B,SHALL,0,0,1
+182,in-mdr:61,MAY,0,0,0
+183,eu-mdr:Art 4(2),SHALL,1,0,0
+184,in-mdr:Schedule 4.Part III.Appendix III.6,SHOULD,1,0,0
