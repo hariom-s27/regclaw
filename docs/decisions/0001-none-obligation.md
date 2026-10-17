@@ -34,6 +34,11 @@ Every clause retains a valid value and can remain in the graph. The additional c
 
 `tests/test_merge.py::test_merge_contract_and_canonical_strings`; `tests/test_merge.py::test_missing_duplicate_unknown_and_default`.
 
+`python tasks.py gold-agreement` -> `data/gold/agreement.json` validates the four-label gold.
+`python tasks.py gold-score data/gold/gold_final.csv --output data/gold/scores_regex.json`;
+`python tasks.py gold-score data/gold/gold_final.csv --predictions data/gold/pred_legalbert.json --output data/gold/scores_legalbert.json`
+report every class, including NONE. Captured evidence: [results](../results.md#obligation-gold-and-classifier).
+
 ## Evidence and Status
 
 Sources: CLAUDE.md; ner/merge.py; goldset/GUIDELINE.md.

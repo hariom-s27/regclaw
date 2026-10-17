@@ -172,12 +172,13 @@ No synthetic fixture timing or fixture quality metric is reported here.
 | Policy parent accuracy | 100% for both scored documents | [`python tasks.py structure-score`](docs/results.md#structure-scoring) |
 | Automated matrix cross-check | 0 mismatches in 264 cells | [`standards.crosscheck.crosscheck`](docs/results.md#matrix-cross-check) |
 | Largest embedding input / oversized inputs | 7,250 tokens / 0 | [`python tasks.py embed --dry-run`](docs/results.md#embedding-input-size) |
-| Offline tests | 286 passed | [`python tasks.py test`](docs/results.md#offline-tests) |
+| Obligation agreement (post-practice) | kappa 0.894990, 95% CI [0.832293, 0.947318] | [`python tasks.py gold-agreement` -> `data/gold/agreement.json`](docs/results.md#obligation-gold-and-classifier) |
+| Obligation Delta macro-F1 (LegalBERT - regex) | -0.072138, 95% CI [-0.143915, +0.005000]; inconclusive | [`python tasks.py gold-score data/gold/gold_final.csv --predictions data/gold/pred_legalbert.json --output data/gold/scores_legalbert.json`](docs/results.md#obligation-gold-and-classifier) |
+| Offline tests | 292 passed | [`python tasks.py test` -> `data/gold/tests_phase_d.txt`](docs/results.md#obligation-gold-and-classifier) |
 
 | Unmeasured area | Status | Reason |
 |---|---|---|
 | Full entity extraction accuracy | TBD | Live extraction and human evaluation pending |
-| LegalBERT quality and agreement | TBD | Gold annotation and training pending |
 | Production embedding reconciliation | TBD | Production vectors not loaded |
 | Retrieval quality and full pipeline latency | TBD | Judged queries and complete live run pending |
 | Part II quality and latency | TBD | Document confirmation and evaluation pending |
@@ -222,7 +223,8 @@ An accepted design does not imply measured live performance.
 
 ## Testing and CI
 
-Run `python tasks.py test`; the current local total is [286 passes](docs/results.md#offline-tests).
+Run `python tasks.py test`; the current local total is [292 passes](docs/results.md#obligation-gold-and-classifier)
+(`data/gold/tests_phase_d.txt`).
 Stub mode supplies canned MCP data and injected model, graph, and vector clients.
 It verifies contracts and guard behavior; model quality and service latency need live runs.
 [CI](.github/workflows/ci.yml) selects Python 3.11 and the same runner; remote status is TBD until pushed.
@@ -239,7 +241,7 @@ Source files remain local; check the source-specific conditions before reuse.
 
 - Record the demo GIF; the walkthrough placeholder remains TBD until media exists.
 - Finish manual parser gold; automatic structure checks cover only the supported sources.
-- Complete human obligation annotation, independent agreement, and model evaluation.
+- Address the exhausted weak-MAY training pool in a future approved split; current gold comparison is inconclusive ([results](docs/results.md#obligation-gold-and-classifier)).
 - Run entity extraction and inspect grounding failures before loading the enriched graph.
 - Load production vectors and judge retrieval results before publishing quality or latency.
 - Confirm the Part II document and complete indexing, citation checks, and evaluation.
