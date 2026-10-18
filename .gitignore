@@ -6,6 +6,8 @@ __pycache__/
 data/pdfs/
 data/*.json
 data/cache/
+data/scratch/
+data/runs/
 data/parse_eval/
 data/gold/
 data/models/legalbert_obl_v1/
