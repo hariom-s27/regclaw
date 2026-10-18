@@ -1,0 +1,51 @@
+clause_id,split,source,length_tercile
+epa-63o:Appendix A.11.5.3,holdout,EPA,medium
+epa-63o:Appendix A.3.1,holdout,EPA,short
+epa-63o:Appendix A.5.2.3,dev,EPA,medium
+epa-63o:Table 2,dev,EPA,long
+epa-63o:§63.360(d),dev,EPA,short
+epa-63o:§63.365(c),holdout,EPA,long
+eu-mdr:Annex I.11.5,dev,EU MDR,short
+eu-mdr:Annex I.14.2,dev,EU MDR,long
+eu-mdr:Annex III.1.1,dev,EU MDR,long
+eu-mdr:Annex XIV.B,dev,EU MDR,short
+eu-mdr:Annex XV.I.2.1,dev,EU MDR,long
+eu-mdr:Annex XV.II.1.11,holdout,EU MDR,long
+eu-mdr:Annex XV.II.2.2,holdout,EU MDR,long
+eu-mdr:Annex XV.II.3.1.4,holdout,EU MDR,short
+eu-mdr:Annex XV.II.3.6.1,dev,EU MDR,medium
+eu-mdr:Art 10(10),holdout,EU MDR,short
+eu-mdr:Art 2(27),holdout,EU MDR,medium
+eu-mdr:Art 2(39),holdout,EU MDR,medium
+eu-mdr:Art 2(41),dev,EU MDR,medium
+eu-mdr:Art 5(2),dev,EU MDR,short
+eu-mdr:Art 5(6),dev,EU MDR,medium
+fda-chem-analysis:IV,holdout,FDA,long
+fda-iso10993-1:Attachment A.T1,holdout,FDA,medium
+fda-iso10993-1:Attachment F.B,holdout,FDA,short
+fda-iso10993-1:Attachment H,dev,FDA,long
+fda-nitinol:I,dev,FDA,medium
+fda-nitinol:IV.B,dev,FDA,short
+imdrf-n47:3.15,dev,IMDRF,short
+imdrf-n47:3.37,dev,IMDRF,short
+imdrf-n47:5.12.3,dev,IMDRF,long
+imdrf-n47:5.9.1,holdout,IMDRF,long
+imdrf-n47:6,holdout,IMDRF,medium
+imdrf-n47:6.1.1,dev,IMDRF,medium
+in-ep:6.1.2,dev,India,short
+in-ep:6.2.1,holdout,India,medium
+in-ep:6.4.4,dev,India,short
+in-ep:6.8.4,dev,India,medium
+in-ep:6.9.7,dev,India,short
+in-mdr:19C,holdout,India,medium
+in-mdr:23,dev,India,long
+in-mdr:50,dev,India,medium
+in-mdr:51,dev,India,long
+in-mdr:71,dev,India,short
+in-mdr:73,holdout,India,short
+in-mdr:Form MD-13,dev,India,medium
+in-mdr:Schedule 4.Part III.Appendix I.10,holdout,India,short
+in-mdr:Schedule 4.Part III.Appendix III.13,dev,India,medium
+in-mdr:Schedule 4.Part III.Appendix III.3,holdout,India,long
+in-mdr:Schedule 5,dev,India,long
+in-mdr:Schedule 7.Table 10.6,holdout,India,long
