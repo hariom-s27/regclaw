@@ -599,7 +599,7 @@ the same SHA-256 at start and end:
 | Work | Status | Reason |
 |---|---|---|
 | Manual parser gold for the remaining sources | TBD | Author annotation is not complete |
-| Full entity extraction and grounded accuracy | TBD | Live extraction and human evaluation not run |
+| Full entity extraction and grounded accuracy | Live extraction provisional (GPT); accuracy pending | `python tasks.py ner` in the Azure/low environment below; no accuracy claim until the hand gold (S4b) exists |
 | Obligation agreement and LegalBERT quality | Measured | See Obligation gold and classifier; macro-F1 comparison is inconclusive |
 | Visual matrix verification | TBD | Human visual comparison not completed |
 | Production embedding reconciliation | Measured | S7: 1,143 clauses and vectors, no missing/orphan ids; see commands and counts above |
@@ -635,3 +635,453 @@ Source dates and decision chronology are recorded in the journal without publish
 | Parser versions and dated fixes | Journal entries, named Git commits, and parser regression tests |
 
 No result has been inferred from a roadmap target or a stub-mode quality metric.
+
+## S4 provisional (GPT): live entities and frozen evaluation
+
+Claude remains the default provider and the final headline. This Azure run is
+**provisional (GPT)** under ADR 0025 / C-GPT.
+
+no accuracy claim until the hand gold (S4b) exists
+
+Grounding verifies text support, not the correctness of a type
+or canonical. The fixed prompt, schema, twelve checks, normaliser, aliases,
+standard-reference rules, parser, existing gold and corpus are unchanged.
+
+Every numerical paragraph and table in this S4 section is labelled
+**provisional (GPT)** and inherits its phase's producing command below, including
+metadata, checks and test counts. Counts in the split table describe the frozen
+sampling design, not model performance. Commands are recorded as plain text;
+local artifact paths are not publication links.
+
+Sampling metadata — **provisional (GPT)** run. The eval freeze preceded every
+new live S4 call. Producing command:
+`python -m goldset.sample_entities`. Seed `20261018`; within each source family,
+character length and clause id order define three rank terciles. Allocation
+starts with two samples per stratum and fills proportional deficits; the split
+starts with one dev item per stratum and fills proportional deficits. Both use
+the same seeded RNG. Fixture ids and the earlier S4 smoke id are excluded.
+Only ids and strata are tracked. Holdout model rows are never displayed or
+reviewed individually; subsequent reporting uses aggregates.
+
+Frozen-id digest — **provisional (GPT)** run; command:
+`Get-FileHash goldset/entity_gold_ids.csv -Algorithm SHA256`:
+`b0964e8b603b30a2bf39713e32ab3e06745e117cedac9d54608803eaa3fb6113`.
+
+Sampling counts — **provisional (GPT)** run; command:
+`python -m goldset.sample_entities`.
+
+| Source family — provisional (GPT) | Dev | Holdout |
+|---|---:|---:|
+| FDA | 3 | 3 |
+| EU MDR | 9 | 6 |
+| IMDRF | 4 | 2 |
+| India | 11 | 6 |
+| EPA | 3 | 3 |
+| Total | 30 | 20 |
+
+Run environment and controls — **provisional (GPT)**; commands: the Phase 1,
+Phase 2 and Phase 3 `python tasks.py ner` invocations below, with controls
+implemented in `ner/live_controls.py`. `LLM_PROVIDER=azure_openai`,
+`REGCLAW_STUB=0`, deployment
+`AZURE_OPENAI_S4_DEPLOYMENT=gpt-5-mini`,
+`AZURE_OPENAI_S4_REASONING_EFFORT=low`, `LANGFUSE_ENABLED=false`; `.env` is
+loaded privately. Response version: `gpt-5-mini-2025-08-07`. Azure output lives
+under `data/runs/azure_openai/s4/`; high effort uses its `high/` subdirectory.
+The cache key includes provider, deployment and effort. Outputs and the call
+ledger retain provenance, including the response's reported model version.
+The Azure scheduler uses three workers and reserves at most 78 requests and
+78,000 estimated prompt-plus-completion-cap tokens per rolling 61 seconds.
+It honors Retry-After, checkpoints successful raw results, and guards the $8
+cumulative and projected full-run cost and the full-corpus error threshold.
+
+### Phase 1 — provisional (GPT) gate
+
+Producing command for every Phase 1 number — **provisional (GPT)** (fixed ids
+also saved in the local `phase1/ids.json`):
+
+```powershell
+python tasks.py ner --ids "fda-iso10993-1:Attachment G,fda-iso10993-1:IV.A,eu-mdr:Annex I.14.4,eu-mdr:Art 10(9)(b),imdrf-n47:7,imdrf-n47:Appendix B.5.12,in-ep:5.8.1,in-mdr:12,epa-63o:Appendix A.11.3.1,epa-63o:Table 5"
+```
+The fixed non-eval sample selects two clauses per source family using seed
+`20261018`. Local receipts: `data/runs/azure_openai/s4/phase1/`.
+
+| Type — all measurements provisional (GPT) | Mentions | Unique canonicals | Alias resolved | Sent to review | Grounding rejects / attempted |
+|---|---:|---:|---:|---:|---:|
+| biological_effects | 17 | 13 | 29.4% | 52.9% | 0 / 23 (0%) |
+| chemicals | 3 | 2 | 66.7% | 33.3% | 0 / 6 (0%) |
+| device_types | 6 | 6 | 0% | 83.3% | 0 / 9 (0%) |
+| regulatory_actors | 8 | 5 | 12.5% | 62.5% | 0 / 12 (0%) |
+| lifecycle_phases | 12 | 6 | 0% | 75.0% | 0 / 15 (0%) |
+
+**provisional (GPT)**, from the fixed-id command above: ten calls, ten successful end-turn stops, zero error rows,
+zero retries, nineteen non-grounding rejects, forty-six alias-review rows.
+Input/output/reasoning tokens: **19,915 / 8,215 / 5,760**; reasoning is included
+in output. Cached prompt tokens: **10,752**. Wall time **47.36 seconds**.
+Estimated cost **$0.023550**; projected full-run cost **$2.6917**. The grounding
+and cost gates pass. These are conservative estimates using published Azure
+regional rates of $0.275 input / $2.20 output per million tokens, without any
+cached-input discount; subscription billing is unverified. Source:
+[Microsoft Foundry pricing announcement](https://devblogs.microsoft.com/foundry/whats-new-in-azure-ai-foundry-august-2025/).
+The pre-existing R11 legacy-rate estimate is retained separately in receipts.
+
+Corpus-quoting example rows are omitted. This report contains no verbatim
+clause text; named canonical aggregates below exclude holdout clauses.
+
+Review percentages count retained mentions flagged by legitimacy/collision or
+fuzzy proposals, once per mention. Grounding denominators count all attempted
+entities, including those later rejected for another reason or deduplicated.
+Neither the alias-review candidates nor this report change `aliases.csv`.
+
+### Blind S4b materials
+
+Annotation/scorer metadata — **provisional (GPT)** run. Sampling command:
+`python -m goldset.sample_entities`; scorer validation command:
+`python tasks.py test`. Annotation-sheet construction copied only source
+clause id/source/text into the blank sheet, without predictions.
+
+**provisional (GPT)** run metadata, validated with `python tasks.py test`:
+`data/gold/entity_annotation_sheet.csv` contains the fifty eval clauses and
+empty type/notes cells, with no predictions. It is gitignored because it carries
+corpus text. `goldset/ENTITY_GUIDELINE_v1.md` mirrors the frozen prompt and
+uses only its synthetic few-shots. `goldset/score_entities.py` consumes reviewed
+typed character spans and canonicals, calculates strict/exact/partial/type and
+canonical-set precision/recall/F1, micro and five-type macro, and uses 1,000
+clause bootstrap resamples with seed `20261018`. Empty denominators score zero.
+One-to-one span matching maximizes total credit; per-type measures filter each
+type, whereas exact/partial micro matching permits cross-type matches.
+Known-answer synthetic tests cover wrong types, partial boundaries, duplicates,
+non-greedy matching, canonical aliases, empty clauses and bootstrap repeatability.
+No corpus scoring has been performed. Ambiguous repeated mentions require
+explicit human-reviewed offsets before scoring. The guideline requests a blind
+ten-clause repeat one week later for intra-annotator agreement.
+
+### Phase 2 — provisional (GPT) full low-effort run
+
+Producing command for every Phase 2 number — **provisional (GPT)**:
+`python tasks.py ner` in the Azure/low environment above. Local frozen
+receipts: `data/runs/azure_openai/s4/phase2/`. **provisional (GPT)**: **1,143**
+clauses, **1,133** new requests and **10** reused Phase 1 cache entries; **zero**
+error rows, HTTP 429s, schema retries, budget retries or other retries. All
+successful calls stopped with `end_turn`. No error ids/reasons to report.
+
+| Type — all measurements provisional (GPT) | Mentions | Unique canonicals | Alias resolved | Sent to review | Grounding rejects / attempted |
+|---|---:|---:|---:|---:|---:|
+| biological_effects | 259 | 18 | 17.4% | 71.8% | 5 / 455 (1.1%) |
+| chemicals | 327 | 183 | 31.2% | 29.1% | 6 / 359 (1.7%) |
+| device_types | 1,129 | 702 | 0% | 69.4% | 50 / 1,345 (3.7%) |
+| regulatory_actors | 1,094 | 11 | 6.2% | 70.5% | 25 / 1,547 (1.6%) |
+| lifecycle_phases | 1,334 | 13 | 0% | 91.0% | 54 / 1,839 (2.9%) |
+
+**provisional (GPT)**, from `python tasks.py ner`: **4,143** retained mentions, **1,402** total rejects,
+**2,833** deduplicated alias-review rows, **4,207** unsupported-expansion flags
+and **2** cross-type collision flags. Candidates have not been accepted or
+added to the frozen aliases. New Phase 2 calls used **2,090,837 / 852,989 /
+606,976** input/output/reasoning tokens; output includes reasoning. Cached
+prompt tokens: **1,715,712**. Phase 2 wall time: **6,116.20 seconds**; incremental
+estimated cost **$2.451556**. Including the ten Phase 1 calls, the full low run
+used **2,110,752 / 861,204 / 612,736** input/output/reasoning tokens, **1,726,464**
+cached prompt tokens, **6,163.56 seconds** of pipeline time and **$2.475106**.
+Tests and reporting time are excluded from pipeline time.
+
+Check #12 comparison against Phase 1 — **provisional (GPT)**; producing
+commands: the Phase 1 fixed-id `python tasks.py ner --ids ...` command and
+Phase 2 `python tasks.py ner`. The following cross-sample arithmetic is derived
+from their summary receipts:
+
+| Type — provisional (GPT) | Phase 1 mean | Full mean | Phase 1 empty rate | Full empty rate | >25% relative change |
+|---|---:|---:|---:|---:|---|
+| biological_effects | 1.700 | 0.227 | 80.0% | 89.8% | mean |
+| chemicals | 0.300 | 0.286 | 70.0% | 87.3% | none |
+| device_types | 0.600 | 0.988 | 50.0% | 49.3% | mean |
+| regulatory_actors | 0.800 | 0.957 | 50.0% | 45.0% | none |
+| lifecycle_phases | 1.200 | 1.167 | 20.0% | 35.3% | empty rate |
+
+**provisional (GPT)**: these three cross-sample warnings were inspected as aggregates. They compare a
+small balanced-by-family sample with the full corpus, not repeated inference
+on identical clauses. The unchanged automatic check requires matching ordered
+id sets and therefore does not flag this different-size comparison. No prompt,
+check, alias or output was adjusted in response. The explicit grounding,
+full-run error and cost stop conditions all pass.
+
+Named stop-entity review — **provisional (GPT)**; producing command:
+`python tasks.py ner`, followed by non-holdout clause-frequency aggregation.
+It uses **only the 1,123 non-holdout clauses**.
+Automatic approval review rejected full-corpus named frequencies because they
+would include holdout-derived model output. The safe alternative excludes
+holdout rows before reading canonicals for this review; their names and
+frequencies remain sealed. The full-run unnamed metrics above still include
+all clauses. Each list is top fifteen or all canonicals if fewer exist;
+all frequencies are provisional (GPT).
+
+| Type — provisional (GPT) | Non-holdout canonical (clause frequency), provisional (GPT) |
+|---|---|
+| biological_effects | other (90); sensitization (21); carcinogenicity (16); genotoxicity (16); reproductive developmental toxicity (14); irritation (14); cytotoxicity (13); systemic toxicity (11); degradation (8); material mediated pyrogenicity (7); hemocompatibility (6); implantation effects (6); acute systemic toxicity (5); subchronic systemic toxicity (5); subacute systemic toxicity (4) |
+| chemicals | ethylene oxide (74); nickel titanium alloy (13); nickel (12); titanium (4); ethane-1,2-diol (3); hexane (3); formaldehyde (3); plasticizers (3); stainless steel (3); eto cems (2); human blood (2); human plasma (2); endocrine-disrupting substances (2); sterilant residues (2); isopropyl alcohol (2) |
+| device_types | ivd medical device (84); medical device (68); eto cems (26); in vitro diagnostic medical device (25); investigational medical device (25); medical device and ivd medical device (14); investigational device (12); new in vitro diagnostic medical device (10); implant (8); software (7); implantable device (7); nitinol device (7); active medical device (7); active implantable device (6); device for use by lay persons (6) |
+| regulatory_actors | other (378); manufacturer (242); competent authority (228); sponsor (64); applicant (50); notified body (30); investigator (28); authorised representative (22); laboratory (18); importer (11); distributor (6) |
+| lifecycle_phases | other (310); manufacturing (267); design development (151); clinical investigation (146); premarket submission (92); conformity assessment (82); sterilization (67); storage transport (65); post market surveillance (62); packaging (43); change control (12); material selection (8); reprocessing (6) |
+
+Repeated command: `python tasks.py ner`. **provisional (GPT)** cache verification:
+**zero API calls**, **1,143 cache hits**, **zero** new tokens/cost, unchanged call
+ledger, **92.16 seconds**. The entity JSON is byte-identical to the frozen full
+run. Existing review logic starts with the previous run's canonical bank, so
+the rerun produces **2,919** review rows instead of **2,833**; chemical review
+share becomes **30.3%**, device review share **80.6%**. Entity names, grounding,
+aliases and the other mention counts are unchanged. The initial full-run table
+above uses the preserved first-run receipts, not the overwritten rerun summary.
+There are no identical-id drift alerts on the cache rerun.
+
+### Phase 3 — provisional (GPT) effort comparison, no winner
+
+Producing command for every high-effort Phase 3 number — **provisional (GPT)**.
+Equivalent CLI to the executed Python launcher (same task and frozen ids):
+
+```powershell
+$env:AZURE_OPENAI_S4_REASONING_EFFORT = 'high'
+$ids = (Import-Csv goldset/entity_gold_ids.csv).clause_id -join ','
+python tasks.py ner --ids $ids
+```
+
+**provisional (GPT)**, from the high-effort command above: the existing process
+completed all fifty ids before the continuation check;
+the continuation made **zero** additional API calls. High-effort artifacts and
+cache are under `data/runs/azure_openai/s4/high/`; `comparison.json` contains
+only split/type aggregates. All measurements below are **provisional (GPT)**.
+Response version remains `gpt-5-mini-2025-08-07`.
+
+Every comparison below is **provisional (GPT)**. Low results come from
+Phase 2 `python tasks.py ner`; high results come from the high-effort
+`python tasks.py ner --ids $ids` command above. An offline `python -` aggregate
+pass joined those receipts to the frozen split CSV, computed per-type counts,
+grounding fractions, set Jaccards and operational means, and saved only
+split/type aggregates in `comparison.json`. It made no provider calls and
+exposed no individual holdout outputs.
+
+DEV counts and grounding — **provisional (GPT)** (mentions / unique canonicals;
+thirty clauses), from those low/high commands and aggregate pass:
+
+| Type — provisional (GPT) | Low mentions / unique | High mentions / unique | Low grounding rejected / attempted | High grounding rejected / attempted |
+|---|---:|---:|---:|---:|
+| biological_effects | 6 / 2 | 7 / 2 | 0 / 13 (0%) | 0 / 12 (0%) |
+| chemicals | 7 / 6 | 9 / 8 | 0 / 8 (0%) | 0 / 9 (0%) |
+| device_types | 27 / 25 | 30 / 28 | 1 / 32 (3.13%) | 0 / 30 (0%) |
+| regulatory_actors | 28 / 8 | 31 / 8 | 1 / 40 (2.50%) | 0 / 44 (0%) |
+| lifecycle_phases | 39 / 10 | 51 / 10 | 3 / 66 (4.55%) | 0 / 76 (0%) |
+
+Holdout **aggregates only**, **provisional (GPT)**, from the same low/high
+commands and aggregate pass (twenty clauses; no individual ids, names, mentions,
+text, evidence or per-clause scores were displayed or inspected):
+
+| Type — provisional (GPT) | Low mentions / unique | High mentions / unique | Low grounding rejected / attempted | High grounding rejected / attempted |
+|---|---:|---:|---:|---:|
+| biological_effects | 14 / 14 | 15 / 14 | 0 / 17 (0%) | 0 / 18 (0%) |
+| chemicals | 17 / 15 | 22 / 19 | 0 / 17 (0%) | 0 / 22 (0%) |
+| device_types | 25 / 24 | 28 / 27 | 0 / 28 (0%) | 1 / 30 (3.33%) |
+| regulatory_actors | 17 / 7 | 22 / 7 | 1 / 24 (4.17%) | 0 / 28 (0%) |
+| lifecycle_phases | 23 / 12 | 33 / 13 | 2 / 36 (5.56%) | 0 / 47 (0%) |
+
+Canonical-set agreement — **provisional (GPT)**, from the same low/high
+commands and aggregate pass. Per-clause Jaccard uses sets of `(type, canonical)` after the unchanged
+normaliser. Two empty sets score one. Only aggregate means/minima are exposed:
+
+| Scope — provisional (GPT) | DEV mean | DEV minimum | Holdout mean | Holdout minimum |
+|---|---:|---:|---:|---:|
+| All five types together | 0.6498 | 0 | 0.7165 | 0.25 |
+| biological_effects | 0.9667 | 0 | 0.9429 | 0 |
+| chemicals | 0.9667 | 0 | 0.9433 | 0 |
+| device_types | 0.7867 | 0 | 0.8054 | 0 |
+| regulatory_actors | 0.8194 | 0 | 0.7375 | 0 |
+| lifecycle_phases | 0.6683 | 0 | 0.5717 | 0 |
+
+Operational means — **provisional (GPT)**, from the same low/high commands and
+aggregate pass. Per-clause operational means include every attempt, including truncation
+retries. Response latency sums all request latencies for a clause, excluding
+limiter/queue time; it is different from amortized pipeline wall time.
+Reasoning tokens are already included in output tokens.
+
+| Split / effort — provisional (GPT) | Input / clause | Output / clause | Reasoning / clause | Response seconds / clause | USD / clause | Calls | Budget retries |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DEV low | 1,795.47 | 728.70 | 507.73 | 7.03 | 0.002097 | 30 | 0 |
+| DEV high | 2,134.20 | 10,086.00 | 9,895.47 | 73.40 | 0.022776 | 35 | 5 |
+| Holdout low, aggregate | 1,828.70 | 830.85 | 585.60 | 7.96 | 0.002331 | 20 | 0 |
+| Holdout high, aggregate | 2,517.35 | 12,952.70 | 12,734.40 | 93.37 | 0.029188 | 27 | 7 |
+
+**provisional (GPT)**, from those low/high commands: error rows and schema errors/retries are **zero** for both
+efforts in both splits. High effort made **62** calls: **50** end-turn stops
+and **12** max-token stops, all recovered by the existing doubled-budget retry.
+The existing Azure mapping reserves **12,000** combined tokens initially and
+**24,000** on that retry for high effort; these budgets were not retuned.
+High totals: **114,373 / 561,634 / 551,552** input/output/reasoning tokens;
+**86,272** cached prompt tokens; **2,431.87 seconds** pipeline wall time;
+estimated **$1.267047**. High retained **248** mentions and produced **229**
+alias-review rows. Its only grounding rejection was one device mention out of
+the **60** attempted device entities. No high-effort entities were merged into
+the graph.
+
+**no accuracy claim until the hand gold (S4b) exists**. Differences in counts,
+grounding and canonical-set agreement do not identify a winner. Holdout outputs
+remain sealed; this report contains only their aggregate numbers.
+
+### Phase 5 — provisional (GPT) merge and graph
+
+Producing merge command — **provisional (GPT)**:
+`python tasks.py enrich --ner data/runs/azure_openai/s4/phase2/ner.json --output data/runs/azure_openai/s4/phase2/enriched.json`.
+The unchanged default source is **regex weak labels**, `data/weak_labels.json`;
+it covers every corpus id without missing/unknown ids. **provisional (GPT)** merged
+label counts: SHALL **481**, SHOULD **244**, MAY **34**, NONE **384**. LegalBERT
+predictions were not selected; the S5b decision is unchanged. The enriched
+contract is unchanged and provenance is a sibling JSON sidecar with source and
+output hashes. The default `data/enriched.json` is untouched.
+
+Producing graph command for every graph count and check — **provisional (GPT)**.
+Graph entrypoint `graph.build_graph.main` ran with the following arguments,
+equivalent to this CLI command (stdout and counters were captured locally):
+`python tasks.py graph --load --input data/runs/azure_openai/s4/phase2/enriched.json --checks --verify-idempotent`.
+`--from-clauses` is deliberately absent because that flag strips entities.
+Graph work overlapped the independent high-effort comparison and uses only the
+completed Phase 2 low-effort entities. Receipts are in the Phase 2 directory:
+`graph_receipt.json`, `graph_checks.txt`, `enriched.provenance.json`.
+
+| Nodes — provisional (GPT) | Count |
+|---|---:|
+| Module | 1 |
+| Standard | 102 |
+| Clause | 1,143 |
+| LifecyclePhase | 13 |
+| RegulatoryAuthority | 5 |
+| Chemical | 183 |
+| BiologicalEffect | 18 |
+| DeviceType | 702 |
+| RegulatoryActor | 11 |
+| Total | 2,178 |
+
+| Relationships — provisional (GPT) | Count |
+|---|---:|
+| BELONGS_TO | 1,153 |
+| MENTIONS | 4,143 |
+| REGULATED_BY | 10 |
+| REFERENCES | 198 |
+| Total | 5,504 |
+
+**provisional (GPT)**, from the graph command above: **92** referenced-standard stubs; initial load created
+**1,019** nodes and **4,341** relationships. Reload created **zero** nodes and
+**zero** relationships. No graph check failed.
+
+| Check — provisional (GPT) | provisional (GPT) result | Status |
+|---|---|---|
+| 1 Counts by label/type | Exact plan match; no unexplained gaps | PASS |
+| 2 Orphan clauses | 0 | PASS |
+| 3 Standards without Module, except stubs | 0 non-stubs | PASS |
+| 4 Clauses without MENTIONS | 100 / 1,143 = 8.75%, below 10% threshold | PASS |
+| 5 Never-mentioned entities | 0 | PASS |
+| 6 Entity degree distribution | RegulatoryActor max 384; LifecyclePhase max 316; threshold 200 | WARN |
+| 7 Name collisions and singleton share | 0 collisions; singleton shares below | PASS |
+| 8 Empty text or null number | 0 | PASS |
+| 9 Duplicate MENTIONS | 0 | PASS |
+| 10 Self references | 0 | PASS |
+| 11 Orphan LifecyclePhase | 0 | PASS |
+| 12 Uniqueness constraints | All 9 present | PASS |
+| 13 Idempotent reload | 0 nodes and 0 relationships created | PASS |
+
+| Entity label — provisional (GPT) | Degree p50 | Degree p90 | Maximum | Singleton share |
+|---|---:|---:|---:|---:|
+| BiologicalEffect | 8 | 18.5 | 91 | 0% |
+| Chemical | 1 | 2 | 77 | 78.69% |
+| DeviceType | 1 | 2 | 86 | 85.61% |
+| RegulatoryActor | 30 | 247 | 384 | 0% |
+| LifecyclePhase | 68 | 246.6 | 316 | 0% |
+
+Known limitations — **provisional (GPT)**; producing commands are the merge
+and graph commands above:
+
+- **provisional (GPT)**, graph command above: **DeviceType singleton share: 85.61%**, requiring hand review of specificity
+  and aliases. Chemical singleton share is **78.69%**.
+- **provisional (GPT)**, graph command above: **Degree WARN (check #6)**: RegulatoryActor maximum **384** and LifecyclePhase
+  maximum **316**, against the **200** threshold. Stop-entity review is pending.
+- **provisional (GPT)**, merge command above: **obligation labels = regex weak labels (LegalBERT pending S5b)**, loaded from
+  `data/weak_labels.json`. This graph does not establish LegalBERT performance.
+
+No entity, alias, graph rule or threshold was changed to remove a warning.
+Graph audits expose aggregate values, never individual holdout entity rows or
+holdout-derived named frequencies. Counts are structural checks, not accuracy.
+
+### Final S4 audit
+
+All S4 run measurements in this section remain **provisional (GPT)**. Producing
+commands: the Phase 1 fixed-id `python tasks.py ner --ids ...`, Phase 2
+`python tasks.py ner`, the repeated cache-only command, and Phase 3 high-effort
+`python tasks.py ner --ids $ids`; totals sum their recorded usage and wall times.
+Total
+metered calls across both efforts: **1,205**; estimated cost **$3.742153**;
+input/output/reasoning tokens **2,225,125 / 1,422,838 / 1,164,288**; cached prompt
+tokens **1,812,736**. Reasoning is included in output, not billed twice.
+Sum of extraction pipeline wall times: **8,595.44 seconds** (**143.26 minutes**),
+plus **92.16 seconds** for the cache-only verification. Tests/reporting are
+excluded; graph work overlapped the high-effort run. Azure subscription billing
+is unverified; the conservative published-rate estimate omits cache discounts.
+Total HTTP 429 count: **zero**.
+
+| Stop condition — provisional (GPT) | Observed | Result |
+|---|---|---|
+| Phase 1 grounding rejection >15% for any type | 0% in every type | PASS |
+| Full-run error rows >5% | 0 / 1,143 | PASS |
+| Estimated cost >$8 | $3.742153 cumulative; admission and full-run projection guards active | PASS |
+
+Test counts — **provisional (GPT)** run validation; producing command:
+`python tasks.py test` after each completed phase. All passed. The
+annotation materials and graph work were completed while independent live work
+continued, so their validation preceded the final high-effort validation.
+
+| Phase — provisional (GPT) | Status | Passing tests at phase validation |
+|---|---|---:|
+| 0 Freeze | Done | 328 |
+| 1 Live check | Done | 332 |
+| 2 Full low + cache verification | Done | 338 |
+| 3 High comparison | Done | 339 |
+| 4 Blind pack / scorer | Done; no corpus scoring | 338 |
+| 5 Merge / graph | Done; degree warning retained | 338 |
+| Final code and metadata guard | Done | 339 (12 MCP + 1 summary + 326 root) |
+
+An initial sandbox test attempt could not access pytest temporary directories;
+the suite passed with normal temporary-file access. `git diff --check` passes.
+No prompt, schema, check, normaliser, alias-table content, standard-reference
+rule, parser, clause or pre-existing gold file was modified. The annotation
+sheet was reverified as fifty rows with all type/notes cells empty
+(**provisional (GPT)** run metadata, offline CSV validation); digest command:
+`Get-FileHash data/gold/entity_annotation_sheet.csv -Algorithm SHA256`. Its SHA-256
+is `e1b272d0727aaade3bc3e4e5df16a95f80ee135b5c2779e0df0c630ff9526b7f`.
+
+Corpus integrity — **provisional (GPT)** run; command:
+`Get-FileHash data/clauses.json -Algorithm SHA256`.
+`data/clauses.json` SHA-256 **at both start and end**:
+`c517fcee4f89967ad62d49a42a8efe0d0ffd76df91ae1e88a2516f2b8b3c585d`.
+The frozen eval-id SHA-256 is unchanged from Phase 0.
+
+File-by-file changes:
+
+| File — provisional (GPT) run | Change |
+|---|---|
+| `goldset/entity_gold_ids.csv` | Frozen ids/strata/splits only; no corpus text |
+| `goldset/sample_entities.py` | Reproducible source/length sampling, exclusions, split, overwrite refusal |
+| `goldset/ENTITY_GUIDELINE_v1.md` | One-page blind guideline; only synthetic prompt examples |
+| `goldset/score_entities.py` | Typed-span/canonical scorer and seeded clause bootstrap; completed-gold guard |
+| `tests/test_score_entities.py` | Known-answer synthetic metric and bootstrap tests |
+| `ner/extract.py` | Provider cache identity, high-effort path, dotenv entrypoint, bounded batches/checkpoints, pacing hooks, request/retry/token/time reporting, retained-mention review percentages, Azure cost estimate, response provenance on error rows |
+| `ner/live_controls.py` | Azure-only rolling token/request limits, Retry-After handling, persistent call/cost ledger, cumulative/projected cost and full-corpus error guards |
+| `llm/azure_openai.py` | Preserve response reasoning-token and cached-input counters |
+| `ner/merge.py` | Explicit NER/output paths, provider-directory guard, provenance/hash sidecar; unchanged weak-label default |
+| `tests/test_entity_run.py` | Freeze, cache/provider/effort separation, pacing/cost/error/retry guards, merge paths/source and terminal-error response-version tests |
+| `docs/results.md` | This provisional report, commands, metrics, warnings and audit |
+
+DESIGN CONFLICTS: no new extraction, schema, graph or metric-contract change.
+C-GPT remains provisional and Claude remains the default/final headline. The
+reporting restriction is explicit: full-corpus named top-canonical frequencies
+were rejected by automatic approval review to protect holdout outputs; the
+safe named review uses non-holdout clauses only. No review/alias decision was
+made from holdout output. The existing run-dependent proposal count on cache
+rerun is reported above; entity JSON is byte-identical.
+
+All run receipts/caches, the blind annotation sheet and enriched output remain
+ignored under `data/`. The approved commits contain only the frozen-id and
+annotation/scorer files, the listed run fixes/tests, and this report in separate
+commits. No `data/`, `.env`, PDF or model artifact is included. No push.
