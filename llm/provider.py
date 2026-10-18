@@ -22,11 +22,14 @@ def live_configured():
 
 
 def make_client(role, *, effort='low', mode='structured'):
-    if role not in {'S4', 'S10'}:
-        raise ValueError('role must be S4 or S10')
+    if role not in {'S4', 'S10', 's8_cypher'}:
+        raise ValueError('role must be S4, S10 or s8_cypher')
     if provider_name() == 'azure_openai':
         from .azure_openai import AzureOpenAIAdapter
         return AzureOpenAIAdapter(role, mode=mode)
+    if role == 's8_cypher':
+        from .cypher import AnthropicCypherClient
+        return AnthropicCypherClient()
     if role == 'S4':
         from ner.client import AnthropicClient
         return AnthropicClient(effort=effort, mode=mode)
@@ -38,9 +41,13 @@ def provenance(client, response_model=None):
     provider = getattr(client, 'provider', None)
     if provider is None:  # Recorded fixtures retain their existing contracts.
         return {}
-    return dict(provider=provider, model=client.model,
+    details = dict(provider=provider, model=client.model,
                 model_version=response_model, provisional=provider != 'anthropic',
                 reasoning_effort=getattr(client, 'effort', 'low'))
+    if getattr(client, 'role', None) == 's8_cypher':
+        details.update(role=client.role, requested_model=client.model,
+                       response_model=response_model, effort=client.effort)
+    return details
 
 
 def save_record(role, record, *, root=None):

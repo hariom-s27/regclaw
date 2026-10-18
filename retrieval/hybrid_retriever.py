@@ -24,35 +24,39 @@ Postgres table: clause_embeddings(clause_id text primary key, embedding vector(1
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import logging
 import os
 import re
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
 # Preserve the documented direct-script entry point for the shared tracer.
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from observability.tracing import stage, traced, record_response
+from observability.tracing import stage, traced
+from llm.provider import make_client, provenance
+from llm.cypher import request as cypher_request, parse_output
+from retrieval.cypher_cache import JsonlCache, cache_path, generation_key, sha
+from retrieval.query_embeddings import QueryEmbeddings, check_identity
+from retrieval.setup import FULLTEXT_INDEX
 
 load_dotenv()
 log = logging.getLogger("hybrid")
 logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(levelname)s %(message)s")
 
-HAIKU = os.getenv("CYPHER_MODEL", "claude-haiku-4-5")
 EMBED_MODEL = "text-embedding-3-small"
 PG_TABLE = os.getenv("PG_TABLE", "clause_embeddings")
-FULLTEXT_INDEX = "clause_text_ft"
 
 # --------------------------------------------------------------------------------------
 # Stage 1 helpers: schema, prompt, validation
 # --------------------------------------------------------------------------------------
 SCHEMA_FALLBACK = """Node labels and properties:
-  Clause {id: STRING, number: STRING, title: STRING, text: STRING, obligation: STRING  // one of 'SHALL','SHOULD','MAY'}
+  Clause {id: STRING, number: STRING, title: STRING, text: STRING, obligation: STRING}
   Standard {id: STRING, number: STRING, title: STRING}
   Module {name: STRING}
   LifecyclePhase {name: STRING}
@@ -68,8 +72,27 @@ Relationship patterns:
   (:Clause)-[:MENTIONS]->(:BiologicalEffect)
   (:Clause)-[:MENTIONS]->(:DeviceType)
   (:Clause)-[:MENTIONS]->(:RegulatoryActor)
+  (:Clause)-[:MENTIONS]->(:LifecyclePhase)
   (:Clause)-[:REFERENCES]->(:Standard)
   (:Standard)-[:REGULATED_BY]->(:RegulatoryAuthority)"""
+
+
+def canonical_schema(schema):
+    """Canonicalise the documented nodes, properties, obligations and patterns."""
+    nodes = []
+    for label, properties in re.findall(r'^\s{2}(\w+) \{([^}]+)\}', schema, re.M):
+        nodes.append((label, ', '.join(sorted(p.strip() for p in properties.split(',')))))
+    patterns = sorted(set(re.findall(r'\(:\w+\)-\[:\w+\]->\(:\w+\)', schema)))
+    values = re.search(r'Clause.obligation values: (\[[^\n]+\])', schema)
+    obligations = sorted(ast.literal_eval(values[1])) if values else sorted(['SHALL', 'SHOULD', 'MAY', 'NONE'])
+    lines = ['Node labels and properties:']
+    lines += [f'  {label} {{{props}}}' for label, props in sorted(nodes)]
+    lines += [f'  // Clause.obligation values: {obligations}', 'Relationship patterns (direction matters):']
+    lines += ['  ' + pattern for pattern in patterns]
+    return '\n'.join(lines)
+
+
+SCHEMA_FALLBACK = canonical_schema(SCHEMA_FALLBACK)
 
 
 def introspect_schema(driver, database: str = "neo4j") -> str:
@@ -86,11 +109,11 @@ def introspect_schema(driver, database: str = "neo4j") -> str:
         obl, _, _ = driver.execute_query(
             "MATCH (c:Clause) RETURN collect(DISTINCT c.obligation) AS v", database_=database, routing_="r")
         lines = ["Node labels and properties:"]
-        lines += [f"  {r['label']} {{{', '.join(r['keys'])}}}" for r in props]
-        lines.append(f"  // Clause.obligation values: {obl[0]['v']}")
+        lines += [f"  {r['label']} {{{', '.join(sorted(r['keys']))}}}" for r in props]
+        lines.append(f"  // Clause.obligation values: {sorted(obl[0]['v'])}")
         lines.append("Relationship patterns (direction matters):")
         lines += [f"  (:{r['s']})-[:{r['t']}]->(:{r['e']})" for r in pats]
-        return "\n".join(lines)
+        return canonical_schema("\n".join(lines))
     except Exception as e:  # graph not reachable yet -> use the documented schema
         log.warning("schema introspection failed (%s); using fallback", e)
         return SCHEMA_FALLBACK
@@ -102,6 +125,7 @@ is cheap and missing a relevant clause is expensive.
 
 SCHEMA (use only these labels, relationship types, properties and directions):
 {schema}
+The value 'other' on RegulatoryActor / LifecyclePhase / BiologicalEffect is a catch-all; filtering on it is not selective.
 
 HARD RULES
 1. Return exactly one column: `RETURN DISTINCT c.id AS clause_id` where c is a :Clause.
@@ -120,35 +144,36 @@ EXAMPLES
 {examples}"""
 
 FEW_SHOTS = [
-    {"q": "mandatory requirements for biological evaluation",
+    {"q": "mandatory requirements for genotoxicity assessment",
      "cypher": "MATCH (c:Clause) WHERE c.obligation = $ob AND (toLower(c.text) CONTAINS $t1 OR toLower(c.title) CONTAINS $t1) RETURN DISTINCT c.id AS clause_id",
-     "params": {"ob": "SHALL", "t1": "biological evaluation"}},
-    {"q": "ethylene oxide sterilization residuals",
+     "params": [{"name": "ob", "value": "SHALL"}, {"name": "t1", "value": "genotoxicity"}]},
+    {"q": "nickel release from nitinol devices",
      "cypher": "MATCH (c:Clause) WHERE EXISTS { (c)-[:MENTIONS]->(ch:Chemical) WHERE toLower(ch.name) CONTAINS $a OR toLower(ch.name) CONTAINS $b OR toLower(ch.name) CONTAINS $c2 } OR toLower(c.text) CONTAINS $d RETURN DISTINCT c.id AS clause_id",
-     "params": {"a": "ethylene oxide", "b": "ethylene chlorohydrin", "c2": "eo", "d": "residual"}},
-    {"q": "knee implant biocompatibility tests",
+     "params": [{"name": "a", "value": "nickel"}, {"name": "b", "value": "nickel titanium alloy"}, {"name": "c2", "value": "nitinol"}, {"name": "d", "value": "release"}]},
+    {"q": "hemocompatibility testing for blood-contacting catheters",
      "cypher": "MATCH (c:Clause) WHERE EXISTS { (c)-[:MENTIONS]->(d:DeviceType) WHERE toLower(d.name) CONTAINS $a OR toLower(d.name) CONTAINS $b } OR EXISTS { (c)-[:MENTIONS]->(e:BiologicalEffect) WHERE toLower(e.name) CONTAINS $c2 } RETURN DISTINCT c.id AS clause_id",
-     "params": {"a": "implant", "b": "orthopaedic", "c2": "implantation"}},
+     "params": [{"name": "a", "value": "catheter"}, {"name": "b", "value": "blood"}, {"name": "c2", "value": "hemocompatibility"}]},
     {"q": "which clauses of the cytotoxicity standard are recommendations only",
      "cypher": "MATCH (c:Clause)-[:BELONGS_TO]->(s:Standard) WHERE c.obligation = $ob AND (toLower(s.title) CONTAINS $t OR s.number CONTAINS $n) RETURN DISTINCT c.id AS clause_id",
-     "params": {"ob": "SHOULD", "t": "cytotoxicity", "n": "10993-5"}},
+     "params": [{"name": "ob", "value": "SHOULD"}, {"name": "t", "value": "cytotoxicity"}, {"name": "n", "value": "10993-5"}]},
     {"q": "clauses that point to the chemical characterization standard",
      "cypher": "MATCH (c:Clause)-[:REFERENCES]->(s:Standard) WHERE s.number CONTAINS $n OR toLower(s.title) CONTAINS $t RETURN DISTINCT c.id AS clause_id",
-     "params": {"n": "10993-18", "t": "chemical characterization"}},
+     "params": [{"name": "n", "value": "10993-18"}, {"name": "t", "value": "chemical characterization"}]},
 ]
 
-CYPHER_TOOL = {
-    "name": "emit_cypher",
-    "description": "Return the read-only Cypher filter query and its parameters.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "cypher": {"type": "string", "description": "One Cypher statement returning `clause_id`."},
-            "params": {"type": "object", "description": "Parameter values referenced as $name in the query."},
-        },
-        "required": ["cypher", "params"],
-    },
-}
+def render_fewshots():
+    return '\n'.join(
+        f"Q: {e['q']}\nCYPHER: {e['cypher']}\nPARAMS: {json.dumps(e['params'], ensure_ascii=False, sort_keys=True)}\n"
+        for e in FEW_SHOTS)
+
+
+def render_prompt(schema):
+    return SYSTEM_PROMPT.format(schema=canonical_schema(schema), examples=render_fewshots(), ft=FULLTEXT_INDEX)
+
+
+def prompt_hashes(schema):
+    return dict(prompt_template_sha=sha(SYSTEM_PROMPT), fewshot_sha=sha(render_fewshots()),
+                rendered_prompt_sha=sha(render_prompt(schema)), schema_sha=sha(canonical_schema(schema)))
 
 WRITE_PATTERN = re.compile(
     r"\b(CREATE|MERGE|SET|DELETE|DETACH|REMOVE|DROP|FOREACH|LOAD\s+CSV|IN\s+TRANSACTIONS|"
@@ -162,6 +187,14 @@ RELTYPE_PATTERN = re.compile(r"\[\s*\w*\s*:\s*`?([A-Za-z_]\w*)")
 
 class CypherRejected(ValueError):
     pass
+
+
+class CypherGenerationError(RuntimeError):
+    """Terminal stop guard: a refusal or exhausted truncation is an error."""
+
+
+def has_obligation_filter(query):
+    return bool(re.search(r'\.\s*`?obligation`?\b', _strip_comments_and_strings(query), re.I))
 
 
 def _strip_comments_and_strings(q: str) -> str:
@@ -229,64 +262,108 @@ class RunLog:
     max_score: float | None = None
     neighbours_added: int = 0
     ms: dict = field(default_factory=dict)
+    stage1_candidate_ids: list = field(default_factory=list)
+    candidate_count: int = 0
+    fallback_path: str = 'text2cypher'
+    cache_key: dict = field(default_factory=dict)
+    obligation_filter: bool = False
+    stage2_ranked: list = field(default_factory=list)
+    stage3_added: list = field(default_factory=list)
+    stage3_skipped_no_vector: int = 0
+    final_ids: list = field(default_factory=list)
+    query_embedding_key: str = ''
+    embedding_provider: str = ''
+    embedding_model: str = ''
+    generations: list = field(default_factory=list)
+    qid: str | None = None
+    variant: str = 'a'
+    gen_index: int = 0
+
+    def to_dict(self):
+        return asdict(self)
 
 
 # --------------------------------------------------------------------------------------
 # Retriever
 # --------------------------------------------------------------------------------------
 class HybridRetriever:
-    def __init__(self, database: str = "neo4j", cypher_timeout_s: float = 5.0, max_retries: int = 2):
-        import anthropic
-        import psycopg
-        from neo4j import GraphDatabase
-        from openai import OpenAI
-        from pgvector.psycopg import register_vector
-
+    def __init__(self, database: str = "neo4j", cypher_timeout_s: float = 5.0, max_retries: int = 2,
+                 *, cache_file=None, run_family=None, fresh=False,
+                 manifest_path=None, driver=None, pg=None, llm=None, embedder=None):
         self.db = database
         self.timeout = cypher_timeout_s
         self.max_retries = max_retries
-        self.driver = GraphDatabase.driver(os.environ["NEO4J_URI"],
-                                           auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]))
-        self.pg = psycopg.connect(os.environ["PG_DSN"], autocommit=True)
-        register_vector(self.pg)
-        self.llm = anthropic.Anthropic()
-        self.oai = OpenAI()
+        if driver is None:
+            from neo4j import GraphDatabase
+            driver = GraphDatabase.driver(os.environ['NEO4J_URI'],
+                         auth=(os.environ['NEO4J_USER'], os.environ['NEO4J_PASSWORD']))
+        self.driver = driver
+        if pg is None:
+            import psycopg
+            from pgvector.psycopg import register_vector
+            pg = psycopg.connect(os.environ['PG_DSN'], autocommit=True)
+            self.pg = pg
+            register_vector(self.pg)
+        self.pg = pg
+        self.llm = llm if llm is not None else make_client('s8_cypher')
+        self.fresh = fresh
+        self.cypher_cache = JsonlCache(cache_file or cache_path(self.llm.provider, run_family))
+        self.query_embeddings = QueryEmbeddings(self.cypher_cache.path.with_name('query_embedding_cache.jsonl'), embedder)
+        self.manifest_path = Path(manifest_path) if manifest_path else Path(__file__).resolve().parents[1] / 'data/embed_manifest.json'
+        self.embedding_identity = check_identity(self.query_embeddings.embedder, self.manifest_path, self.pg, PG_TABLE)
         self.schema = introspect_schema(self.driver, database)
         self.labels = set(re.findall(r"^\s{2}(\w+) \{", self.schema, re.M)) or {
             "Clause", "Standard", "Module", "LifecyclePhase", "RegulatoryAuthority",
             "Chemical", "BiologicalEffect", "DeviceType", "RegulatoryActor"}
         self.rels = set(re.findall(r"\[:(\w+)\]", self.schema)) or {"BELONGS_TO", "MENTIONS", "REGULATED_BY", "REFERENCES"}
-        self._ensure_fulltext_index()
 
     def close(self):
         self.driver.close()
         self.pg.close()
 
-    # ---------- setup ----------
-    def _ensure_fulltext_index(self):
-        # One-off schema write done by the app at startup, NOT by the LLM path.
-        self.driver.execute_query(
-            f"CREATE FULLTEXT INDEX {FULLTEXT_INDEX} IF NOT EXISTS FOR (c:Clause) ON EACH [c.title, c.text]",
-            database_=self.db)
-
     # ---------- Stage 1 ----------
-    def _generate_cypher(self, question: str, feedback: str | None, prev: str | None) -> tuple[str, dict]:
-        examples = "\n".join(
-            f"Q: {e['q']}\nCYPHER: {e['cypher']}\nPARAMS: {json.dumps(e['params'])}\n" for e in FEW_SHOTS)
+    def _generate_cypher(self, question: str, feedback: str | None, prev: str | None,
+                         *, run=None, records=None) -> tuple[str, dict]:
+        run = run if run is not None else RunLog(query=question, attempts=1)
+        key = generation_key(question, qid=run.qid, variant=run.variant, gen_index=run.gen_index,
+                             hashes=prompt_hashes(self.schema), provider=self.llm.provider,
+                             requested_model=self.llm.model, effort=self.llm.effort,
+                             attempt_no=run.attempts, feedback=feedback, prev=prev)
+        run.cache_key = key
+        cached = None if self.fresh else self.cypher_cache.find(key)
+        if cached is not None:
+            run.generations.append({**cached['provenance'], 'cache_hit': True})
+            return cached['cypher'], dict(cached['params'])
         msgs = [{"role": "user", "content": f"Question: {question}"}]
         if feedback:
             msgs.append({"role": "assistant", "content": f"Previous attempt:\n{prev}"})
             msgs.append({"role": "user", "content":
                          f"That query failed: {feedback}\nFix it. Follow every HARD RULE. Question: {question}"})
-        with stage('cypher.generate', as_type='generation', model=HAIKU) as observation:
-            resp = self.llm.messages.create(
-                model=HAIKU, max_tokens=800, temperature=0,
-                system=SYSTEM_PROMPT.format(schema=self.schema, examples=examples, ft=FULLTEXT_INDEX),
-                tools=[CYPHER_TOOL], tool_choice={"type": "tool", "name": "emit_cypher"},
-                messages=msgs)
-            record_response(observation, resp)
-        block = next(b for b in resp.content if b.type == "tool_use")
-        return block.input["cypher"], dict(block.input.get("params") or {})
+        for budget in (800, 1600):
+            row = dict(**key, key=key, cypher=None, params={}, reusable=False,
+                       response_model=None, provenance=provenance(self.llm),
+                       validator_outcome='generation_error', fallback_path='text2cypher', max_tokens=budget)
+            try:
+                result = self.llm.generate(cypher_request(render_prompt(self.schema), msgs, max_tokens=budget))
+                row['provenance'] = result['provenance']
+                row['response_model'] = result['provenance'].get('response_model')
+                run.generations.append({**result['provenance'], 'cache_hit': False})
+                stop = result['stop_reason']
+                row['validator_outcome'] = stop
+                if stop == 'max_tokens':
+                    if budget == 800:
+                        continue
+                    raise CypherGenerationError('Text2Cypher truncated after one larger-budget retry')
+                if stop != 'end_turn':
+                    raise CypherGenerationError(f'Text2Cypher stop guard: {stop}')
+                query, params = parse_output(result['data'])
+                row.update(cypher=query, params=params, reusable=True, validator_outcome='structured_valid')
+                return query, params
+            finally:
+                if records is None:
+                    self.cypher_cache.append(row)
+                else:
+                    records.append(row)
 
     def _explain_is_read_only(self, q: str, params: dict):
         # EXPLAIN plans without executing; summary.query_type: 'r' | 'rw' | 'w' | 's'
@@ -303,13 +380,30 @@ class HybridRetriever:
             return s.execute_read(work)
 
     def stage1_filter(self, question: str, run: RunLog, inject_limit: int | None) -> list[str]:
+        records = []
+        try:
+            ids = self._stage1_filter(question, run, inject_limit, records)
+            run.stage1_candidate_ids = list(ids)
+            run.candidates = run.candidate_count = len(ids)
+            return ids
+        finally:
+            run.fallback_path = run.filter_path
+            run.obligation_filter = has_obligation_filter(run.cypher)
+            for row in records:
+                row['fallback_path'] = run.fallback_path
+                self.cypher_cache.append(row)
+
+    def _stage1_filter(self, question, run, inject_limit, records):
         feedback = prev = None
         for attempt in range(1, self.max_retries + 2):
             run.attempts = attempt
             try:
-                q, params = self._generate_cypher(question, feedback, prev)
+                start = len(records)
+                q, params = self._generate_cypher(question, feedback, prev, run=run, records=records)
                 prev = q
                 q, warns = validate_cypher(q, self.labels, self.rels)
+                if len(records) > start:
+                    records[-1]['validator_outcome'] = 'accepted'
                 run.warnings += warns
                 if inject_limit:  # reproduce the original internship bug on purpose
                     q = f"{q} LIMIT {int(inject_limit)}"
@@ -320,34 +414,47 @@ class HybridRetriever:
                 if ids:
                     return list(dict.fromkeys(ids))
                 feedback = "it ran but returned 0 rows; broaden it (synonyms, OR across labels, full-text fallback)"
+            except CypherGenerationError:
+                raise
             except Exception as e:  # syntax error, rejected, timeout -> feed error back
+                if len(records) > start:
+                    records[-1]['validator_outcome'] = type(e).__name__
                 feedback = f"{type(e).__name__}: {e}"
                 run.warnings.append(f"attempt {attempt}: {feedback[:200]}")
         # Fallback 1: Lucene full-text over clause title+text (case-insensitive by default analyzer)
         run.filter_path = "fulltext_fallback"
         lucene = " OR ".join(re.findall(r"[A-Za-z0-9-]{3,}", question)) or question
-        recs, _, _ = self.driver.execute_query(
-            f"CALL db.index.fulltext.queryNodes('{FULLTEXT_INDEX}', $q) YIELD node, score "
-            "RETURN node.id AS clause_id", {"q": lucene}, database_=self.db, routing_="r")
-        ids = [r["clause_id"] for r in recs]
+        run.cypher = (f"CALL db.index.fulltext.queryNodes('{FULLTEXT_INDEX}', $q) YIELD node, score "
+                      "RETURN node.id AS clause_id")
+        run.params = {'q': lucene}
+        try:
+            recs, _, _ = self.driver.execute_query(run.cypher, run.params, database_=self.db, routing_='r')
+            ids = [r['clause_id'] for r in recs]
+        except Exception as exc:
+            message = f'full-text fallback failed ({type(exc).__name__}); continuing to all clauses'
+            log.warning(message)
+            run.warnings.append(message)
+            ids = []
         if ids:
             return ids
         # Fallback 2: no filter at all — stage 2 ranks all ~1.15k vectors exactly (still cheap)
         run.filter_path = "all_clauses"
-        recs, _, _ = self.driver.execute_query("MATCH (c:Clause) RETURN c.id AS clause_id",
+        run.cypher, run.params = 'MATCH (c:Clause) RETURN c.id AS clause_id', {}
+        recs, _, _ = self.driver.execute_query(run.cypher,
                                                database_=self.db, routing_="r")
         return [r["clause_id"] for r in recs]
 
     # ---------- Stage 2 ----------
     def embed(self, text: str):
         from pgvector import Vector
-        return Vector(self.oai.embeddings.create(model=EMBED_MODEL, input=text).data[0].embedding)
+        vector, self.query_embedding_key = self.query_embeddings.get(text)
+        return Vector(vector)
 
     def stage2_rank(self, qvec, ids: list[str], top_k: int) -> list[Hit]:
         # Exact scan over the candidate set: no ANN index, so the ANY() filter can never silently drop rows.
         rows = self.pg.execute(
             f"SELECT clause_id, 1 - (embedding <=> %s) AS score FROM {PG_TABLE} "
-            f"WHERE clause_id = ANY(%s) ORDER BY embedding <=> %s LIMIT %s",
+            f"WHERE clause_id = ANY(%s) AND embedding IS NOT NULL ORDER BY embedding <=> %s, clause_id LIMIT %s",
             (qvec, ids, qvec, top_k)).fetchall()
         return [Hit(clause_id=r[0], score=float(r[1])) for r in rows]
 
@@ -355,7 +462,7 @@ class HybridRetriever:
         if not ids:
             return {}
         rows = self.pg.execute(
-            f"SELECT clause_id, 1 - (embedding <=> %s) FROM {PG_TABLE} WHERE clause_id = ANY(%s)",
+            f"SELECT clause_id, 1 - (embedding <=> %s) FROM {PG_TABLE} WHERE clause_id = ANY(%s) AND embedding IS NOT NULL",
             (qvec, ids)).fetchall()
         return {r[0]: float(r[1]) for r in rows}
 
@@ -366,6 +473,7 @@ class HybridRetriever:
         type is needed. Neighbours are re-scored with real cosine and kept only if
         score >= rel_floor * seed_score — this is what stops flooding."""
         if not hits:
+            self.stage3_skipped_no_vector = 0
             return []
         seeds = [h.clause_id for h in hits]
         recs, _, _ = self.driver.execute_query(
@@ -391,11 +499,13 @@ class HybridRetriever:
         for r in recs:
             by_seed.setdefault(r["sid"], []).append((r["nid"], r["rel"]))
         scores = self.score_ids(qvec, list({nid for v in by_seed.values() for nid, _ in v}))
+        self.stage3_skipped_no_vector = len({nid for v in by_seed.values() for nid, _ in v
+                                            if nid not in scores and nid not in seeds})
         have = set(seeds)
         added: list[Hit] = []
         for h in hits:  # best seeds first
-            cands = sorted(((scores.get(nid, 0.0), nid, rel) for nid, rel in by_seed.get(h.clause_id, [])
-                            if nid not in have), reverse=True)
+            cands = sorted(((scores[nid], nid, rel) for nid, rel in by_seed.get(h.clause_id, [])
+                            if nid not in have and nid in scores), reverse=True)
             for sc, nid, rel in cands[:per_seed]:
                 if sc >= rel_floor * h.score and len(added) < total_cap:
                     added.append(Hit(clause_id=nid, score=sc, via=f"neighbour:{rel}:{h.clause_id}"))
@@ -419,8 +529,13 @@ class HybridRetriever:
     # ---------- orchestration ----------
     @traced('retriever', as_type='retriever')
     def retrieve(self, question: str, top_k: int = 10, inject_limit: int | None = None,
-                 per_seed: int = 2, neighbour_cap: int = 5, rel_floor: float = 0.85) -> tuple[list[Hit], RunLog]:
-        run = RunLog(query=question)
+                 per_seed: int = 2, neighbour_cap: int = 5, rel_floor: float = 0.85,
+                 *, qid=None, variant='a', gen_index=0) -> tuple[list[Hit], RunLog]:
+        # Fail closed before any generation or ranking, even for library callers.
+        self.embedding_identity = check_identity(self.query_embeddings.embedder, self.manifest_path, self.pg, PG_TABLE)
+        run = RunLog(query=question, qid=qid, variant=variant, gen_index=gen_index,
+                     embedding_provider=self.embedding_identity['provider'],
+                     embedding_model=self.embedding_identity['model'])
         t = time.perf_counter()
         with stage('neo4j.cypher') as observation:
             ids = self.stage1_filter(question, run, inject_limit)
@@ -430,14 +545,16 @@ class HybridRetriever:
         run.ms["stage1"] = round((time.perf_counter() - t) * 1000)
 
         t = time.perf_counter()
-        with stage('embed.query'):
+        with stage('embed.query', metadata={'provider': run.embedding_provider, 'model': run.embedding_model}):
             qvec = self.embed(question)
+        run.query_embedding_key = self.query_embedding_key
         with stage('pgvector.rank') as observation:
             ranked = self.stage2_rank(qvec, ids, top_k)
             if observation is not None:
                 observation.update(metadata={'rows': len(ranked), 'candidate_count': len(ids),
                                              'max_score': ranked[0].score if ranked else None})
         run.max_score = round(ranked[0].score, 4) if ranked else None
+        run.stage2_ranked = [(h.clause_id, h.score) for h in ranked]
         run.ms["stage2"] = round((time.perf_counter() - t) * 1000)
 
         t = time.perf_counter()
@@ -446,6 +563,8 @@ class HybridRetriever:
             if observation is not None:
                 observation.update(metadata={'expanded': len(neigh)})
         run.neighbours_added = len(neigh)
+        run.stage3_added = [(h.clause_id, h.score, h.via) for h in neigh]
+        run.stage3_skipped_no_vector = self.stage3_skipped_no_vector
         run.ms["stage3"] = round((time.perf_counter() - t) * 1000)
 
         t = time.perf_counter()
@@ -454,6 +573,7 @@ class HybridRetriever:
             if observation is not None:
                 observation.update(metadata={'rows': len(hits), 'docs': sorted({h.standard for h in hits})})
         run.ms["stage4"] = round((time.perf_counter() - t) * 1000)
+        run.final_ids = [h.clause_id for h in hits]
 
         log.info("query=%r path=%s candidates=%d max_score=%s neighbours=%d attempts=%d ms=%s warnings=%s",
                  question, run.filter_path, run.candidates, run.max_score, run.neighbours_added,
@@ -491,13 +611,24 @@ if __name__ == "__main__":
     ap.add_argument("--top-k", type=int, default=10)
     ap.add_argument("--inject-limit", type=int, default=None, help="append LIMIT N to reproduce the bug")
     ap.add_argument("--compare", action="store_true", help="run with LIMIT 10 injected, then fixed")
+    ap.add_argument('--fresh', action='store_true', help='append new Cypher generations instead of replaying')
+    ap.add_argument('--cache-path', type=Path, help='path to append-only cypher_cache.jsonl')
+    ap.add_argument('--run-family', help='cache family under data/runs/<provider>/s8/')
+    ap.add_argument('--manifest', type=Path, help='S7 embedding identity manifest')
+    ap.add_argument('--qid')
+    ap.add_argument('--variant', choices=['a', 'b', 'c'], default='a')
+    ap.add_argument('--generations', type=int, default=1, help='generate indices 0..N-1; metrics always use index 0')
     a = ap.parse_args()
-    r = HybridRetriever()
+    if a.generations < 1:
+        ap.error('--generations must be positive')
+    r = HybridRetriever(cache_file=a.cache_path, run_family=a.run_family, fresh=a.fresh, manifest_path=a.manifest)
     try:
         if a.compare:
             for lim in (10, None):
                 _print(*r.retrieve(a.query, a.top_k, inject_limit=lim))
         else:
-            _print(*r.retrieve(a.query, a.top_k, inject_limit=a.inject_limit))
+            for gen_index in range(a.generations):
+                _print(*r.retrieve(a.query, a.top_k, inject_limit=a.inject_limit,
+                                  qid=a.qid, variant=a.variant, gen_index=gen_index))
     finally:
         r.close()

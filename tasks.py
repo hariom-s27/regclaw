@@ -72,7 +72,7 @@ def main():
         options = sys.argv[2:] or ['--agreement', 'goldset/annotator_a_round1.csv',
                                   'goldset/annotator_b_round1.csv', '--output', 'data/gold/agreement.json']
         return agreement_main(options)
-    handlers = {'run-summary': 'observability.run_summary',
+    handlers = {'run-summary': 'observability.run_summary', 'retrieval-setup': 'retrieval.setup',
                 'structure-score': 'ingest.structure_gold', 'standards-demo': 'standards.demo',
                 'gold-score': 'goldset.score', 'enrich': 'ner.merge',
                 'graph': 'graph.build_graph', 'near-dups': 'graph.near_dups', 'embed': 'embed.embed',

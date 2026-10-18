@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 from types import SimpleNamespace as NS
+from uuid import uuid4
 
 import pytest
 
@@ -82,7 +83,7 @@ class Cursor:
         raise AssertionError('tracing measured cursor')
 
 
-def retriever(monkeypatch, fail=None):
+def retriever(monkeypatch, tmp_path, fail=None):
     # CI needs no database drivers. These stand-ins only implement constructors
     # used by the production stage bodies; query and result handling stay real.
     monkeypatch.setitem(sys.modules, 'neo4j', NS(unit_of_work=lambda **kw: lambda fn: fn))
@@ -104,16 +105,29 @@ def retriever(monkeypatch, fail=None):
                      obligation='NONE', standard='Public document') for cid in params['ids']], None, None
     r.driver = NS(session=session, execute_query=execute_query)
     def execute(query, params):
+        if 'format_type' in query:
+            return NS(fetchone=lambda: ('vector(1536)',))
         if fail:
             raise fail
         cursor = Cursor([('d:1', .9), ('d:2', .8)] if 'ORDER BY' in query else [('d:1.1', .85)])
         r.cursors.append(cursor)
         return cursor
     r.pg = NS(execute=execute)
-    r.oai = NS(embeddings=NS(create=lambda **kw: NS(data=[NS(embedding=[1., 0.])])))
-    response = NS(content=[NS(type='tool_use', input=dict(cypher='MATCH (c:Clause) RETURN c.id AS clause_id', params={}))],
-                  model='fake-haiku', usage=NS(input_tokens=7, output_tokens=3))
-    r.llm = NS(messages=NS(create=lambda **kw: response))
+    from embed.embed import EmbeddingBatch
+    from llm.cypher import AnthropicCypherClient
+    from retrieval.cypher_cache import JsonlCache
+    from retrieval.query_embeddings import QueryEmbeddings, EXPECTED
+    r.query_embeddings = QueryEmbeddings(tmp_path / (uuid4().hex + '.jsonl'),
+        NS(provider='azure_openai', model='text-embedding-3-small', dimensions=1536,
+           embed=lambda texts: EmbeddingBatch([[1.] + [0.] * 1535])))
+    r.manifest_path = tmp_path / 'identity.json'
+    r.manifest_path.write_text(json.dumps(EXPECTED))
+    r.cypher_cache = JsonlCache(tmp_path / (uuid4().hex + '.jsonl'))
+    r.fresh = False
+    response = NS(content=[NS(type='text', text=json.dumps(dict(
+        cypher='MATCH (c:Clause) RETURN c.id AS clause_id', params=[])))],
+        stop_reason='end_turn', model='fake-haiku', usage=NS(input_tokens=7, output_tokens=3))
+    r.llm = AnthropicCypherClient(NS(messages=NS(create=lambda **kw: response)))
     r.snapshots = {}
     for name in ('stage1_filter', 'embed', 'stage2_rank', 'stage3_expand', 'stage4_fetch'):
         fn = getattr(r, name)
@@ -125,11 +139,11 @@ def retriever(monkeypatch, fail=None):
     return r
 
 
-def test_on_off_identity_and_trace_shape(monkeypatch, fake):
+def test_on_off_identity_and_trace_shape(monkeypatch, fake, tmp_path):
     outputs, snapshots = [], []
     for flag in ('false', 'true'):
         monkeypatch.setenv('LANGFUSE_ENABLED', flag)
-        r = retriever(monkeypatch)
+        r = retriever(monkeypatch, tmp_path)
         hits, run = r.retrieve('PRIVATE prompt')
         outputs.append(hits)
         snapshots.append(r.snapshots)
@@ -144,6 +158,11 @@ def test_on_off_identity_and_trace_shape(monkeypatch, fake):
         'neo4j.cypher', 'embed.query', 'pgvector.rank', 'neighbour.expand', 'text.fetch']
     assert all(s['parent'] is None or s['parent'] in {v['id'] for v in fake.spans} for s in fake.spans)
     assert fake.spans[2]['name'] == 'cypher.generate' and fake.spans[2]['parent'] == fake.spans[1]['id']
+    generation = fake.spans[2]['metadata']
+    assert generation['provider'] == 'anthropic' and generation['role'] == 's8_cypher'
+    assert generation['effort'] is None and generation['provisional'] is False
+    embedding = next(s for s in fake.spans if s['name'] == 'embed.query')
+    assert embedding['metadata'] == {'provider': 'azure_openai', 'model': 'text-embedding-3-small'}
     serialized = json.dumps(fake.spans)
     assert 'PRIVATE' not in serialized and 'input' not in roots[0] and 'output' not in roots[0]
     tracing.flush()
@@ -162,24 +181,24 @@ assert 'langfuse' not in sys.modules
     subprocess.run([sys.executable, '-c', code], cwd=ROOT, env=env, check=True)
 
 
-def test_sdk_kill_switch_is_identity_without_otlp(monkeypatch, fake):
-    baseline, _ = retriever(monkeypatch).retrieve('q')
+def test_sdk_kill_switch_is_identity_without_otlp(monkeypatch, fake, tmp_path):
+    baseline, _ = retriever(monkeypatch, tmp_path).retrieve('q')
     fake.spans.clear()
     monkeypatch.setenv('LANGFUSE_TRACING_ENABLED', 'false')
     def forbidden():
         raise AssertionError('kill switch must not create a client')
     monkeypatch.setattr(tracing, '_get_client', forbidden)
-    actual, _ = retriever(monkeypatch).retrieve('q')
+    actual, _ = retriever(monkeypatch, tmp_path).retrieve('q')
     assert actual == baseline and not fake.spans
     tracing.flush()
 
 
 @pytest.mark.parametrize('flag', ['false', 'true'])
-def test_stage_exception_preserves_type_and_instance(monkeypatch, fake, flag):
+def test_stage_exception_preserves_type_and_instance(monkeypatch, fake, flag, tmp_path):
     monkeypatch.setenv('LANGFUSE_ENABLED', flag)
     error = LookupError('stage failed')
     with pytest.raises(LookupError) as caught:
-        retriever(monkeypatch, fail=error).retrieve('q')
+        retriever(monkeypatch, tmp_path, fail=error).retrieve('q')
     assert caught.value is error and not fake.stack
 
 

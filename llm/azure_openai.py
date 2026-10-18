@@ -21,14 +21,16 @@ class AzureOpenAIAdapter:
     provider = 'azure_openai'
 
     def __init__(self, role, *, mode='structured', sdk_client=None):
-        if role not in {'S4', 'S10'}:
-            raise ValueError('role must be S4 or S10')
+        if role not in {'S4', 'S10', 's8_cypher'}:
+            raise ValueError('role must be S4, S10 or s8_cypher')
         if mode not in {'structured', 'strict_tool'}:
             raise ValueError('mode must be structured or strict_tool')
         self.role, self.mode = role, mode
-        self.model = os.environ[f'AZURE_OPENAI_{role}_DEPLOYMENT']
-        self.effort = os.getenv(f'AZURE_OPENAI_{role}_REASONING_EFFORT',
-                                'low' if role == 'S4' else 'high')
+        env_role = 'S8' if role == 's8_cypher' else role
+        self.model = (os.getenv('AZURE_OPENAI_S8_DEPLOYMENT', 'gpt-5-mini')
+                      if role == 's8_cypher' else os.environ[f'AZURE_OPENAI_{role}_DEPLOYMENT'])
+        self.effort = os.getenv(f'AZURE_OPENAI_{env_role}_REASONING_EFFORT',
+                                'high' if role == 'S10' else 'low')
         if self.effort not in {'minimal', 'low', 'medium', 'high'}:
             raise ValueError('Azure reasoning effort must be minimal, low, medium or high')
         if sdk_client is None:
@@ -45,7 +47,7 @@ class AzureOpenAIAdapter:
         # OpenAI 2.54's own retry policy rejects Retry-After >120s, so leaving
         # SDK retries enabled would subtly change the existing S10 policy.
         from openai import APIConnectionError
-        for attempt in range(1 if self.role == 'S4' else 3):
+        for attempt in range(3 if self.role == 'S10' else 1):
             try:
                 return self.client.chat.completions.create(**mapped)
             except Exception as exc:
@@ -57,7 +59,7 @@ class AzureOpenAIAdapter:
                          or isinstance(status, int) and status >= 500)
                 if override in ('true', 'false'):
                     retry = override == 'true'
-                if self.role == 'S4' or not retry or attempt == 2:
+                if self.role != 'S10' or not retry or attempt == 2:
                     raise
                 delay = None
                 try:
@@ -81,7 +83,8 @@ class AzureOpenAIAdapter:
             system = ''.join(block['text'] for block in system)
         output = request.get('output_config', {}).get('format')
         if output is not None:
-            schema, name = output['schema'], 'entities' if self.role == 'S4' else 'standards'
+            schema = output['schema']
+            name = {'S4': 'entities', 'S10': 'standards', 's8_cypher': 'cypher'}[self.role]
         else:
             tool = next(t for t in request['tools'] if t['name'] == request['tool_choice']['name'])
             schema, name = tool['input_schema'], tool['name']
@@ -138,3 +141,6 @@ class AzureOpenAIAdapter:
         from standards.classifier import LLMResponse
         result = self._complete(request, 'standards.classify')
         return LLMResponse(**result)
+
+    def generate(self, request):
+        return self._complete(request, 'cypher.generate')
