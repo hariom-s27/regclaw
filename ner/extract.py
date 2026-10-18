@@ -44,24 +44,33 @@ def key_for(clause, client):
                      getattr(client, 'provider', 'anthropic'), client.model, client.effort])
 
 
-def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep, controls=None):
+def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep, controls=None,
+                 output_dir=None, cache_path=None, normaliser_version=None):
+    """output_dir/cache_path default to the provider run folder; with cache_path, the
+    cache is read there and its updated copy is written to output_dir only."""
     started = time.perf_counter()
     root = Path(root)
-    output_dir = root / 'data'
+    default_dir = root / 'data'
     if getattr(client, 'provider', 'anthropic') != 'anthropic':
-        output_dir = root / 'data/runs' / client.provider / 's4'
+        default_dir = root / 'data/runs' / client.provider / 's4'
         if client.effort != 'low':
-            output_dir = output_dir / client.effort
+            default_dir = default_dir / client.effort
+    explicit_output = output_dir is not None
+    output_dir = Path(output_dir) if explicit_output else default_dir
     footnote_path = root / 'data/footnotes.json'
     footnotes = defaultdict(list)
     if footnote_path.exists():
         for note in json.loads(footnote_path.read_text(encoding='utf-8')):
             footnotes[note['clause_id']].append(note)
+    source_cache = Path(cache_path) if cache_path else output_dir / 'ner_cache.json'
+    cache = json.loads(source_cache.read_text(encoding='utf-8')) if source_cache.exists() else {}
     cache_path = output_dir / 'ner_cache.json'
-    cache = json.loads(cache_path.read_text(encoding='utf-8')) if cache_path.exists() else {}
+    if explicit_output and (output_dir.resolve() == default_dir.resolve()
+                            or cache_path.resolve() == source_cache.resolve()):
+        raise ValueError('An explicit output_dir must differ from the run folder and the source cache')
     previous_path = output_dir / 'ner.json'
     previous = json.loads(previous_path.read_text(encoding='utf-8')) if previous_path.exists() else []
-    normaliser = Normaliser()
+    normaliser = Normaliser(version=normaliser_version) if normaliser_version else Normaliser()
     usage, lock = Counter(), threading.Lock()
     requests_made = 0
     pending = [c for c in clauses if force or key_for(c, client) not in cache]
@@ -177,7 +186,8 @@ def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep, c
         row = {'id': c['id'], 'text_sha256': hashlib.sha256(c['text'].encode()).hexdigest(),
                'model': cached['model'], 'effort': client.effort,
                'status': 'error' if 'error' in cached else 'stub' if isinstance(client, FakeClient) else 'ok',
-               'entities': {k: [] for k in ENTITY_TYPES}, 'keywords': [], 'iso_refs': ids, 'iso_refs_raw': raw_refs}
+               'entities': {k: [] for k in ENTITY_TYPES}, 'keywords': [], 'iso_refs': ids, 'iso_refs_raw': raw_refs,
+               'normaliser_version': normaliser.version}
         details = cached.get('provenance') or provenance(client)
         if details:
             row['provenance'] = details
@@ -233,6 +243,7 @@ def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep, c
                'wall_time_s': time.perf_counter() - started, 'events': dict(events),
                'errors': sum(r['status'] == 'error' for r in rows), 'rejects': len(rejects),
                'review_rows': len(review), 'usage': dict(usage), 'cost_estimate_usd': cost,
+               'normaliser_version': normaliser.version,
                'grounding': {k: dict(g) for k, g in grounding_totals.items()}, 'drift_alerts': alerts,
                'types': {k: {'mentions': sum(len(r['entities'][k]) for r in rows),
                              'unique_canonicals': len({e['canonical'] for r in rows for e in r['entities'][k]}),

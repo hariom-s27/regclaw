@@ -5,6 +5,10 @@ from pathlib import Path
 import re
 import unicodedata
 
+# 1.0: SINGULARS map only (the S4 freeze). 1.1: plus a conservative last-word
+# rule for DeviceType/LifecyclePhase (ADR 0027, rule rev2). Chemicals are never singularised.
+NORMALISER_VERSION = '1.1'
+VERSIONS = ('1.0', '1.1')
 TYPES = {'biological_effects': 'BiologicalEffect', 'chemicals': 'Chemical',
          'device_types': 'DeviceType', 'regulatory_actors': 'RegulatoryActor',
          'lifecycle_phases': 'LifecyclePhase', 'keywords': 'keyword'}
@@ -12,6 +16,32 @@ SPELLINGS = {'sensitisation': 'sensitization', 'haemocompatibility': 'hemocompat
              'sterilisation': 'sterilization', 'vaporised': 'vaporized'}
 SINGULARS = {'devices': 'device', 'catheters': 'catheter', 'implants': 'implant', 'stents': 'stent',
              'phases': 'phase', 'procedures': 'procedure'}
+# v1.1 last-word exceptions; kept apart from SINGULARS so v1.0 output is unchanged.
+SINGULARS_V11 = {'prostheses': 'prosthesis', 'analyses': 'analysis', 'diagnoses': 'diagnosis',
+                 'lenses': 'lens'}
+PROTECTED = {'series', 'species', 'apparatus', 'lens', 'mass', 'glass', 'gas', 'diagnosis', 'analysis',
+             'themselves'}
+PROTECTED_ENDINGS = ('ss', 'us', 'is', 'ics')
+ACRONYM = re.compile(r'[A-Z]{2,}(s?)')
+
+
+def singular(word, original=None):
+    """v1.1 rule for one casefolded word; `original` is its raw-case form, if known.
+
+    Order: exceptions; protected; acronyms (strip a lowercase plural s only);
+    -ies->-y (words >4 letters); -sses/-xes/-ches/-shes drop es; other -s drop s."""
+    if word in SINGULARS_V11:
+        return SINGULARS_V11[word]
+    if word in PROTECTED or word.endswith(PROTECTED_ENDINGS) or not word.endswith('s'):
+        return word
+    acronym = ACRONYM.fullmatch(original or '')
+    if acronym:
+        return word[:-1] if acronym[1] else word
+    if word.endswith('ies') and len(word) > 4:
+        return word[:-3] + 'y'
+    if word.endswith(('sses', 'xes', 'ches', 'shes')):
+        return word[:-2]
+    return word[:-1]
 
 
 def surface(text):
@@ -42,7 +72,10 @@ def local_abbreviations(text):
 
 
 class Normaliser:
-    def __init__(self, aliases=None):
+    def __init__(self, aliases=None, version=NORMALISER_VERSION):
+        if version not in VERSIONS:
+            raise ValueError(f'Unknown normaliser version {version!r}')
+        self.version = version
         path = Path(aliases) if aliases else Path(__file__).with_name('aliases.csv')
         with path.open(encoding='utf-8', newline='') as f:
             self.rows = list(csv.DictReader(f))
@@ -57,12 +90,19 @@ class Normaliser:
 
     def canonical(self, mention, kind, clause='', enum_canonical=None):
         candidate = surface(mention)
+        raw_words = unicodedata.normalize('NFKC', mention).strip(' \t\n\"\'.,;:').split()
+        raw_last = raw_words[-1] if raw_words else ''
         local = local_abbreviations(clause)
         candidate = local.get(candidate, candidate)
         for source, target in SPELLINGS.items():
             candidate = re.sub(r'\b' + source + r'\b', target, candidate)
         if kind in ('device_types', 'lifecycle_phases', 'DeviceType', 'LifecyclePhase'):
-            candidate = ' '.join(SINGULARS.get(word, word) for word in candidate.split())
+            words = [SINGULARS.get(word, word) for word in candidate.split()]
+            if self.version != '1.0' and words:
+                # The acronym guard needs the raw case of the same (unexpanded) word.
+                original = raw_last if surface(raw_last) == words[-1] else None
+                words[-1] = singular(words[-1], original)
+            candidate = ' '.join(words)
         resolved = False
         visited = set()
         while candidate not in visited:

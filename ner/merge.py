@@ -5,7 +5,7 @@ import json
 import hashlib
 from pathlib import Path
 
-from ner.normalise import Normaliser
+from ner.normalise import NORMALISER_VERSION, Normaliser
 from ner.stdref import references
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +100,8 @@ def main(argv=None):
     if provisional:
         manifest = dict(provenance=metadata[0], model_versions=sorted({m['model_version'] for m in metadata if m.get('model_version')}),
                         ner_source=str(args.ner), obligation_source=str(path),
+                        normaliser_version=NORMALISER_VERSION,
+                        ner_normaliser_versions=sorted({n.get('normaliser_version', '1.0') for n in ner_rows}),
                         input_sha256=hashlib.sha256(args.ner.read_bytes()).hexdigest(),
                         output_sha256=hashlib.sha256(args.output.read_bytes()).hexdigest())
         args.output.with_suffix('.provenance.json').write_text(json.dumps(manifest, indent=2)+'\n', encoding='utf-8')
