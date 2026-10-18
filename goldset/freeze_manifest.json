@@ -1,0 +1,33 @@
+{
+  "schema": "freeze_manifest.v1",
+  "date": "2026-10-18",
+  "normaliser_version": "1.1",
+  "normaliser_rule": "rev3",
+  "adr": "docs/decisions/0027-normaliser-v1-1-freeze-amendment.md",
+  "note": "Holdout model predictions and scores not inspected. Holdout gold was authored by the annotators. Disclosed agent exposures, neither of which informed any rule (normaliser frozen at rev3 before both): (1) a 600-char print showing part of one holdout clause's text; (2) one adjudication-log row for one holdout clause (eu-mdr:Annex XV.II.2.2, a lifecycle_phases gold label). The final report gives the primary 20-clause score plus a 19-clause sensitivity score excluding that clause.",
+  "holdout_clauses": 20,
+  "sensitivity_exclusion": [
+    "eu-mdr:Annex XV.II.2.2"
+  ],
+  "hash_method": "sha256 of LF-normalised text for tracked files; raw bytes for untracked data/ files",
+  "files": {
+    "ner/normalise.py": "3c80bd1e5cae0b9e432b874d09feab3ce07cba351db399d81350878c37333bbb",
+    "ner/aliases.csv": "ff84403cc3b81e734d01dc99bb56ad24f45180d4b34382fde717f6c2a6efb21c",
+    "ner/schema.json": "292beea1e2c7b32d4d47511ffc31d108ed6625ffd49ac535e066dddf6d745dbc",
+    "ner/prompt.py": "fd4d5ecd66e06375e7f3840f0645e4d768417e3f8f5f5b3f19905d599e4183c4",
+    "ner/checks.py": "a3c3eed0f4f9a7e9c747930e83974eb4774b86daac39dca3b8decc64ce6caa8d",
+    "ner/stdref.py": "339ddf6869f88519d34943d0760b3dcaf22076187dc8edcad75f24dd991cb9dc",
+    "ner/extract.py": "33ac9b85d6635d927f3b05730794c302a9d4c578490de22568b3efceb561617e",
+    "ner/merge.py": "43c59759a807e5bc75614a07d534a3e9e947e4a6157925b1a1c082ef1a4a1836",
+    "ner/reclean.py": "1372fe5c08bcca53f38644df08d4fb2c0fad0ff87328c00aeb715f492441e0a1",
+    "goldset/score_entities.py": "dc7dd46daeca4146fd1418e433c164de6b73bc73d95ec465277c969154f021e8",
+    "data/gold/entity_gold_final_v1.1.csv": "82cccb810301939a6571b5e289c9a8b9443367feb23bd819cba5a68c284b7be3",
+    "goldset/entity_gold_ids.csv": "e761d00d4e5c70087dc5ec756bf016284386689301940e58d279d57a62763fd4",
+    "data/clauses.json": "c517fcee4f89967ad62d49a42a8efe0d0ffd76df91ae1e88a2516f2b8b3c585d",
+    "data/runs/azure_openai/s4/ner_cache.json": "62b8415917a8d44f38e3e36e32b41ab986fee6bc129003c5ff4ef43ba9de0e60",
+    "data/runs/azure_openai/s4/high/ner_cache.json": "375ada82f2bdae45daf3b81e67f98a5791643aa09cab4e831d3ccf3749998de4",
+    "data/runs/azure_openai/s4/norm_v1.1_rev3/ner.json": "56a2bc8657b2fc46d8c4ddac3adda6ccc4e8b5a245214b02ee978d76e1e3a9c6",
+    "data/runs/azure_openai/s4/norm_v1.1_rev3_high/ner.json": "523b28435e1dbf816b63d8650a7c20a7dff92ae200d7ecfa1655d155ab90c0ab"
+  },
+  "final_holdout_command": "python -m goldset.score_entities s4b --completed-hand-gold --final-holdout --normaliser-version 1.1 --low data/runs/azure_openai/s4/norm_v1.1_rev3/ner.json data/runs/azure_openai/s4/ner_cache.json data/runs/azure_openai/s4/phase2/call_ledger.json --high data/runs/azure_openai/s4/norm_v1.1_rev3_high/ner.json data/runs/azure_openai/s4/high/ner_cache.json data/runs/azure_openai/s4/call_ledger.json --output data/runs/azure_openai/s4/norm_v1.1_rev3/s4b_scores_holdout_final.json"
+}

@@ -19,6 +19,7 @@ occurrences are never chosen silently, so it is scored with
 schemes=('canonical',) only; entities there need no start/end. Gold canonicals
 always pass through the normaliser. Predictions: after = ner.json canonical
 (normalise=True); before = raw model canonical, surface() only (normalise=False).
+`version` picks the normaliser (ADR 0027): score a v1.0 run with version='1.0'.
 """
 import argparse
 from collections import Counter
@@ -33,14 +34,14 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 from ner.checks import ENTITY_TYPES, ENUMS
-from ner.normalise import Normaliser, surface
+from ner.normalise import NORMALISER_VERSION, Normaliser, surface
 
 SEED = 20261018
 SCHEMES = ('strict', 'exact', 'partial', 'type', 'canonical')
 
 
-def validate(rows, *, spans=True, normalise=True):
-    normaliser = Normaliser()
+def validate(rows, *, spans=True, normalise=True, version=NORMALISER_VERSION):
+    normaliser = Normaliser(version=version)
     result = {}
     if not rows:
         raise ValueError('No annotated clauses')
@@ -104,7 +105,8 @@ def prf(c):
                 f1=2*precision*recall/(precision+recall) if precision+recall else 0.)
 
 
-def score(gold, predicted, *, resamples=1000, seed=SEED, schemes=SCHEMES, normalise=True):
+def score(gold, predicted, *, resamples=1000, seed=SEED, schemes=SCHEMES, normalise=True,
+          version=NORMALISER_VERSION):
     """Micro/per-type/macro P/R/F1 plus clause-bootstrap percentile CI95.
 
     schemes=('canonical',) needs no offsets; normalise applies to predictions only."""
@@ -115,7 +117,8 @@ def score(gold, predicted, *, resamples=1000, seed=SEED, schemes=SCHEMES, normal
     if not schemes or set(schemes) - set(SCHEMES):
         raise ValueError('Unknown scheme')
     spans = set(schemes) != {'canonical'}
-    gold, predicted = validate(gold, spans=spans), validate(predicted, spans=spans, normalise=normalise)
+    gold = validate(gold, spans=spans, version=version)
+    predicted = validate(predicted, spans=spans, normalise=normalise, version=version)
     ids = sorted(gold)
     buckets = ('micro', *ENTITY_TYPES)
     cached = {scheme: {bucket: [] for bucket in buckets} for scheme in schemes}
@@ -147,7 +150,7 @@ def score(gold, predicted, *, resamples=1000, seed=SEED, schemes=SCHEMES, normal
         for bucket, measures in point[scheme].items():
             measures['ci95'] = {metric: np.percentile([d[scheme][bucket][metric] for d in draws], [2.5, 97.5]).tolist()
                                 for metric in ('precision', 'recall', 'f1')}
-    return dict(clauses=len(ids), resamples=resamples, seed=seed, metrics=point,
+    return dict(clauses=len(ids), resamples=resamples, seed=seed, normaliser_version=version, metrics=point,
                 method='Clause bootstrap, percentile CI95; five-type macro; empty denominators=0',
                 caveat='Small gold sets yield wide intervals; single annotator is not inter-annotator agreement.')
 
@@ -174,15 +177,19 @@ def _micro_canonical_f1(per_clause, indices):
     return prf(total)['f1']
 
 
-def paired_diff_ci(gold, a, b, *, resamples=1000, seed=SEED, normalise_a=True, normalise_b=True):
-    """Micro canonical F1 of b - a, both on the same resampled clause indices."""
+def paired_diff_ci(gold, a, b, *, resamples=1000, seed=SEED, normalise_a=True, normalise_b=True,
+                   version_a=NORMALISER_VERSION, version_b=NORMALISER_VERSION):
+    """Micro canonical F1 of b - a, both on the same resampled clause indices.
+
+    Each side's gold and predictions use that side's normaliser version."""
     if not set(gold) == set(a) == set(b):
         raise ValueError('Gold and prediction clause ids differ')
-    gold = validate(gold, spans=False)
-    a, b = validate(a, spans=False, normalise=normalise_a), validate(b, spans=False, normalise=normalise_b)
+    gold_a, gold_b = validate(gold, spans=False, version=version_a), validate(gold, spans=False, version=version_b)
+    a = validate(a, spans=False, normalise=normalise_a, version=version_a)
+    b = validate(b, spans=False, normalise=normalise_b, version=version_b)
     ids = sorted(gold)
-    ca = [counts(gold[c], a[c], 'canonical') for c in ids]
-    cb = [counts(gold[c], b[c], 'canonical') for c in ids]
+    ca = [counts(gold_a[c], a[c], 'canonical') for c in ids]
+    cb = [counts(gold_b[c], b[c], 'canonical') for c in ids]
     point = _micro_canonical_f1(cb, range(len(ids))) - _micro_canonical_f1(ca, range(len(ids)))
     rng = np.random.default_rng(seed)
     draws = []
@@ -190,12 +197,14 @@ def paired_diff_ci(gold, a, b, *, resamples=1000, seed=SEED, normalise_a=True, n
         idx = rng.integers(0, len(ids), size=len(ids))
         draws.append(_micro_canonical_f1(cb, idx) - _micro_canonical_f1(ca, idx))
     return dict(diff=point, ci95=np.percentile(draws, [2.5, 97.5]).tolist(),
-                share_positive=float(np.mean(np.array(draws) > 0)), resamples=resamples, seed=seed)
+                share_positive=float(np.mean(np.array(draws) > 0)), resamples=resamples, seed=seed,
+                versions=dict(a=version_a, b=version_b))
 
 
-def top_errors(gold, predicted, n=10, *, normalise=True):
+def top_errors(gold, predicted, n=10, *, normalise=True, version=NORMALISER_VERSION):
     """Per type, the most frequent false-positive and false-negative canonical names."""
-    gold, predicted = validate(gold, spans=False), validate(predicted, spans=False, normalise=normalise)
+    gold = validate(gold, spans=False, version=version)
+    predicted = validate(predicted, spans=False, normalise=normalise, version=version)
     fp, fn = {k: Counter() for k in ENTITY_TYPES}, {k: Counter() for k in ENTITY_TYPES}
     for cid in gold:
         g = {(e['type'], e['canonical']) for e in gold[cid]}
@@ -294,10 +303,50 @@ def ledger_cost(path, ids, effort):
 S4 = Path('data/runs/azure_openai/s4')
 NOT_COMPUTED = 'not computed: no reviewed offsets in gold or predictions'
 LABELS = {'before': 'raw model canonical, surface() only', 'after': 'ner.json canonical'}
+MANIFEST = Path('goldset/freeze_manifest.json')
+SENSITIVITY_LABEL = 'sensitivity: excludes the 1 clause whose gold row was exposed'
+
+
+HASH_METHOD = 'sha256 of LF-normalised text for tracked files; raw bytes for untracked data/ files'
+
+
+def sha256_file(path):
+    """Freeze hash: raw bytes under data/ (untracked); CRLF->LF elsewhere (git-tracked, portable)."""
+    data = Path(path).read_bytes()
+    if not Path(path).as_posix().startswith('data/'):
+        data = data.replace(b'\r\n', b'\n')
+    return hashlib.sha256(data).hexdigest()
+
+
+def verify_manifest(path=MANIFEST, *, version=NORMALISER_VERSION, required=()):
+    """Check every frozen file sha (see HASH_METHOD) and the normaliser version.
+
+    `required` paths must be listed in the manifest. Raises on any mismatch."""
+    manifest = json.loads(Path(path).read_text(encoding='utf-8'))
+    problems = []
+    if manifest.get('hash_method') != HASH_METHOD:
+        problems.append(f"hash method: {manifest.get('hash_method')!r}")
+    if manifest.get('normaliser_version') != NORMALISER_VERSION or version != NORMALISER_VERSION:
+        problems.append(f"normaliser version: manifest {manifest.get('normaliser_version')!r}, "
+                        f'code {NORMALISER_VERSION!r}, requested {version!r}')
+    files = manifest.get('files') or {}
+    for name in sorted(files):
+        if not Path(name).is_file():
+            problems.append(f'{name}: missing')
+        elif sha256_file(name) != files[name]:
+            problems.append(f'{name}: sha256 differs')
+    listed = {Path(n).as_posix() for n in files}
+    problems += [f'{Path(r).as_posix()}: not in the manifest' for r in required if Path(r).as_posix() not in listed]
+    if problems:
+        raise ValueError('Freeze manifest check failed; final holdout scoring aborted: ' + '; '.join(problems))
+    return manifest
 
 
 def s4b_main(argv=None):
-    """Score the dev split of the S4 GPT runs against offset-free adjudicated gold."""
+    """Score the dev split of the S4 GPT runs against offset-free adjudicated gold.
+
+    --final-holdout scores the holdout split instead, only after every freeze
+    manifest sha and the normaliser version verify; output is aggregate-only."""
     parser = argparse.ArgumentParser(description=s4b_main.__doc__)
     parser.add_argument('--gold', default='data/gold/entity_gold_final_v1.1.csv')
     parser.add_argument('--ids', default='goldset/entity_gold_ids.csv')
@@ -307,20 +356,38 @@ def s4b_main(argv=None):
     parser.add_argument('--high', nargs=3, metavar=('NER', 'CACHE', 'LEDGER'),
                         default=[S4/'high/ner.json', S4/'high/ner_cache.json', S4/'call_ledger.json'])
     parser.add_argument('--output', default=S4/'s4b_scores_dev.json')
+    parser.add_argument('--normaliser-version', choices=('1.0', '1.1'), default=NORMALISER_VERSION)
+    parser.add_argument('--baseline-low', metavar='NER', help='low ner.json to diff against (v - baseline)')
+    parser.add_argument('--baseline-version', choices=('1.0', '1.1'), default='1.0')
     parser.add_argument('--completed-hand-gold', action='store_true')
+    parser.add_argument('--final-holdout', action='store_true', help='score the sealed holdout after the manifest check')
+    parser.add_argument('--manifest', default=MANIFEST)
     args = parser.parse_args(argv)
     if not args.completed_hand_gold:
         parser.error('Scoring requires completed hand gold, never the blind blank sheet')
+    target, manifest = 'dev', None
+    if args.final_holdout:
+        if args.baseline_low:
+            parser.error('--final-holdout does not take --baseline-low')
+        if Path(args.output).exists():
+            parser.error('--final-holdout never overwrites an existing output')
+        # Verify before any gold or prediction is read.
+        manifest = verify_manifest(args.manifest, version=args.normaliser_version,
+                                   required=(args.gold, args.ids, args.clauses, *args.low[:2], *args.high[:2]))
+        target = 'holdout'
     with Path(args.ids).open(encoding='utf-8', newline='') as f:
         split = {r['clause_id']: r['split'] for r in csv.DictReader(f)}
-    dev = sorted(c for c, s in split.items() if s == 'dev')
+    eval_ids = sorted(c for c, s in split.items() if s == target)
+    if manifest and len(eval_ids) != manifest['holdout_clauses']:
+        raise ValueError('Holdout id count differs from the manifest')
     texts = {c['id']: c['text'] for c in json.loads(Path(args.clauses).read_text(encoding='utf-8'))
              if c['id'] in split}
     gold = load_gold_csv(args.gold, texts)
     if set(gold) != set(split):
         raise ValueError('Gold ids differ from the id list')
-    gold_dev = {c: gold[c] for c in dev}
-    out = dict(split='dev', clauses=len(dev),
+    gold_eval = {c: gold[c] for c in eval_ids}
+    version = args.normaliser_version
+    out = dict(split=target, clauses=len(eval_ids), normaliser_version=version,
                gold_validation=dict(rows=len(gold), ids_match=True, mentions=sum(map(len, gold.values())),
                                     checks='cell format, enum validity, surface() substring: all pass'),
                labels=LABELS, primary='canonical', strict=NOT_COMPUTED, exact=NOT_COMPUTED,
@@ -328,17 +395,41 @@ def s4b_main(argv=None):
                errors_low={}, cost={})
     preds = {}
     for run, (ner, cache, ledger) in (('low', args.low), ('high', args.high)):
-        preds[run, 'after'] = load_predictions(ner, dev)
-        preds[run, 'before'] = load_predictions(cache, dev, stage='before', effort=run, texts=texts)
+        preds[run, 'after'] = load_predictions(ner, eval_ids)
+        preds[run, 'before'] = load_predictions(cache, eval_ids, stage='before', effort=run, texts=texts)
         for stage in ('after', 'before'):
-            out['scores'][f'{run}_{stage}'] = score(gold_dev, preds[run, stage], schemes=('canonical',),
-                                                    normalise=stage == 'after')
-        out['cost'][run] = ledger_cost(ledger, dev, run)
+            out['scores'][f'{run}_{stage}'] = score(gold_eval, preds[run, stage], schemes=('canonical',),
+                                                    normalise=stage == 'after', version=version)
+        out['cost'][run] = ledger_cost(ledger, eval_ids, run)
     for stage in ('after', 'before'):
         n = stage == 'after'
-        out['diff_high_minus_low'][stage] = paired_diff_ci(gold_dev, preds['low', stage], preds['high', stage],
-                                                           normalise_a=n, normalise_b=n)
-        out['errors_low'][stage] = top_errors(gold_dev, preds['low', stage], normalise=n)
+        out['diff_high_minus_low'][stage] = paired_diff_ci(gold_eval, preds['low', stage], preds['high', stage],
+                                                           normalise_a=n, normalise_b=n,
+                                                           version_a=version, version_b=version)
+        if not manifest:  # holdout output stays aggregate-only
+            out['errors_low'][stage] = top_errors(gold_eval, preds['low', stage], normalise=n, version=version)
+    if manifest:
+        del out['errors_low']
+        out['manifest'] = dict(path=Path(args.manifest).as_posix(), sha256=sha256_file(args.manifest), verified=True)
+        excluded = sorted(manifest['sensitivity_exclusion'])
+        if not set(excluded) <= set(eval_ids):
+            raise ValueError('Sensitivity exclusion lists ids outside the holdout')
+        keep = [c for c in eval_ids if c not in excluded]
+        sub = lambda rows: {c: rows[c] for c in keep}
+        out['sensitivity'] = dict(
+            label=SENSITIVITY_LABEL, excluded=excluded, clauses=len(keep),
+            scores={f'{run}_{stage}': score(sub(gold_eval), sub(preds[run, stage]), schemes=('canonical',),
+                                            normalise=stage == 'after', version=version)
+                    for run in ('low', 'high') for stage in ('after', 'before')},
+            diff_high_minus_low={stage: paired_diff_ci(sub(gold_eval), sub(preds['low', stage]), sub(preds['high', stage]),
+                                                       normalise_a=stage == 'after', normalise_b=stage == 'after',
+                                                       version_a=version, version_b=version)
+                                 for stage in ('after', 'before')})
+    if args.baseline_low:
+        out['diff_low_vs_baseline'] = dict(
+            baseline=str(args.baseline_low), **paired_diff_ci(
+                gold_eval, load_predictions(args.baseline_low, eval_ids), preds['low', 'after'],
+                version_a=args.baseline_version, version_b=version))
     Path(args.output).write_text(json.dumps(out, indent=2)+'\n', encoding='utf-8')
     print(f'wrote {args.output}')
     return 0
