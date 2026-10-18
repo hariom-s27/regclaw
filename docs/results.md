@@ -1085,3 +1085,101 @@ All run receipts/caches, the blind annotation sheet and enriched output remain
 ignored under `data/`. The approved commits contain only the frozen-id and
 annotation/scorer files, the listed run fixes/tests, and this report in separate
 commits. No `data/`, `.env`, PDF or model artifact is included. No push.
+
+## S4b/S4c provisional (GPT): dev scores and normaliser v1.1
+
+Every number in this section is **provisional (GPT), dev split** unless it is
+labelled as a corpus or graph count. Claude remains the default provider and the
+final headline (ADR 0025). The holdout split is sealed: no holdout prediction or
+score has been inspected, and the final holdout score is computed once, later,
+after the freeze-manifest check (ADR 0027). This section contains no clause text.
+
+### Gold
+
+Gold metadata — **provisional (GPT), dev split** context; validation command:
+`python -m goldset.score_entities s4b --completed-hand-gold` (gold loader checks).
+
+- 50 eval clauses, frozen before any S4 live call: **30 dev / 20 holdout**.
+- **185** gold entity entries over the 50 clauses, labelled by a human annotator
+  and Claude, then adjudicated under `goldset/ENTITY_GUIDELINE_v1.1.md`. Every
+  change is in the adjudication log.
+- The gold has no character offsets. Only the per-clause canonical-set scheme is
+  scored; strict/exact/partial/type schemes are not computed.
+- Dev scoring counts unique (type, canonical) pairs per clause: **95** on dev
+  (biological effects 2, chemicals 7, device types 18, regulatory actors 25,
+  lifecycle phases 43).
+
+### Dev scores, v1.0 vs v1.1
+
+Producing commands — **provisional (GPT), dev split**: v1.0 is
+`python -m goldset.score_entities s4b --completed-hand-gold --normaliser-version 1.0`
+on the S4 Phase 2 (low) and Phase 3 (high) runs; v1.1 is the same scorer with
+`--normaliser-version 1.1` on the cache-only v1.1 (rule rev3) rebuilds, with
+`--baseline-low` set to the Phase 2 run (command in ADR 0027). Canonical-set F1
+with clause-bootstrap CI95 (1,000 resamples, seed `20261018`):
+
+| Run — provisional (GPT), dev split | Micro | Biological effects | Chemicals | Device types | Regulatory actors | Lifecycle phases |
+|---|---|---|---|---|---|---|
+| low, v1.0 | 0.693 [0.598, 0.772] | 0.500 [0.000, 0.889] | 1.000 [0.000, 1.000] | 0.400 [0.222, 0.578] | 0.792 [0.579, 0.914] | 0.756 [0.649, 0.842] |
+| low, v1.1 | 0.723 [0.611, 0.806] | 0.500 [0.000, 0.889] | 1.000 [0.000, 1.000] | 0.533 [0.235, 0.755] | 0.792 [0.579, 0.914] | 0.756 [0.649, 0.842] |
+| high, v1.0 | 0.717 [0.623, 0.787] | 0.444 [0.000, 0.800] | 0.875 [0.000, 1.000] | 0.458 [0.216, 0.667] | 0.786 [0.556, 0.909] | 0.809 [0.702, 0.889] |
+| high, v1.1 | 0.744 [0.640, 0.814] | 0.444 [0.000, 0.800] | 0.875 [0.000, 1.000] | 0.583 [0.242, 0.767] | 0.786 [0.556, 0.909] | 0.809 [0.702, 0.889] |
+
+**provisional (GPT), dev split**: raw model canonicals before any normalisation
+(surface form only) score micro **0.638** (low) and **0.682** (high). The v1.0
+re-score reproduces the original S4b scores exactly.
+
+### Low over high
+
+**provisional (GPT), dev split**, same commands: the paired high − low micro F1
+difference is **+0.024, CI95 [−0.051, 0.094]** under v1.0 and **+0.022, CI95
+[−0.053, 0.092]** under v1.1. Both intervals include zero. High effort costs about
+**11×** more per dev clause (**$0.0228** vs **$0.0021**, published-rate estimate)
+and is about 10× slower. Decision: **low effort** stays the S4 default.
+
+### Normaliser gain
+
+**provisional (GPT), dev split**: v1.1 − v1.0 for low effort is **+0.030, CI95
+[0.000, 0.080]** micro F1. The gain is exactly the three dev plural pairs in
+device types (correct pairs 70 → 73). Other types are unchanged.
+
+Corpus counts — **provisional (GPT)**, all 1,143 clauses, cache-only rebuild
+(`python -m ner.reclean`, **0** model calls): DeviceType unique canonicals
+**702 → 689**, singleton share **85.61% → 84.76%**, **13** merges. Lifecycle
+phases (13) and chemicals (183) are unchanged. The gold is unaffected: **0** gold
+canonicals change under v1.1. The rule, its three revisions and the holdout
+disclosures are in ADR 0027.
+
+### Graph after the v1.1 reload
+
+Producing command — **provisional (GPT)**: the old entity layer (927 nodes and
+4,143 MENTIONS) was deleted in one checked transaction, then
+`python tasks.py graph --load --input <v1.1 enriched.json> --checks --verify-idempotent`.
+Weak obligation labels are unchanged.
+
+| Count — provisional (GPT) | S4 (v1.0) | v1.1 |
+|---|---:|---:|
+| Clause / Standard / Module / RegulatoryAuthority | 1,143 / 102 / 1 / 5 | unchanged |
+| LifecyclePhase / Chemical / BiologicalEffect / RegulatoryActor | 13 / 183 / 18 / 11 | unchanged |
+| DeviceType | 702 | 689 |
+| BELONGS_TO / REFERENCES / REGULATED_BY / MENTIONS | 1,153 / 198 / 10 / 4,143 | unchanged |
+| Total nodes / relationships | 2,178 / 5,504 | 2,165 / 5,504 |
+
+**provisional (GPT)**: 12 of 13 graph checks pass. Check 6 (degree) still WARNs:
+RegulatoryActor maximum **384** and LifecyclePhase maximum **316**, against the
+200 threshold; stop-entity review is pending. DeviceType degree p50 **1**, p90
+**2**, maximum **86**. The idempotent reload created **0** nodes and **0** relationships.
+
+### Known limitations
+
+- **provisional (GPT), dev split**: DeviceType phrase noise. The frozen prompt
+  yields long descriptive phrases as device types. Device-type F1 is the lowest
+  of the five types, and the corpus DeviceType singleton share stays near 85%.
+- **provisional (GPT), dev split**: `other` is over-used. On dev, low effort
+  predicts `other` for 5 of 6 biological-effect, 10 of 28 regulatory-actor and
+  12 of 39 lifecycle-phase entities. `other` is the most frequent false positive in
+  each of those types.
+- **provisional (GPT), dev split**: only **2** dev biological-effect gold pairs
+  and **7** chemical pairs; those per-type scores are not informative.
+- **provisional (GPT), dev split**: 30 clauses give wide CIs; one annotator plus
+  Claude adjudication is not inter-annotator agreement.

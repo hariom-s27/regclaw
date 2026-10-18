@@ -32,3 +32,6 @@ unmeasured performance consequences. Current measurements are in [results](../re
 | [0022](0022-heading-policy.md) | Retain grouping labels and heading parents | accepted | Raw plus policy scores. |
 | [0023](0023-official-structure.md) | Official source structure as automatic parser gold | accepted | Use local official structural gold. |
 | [0024](0024-duplicates-and-stubs.md) | Report near-duplicates and keep reference stubs | accepted | Keep issuer records and reference stubs. |
+| [0025](0025-provisional-gpt-substitute.md) | Provisional Azure OpenAI GPT substitute for Claude | accepted (provisional) | Explicit GPT substitute; Claude stays default. |
+| [0026](0026-azure-hosted-embeddings.md) | Azure-hosted text-embedding-3-small embeddings | accepted (documentation draft) | Explicit Azure selection; no fallback. |
+| [0027](0027-normaliser-v1-1-freeze-amendment.md) | Normaliser v1.1 — a versioned amendment to the S4 freeze | accepted (provisional) | Versioned v1.1 rule; re-frozen before holdout. |
