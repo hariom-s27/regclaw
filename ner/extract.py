@@ -13,10 +13,11 @@ import time
 import jsonschema
 
 from .checks import ENTITY_TYPES, ENUMS, check_response, drift, valid_stop_reason
-from .client import AnthropicClient, FakeClient
+from .client import FakeClient
 from .normalise import Normaliser, review_candidates, surface
 from .prompt import SYSTEM_PROMPT
 from .stdref import references
+from llm.provider import live_configured, make_client, provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 REJECT_FIELDS = ['clause_id', 'type', 'mention', 'reason']
@@ -43,14 +44,17 @@ def key_for(clause, client):
 
 def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep):
     root = Path(root)
+    output_dir = root / 'data'
+    if getattr(client, 'provider', 'anthropic') != 'anthropic':
+        output_dir = root / 'data/runs' / client.provider / 's4'
     footnote_path = root / 'data/footnotes.json'
     footnotes = defaultdict(list)
     if footnote_path.exists():
         for note in json.loads(footnote_path.read_text(encoding='utf-8')):
             footnotes[note['clause_id']].append(note)
-    cache_path = root / 'data/ner_cache.json'
+    cache_path = output_dir / 'ner_cache.json'
     cache = json.loads(cache_path.read_text(encoding='utf-8')) if cache_path.exists() else {}
-    previous_path = root / 'data/ner.json'
+    previous_path = output_dir / 'ner.json'
     previous = json.loads(previous_path.read_text(encoding='utf-8')) if previous_path.exists() else []
     normaliser = Normaliser()
     usage, lock = Counter(), threading.Lock()
@@ -92,8 +96,13 @@ def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep):
                         retried_schema = True
                         continue
                     return c['id'], {'error': 'schema', 'model': raw.model}
-                return c['id'], {'data': raw.data, 'model': raw.model, 'stop_reason': raw.stop_reason,
-                                 'usage': raw.usage}
+                result = {'data': raw.data, 'model': raw.model, 'stop_reason': raw.stop_reason,
+                          'usage': raw.usage}
+                if raw.provenance:
+                    result['provenance'] = raw.provenance
+                    result['latency_s'] = raw.latency_s
+                    result['finish_reason'] = raw.finish_reason
+                return c['id'], result
         except Exception as exc:
             # Preserve the id and avoid writing exception strings that may contain secrets.
             return c['id'], {'error': 'client:' + type(exc).__name__, 'model': client.model}
@@ -130,6 +139,9 @@ def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep):
                'model': cached['model'], 'effort': client.effort,
                'status': 'error' if 'error' in cached else 'stub' if isinstance(client, FakeClient) else 'ok',
                'entities': {k: [] for k in ENTITY_TYPES}, 'keywords': [], 'iso_refs': ids, 'iso_refs_raw': raw_refs}
+        details = cached.get('provenance') or provenance(client)
+        if details:
+            row['provenance'] = details
         if 'error' in cached:
             rejects.append({'clause_id': c['id'], 'type': 'response', 'mention': '', 'reason': cached['error']})
         else:
@@ -161,9 +173,9 @@ def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep):
     # Deduplicate proposals in stable order. No proposal changes an entity canonical.
     review = [dict(zip(REVIEW_FIELDS, values)) for values in dict.fromkeys(tuple(r[k] for k in REVIEW_FIELDS) for r in review)]
     json_write(cache_path, cache)
-    json_write(root / 'data/ner.json', rows)
-    csv_write(root / 'data/ner_rejects.csv', REJECT_FIELDS, rejects)
-    csv_write(root / 'data/alias_review.csv', REVIEW_FIELDS, review)
+    json_write(output_dir / 'ner.json', rows)
+    csv_write(output_dir / 'ner_rejects.csv', REJECT_FIELDS, rejects)
+    csv_write(output_dir / 'alias_review.csv', REVIEW_FIELDS, review)
 
     def run_metrics(rs):
         return {k: {'mean': sum(len(r['entities'][k]) for r in rs)/len(rs) if rs else 0,
@@ -182,6 +194,15 @@ def run_pipeline(clauses, client, *, root=ROOT, force=False, sleep=time.sleep):
                              'resolved_alias': resolved[k],
                              'review_mentions': len({str(p['candidate']) for p in review if p['type'] == k})}
                          for k in ENTITY_TYPES}}
+    details = provenance(client)
+    if details:
+        versions = {r['provenance']['model_version'] for r in rows if r.get('provenance', {}).get('model_version')}
+        details['model_version'] = next(iter(versions)) if len(versions) == 1 else None
+        summary['provenance'] = details
+        if client.provider != 'anthropic':
+            summary['cost_prices_verified'] = False
+            summary['cost_rate_source'] = 'R11 A1 legacy rates; not Azure billing'
+            json_write(output_dir / 'run_summary.json', summary)
     print(f"NER: rows={len(rows)}, requests={requests_made}, uncached clauses={len(pending)}, cache hits={hits}, error rows={summary['errors']}, rejects={len(rejects)}, review rows={len(review)}, flags={dict(flags)}")
     if alerts:
         print('WARN run-level drift >25%; stopping summary for inspection:', json.dumps(alerts))
@@ -213,10 +234,10 @@ def main(argv=None):
         if args.limit < 0:
             p.error('--limit must be nonnegative')
         clauses = clauses[:args.limit]
-    stub = args.stub or os.environ.get('REGCLAW_STUB') == '1' or not os.environ.get('ANTHROPIC_API_KEY')
+    stub = args.stub or not live_configured()
     if stub:
         print('STUB MODE: entities are recorded fixtures, numbers are not meaningful.')
-    client = FakeClient(effort=args.effort, mode=args.mode) if stub else AnthropicClient(effort=args.effort, mode=args.mode)
+    client = FakeClient(effort=args.effort, mode=args.mode) if stub else make_client('S4', effort=args.effort, mode=args.mode)
     _, summary = run_pipeline(clauses, client, force=args.force)
     return 2 if summary['drift_alerts'] else 0
 

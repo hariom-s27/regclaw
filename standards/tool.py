@@ -3,13 +3,13 @@
 REGCLAW_STUB=1 disables automatic SDK use; explicit fake clients still run.
 """
 import logging
-import os
 from .assemble import assemble
-from .classifier import AnthropicLLM, make_request
+from .classifier import make_request
 from .data_loader import load_data
 from .engine import evaluate
 from .guard import guard
 from .profile import DeviceProfile
+from llm.provider import live_configured, make_client, provenance, save_record
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ def get_applicable_standards(device_profile, retriever, *, llm=None, data=None, 
         log.warning('standards retrieval unavailable: %s', type(exc).__name__)
         rules['notes'].append('Retrieval unavailable; decisions are unsupported by corpus citations.')
     response = None
-    if llm is None and os.getenv('ANTHROPIC_API_KEY') and os.getenv('REGCLAW_STUB') != '1':
+    if llm is None and live_configured():
         try:
-            llm = AnthropicLLM()
+            llm = make_client('S10')
         except Exception as exc:
             log.warning('standards classifier unavailable: %s', type(exc).__name__)
     if llm is not None:
@@ -46,4 +46,11 @@ def get_applicable_standards(device_profile, retriever, *, llm=None, data=None, 
         except Exception as exc:
             log.warning('standards classifier unavailable: %s', type(exc).__name__)
     guarded = guard(rules, response, data, candidates, profile.device_specific_standards)
-    return assemble(profile, data, rules, guarded, getattr(llm, 'model', 'unavailable'), generated_at=generated_at)
+    result = assemble(profile, data, rules, guarded, getattr(llm, 'model', 'unavailable'), generated_at=generated_at)
+    details = getattr(response, 'provenance', None) or provenance(llm)
+    if details:
+        result['provenance'].update(details)
+        if response is not None:
+            result['provenance']['usage'] = response.usage
+        save_record('S10', result)
+    return result

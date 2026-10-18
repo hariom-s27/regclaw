@@ -1,0 +1,53 @@
+"""Role selection and additive live provenance, without loading keys in stub mode."""
+import json
+import os
+from pathlib import Path
+from uuid import uuid4
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def provider_name():
+    provider = os.getenv('LLM_PROVIDER', 'anthropic')
+    if provider not in {'anthropic', 'azure_openai'}:
+        raise ValueError('LLM_PROVIDER must be anthropic or azure_openai')
+    return provider
+
+
+def live_configured():
+    if os.getenv('REGCLAW_STUB') == '1':
+        return False
+    key = 'AZURE_OPENAI_API_KEY' if provider_name() == 'azure_openai' else 'ANTHROPIC_API_KEY'
+    return bool(os.getenv(key))
+
+
+def make_client(role, *, effort='low', mode='structured'):
+    if role not in {'S4', 'S10'}:
+        raise ValueError('role must be S4 or S10')
+    if provider_name() == 'azure_openai':
+        from .azure_openai import AzureOpenAIAdapter
+        return AzureOpenAIAdapter(role, mode=mode)
+    if role == 'S4':
+        from ner.client import AnthropicClient
+        return AnthropicClient(effort=effort, mode=mode)
+    from standards.classifier import AnthropicLLM
+    return AnthropicLLM()
+
+
+def provenance(client, response_model=None):
+    provider = getattr(client, 'provider', None)
+    if provider is None:  # Recorded fixtures retain their existing contracts.
+        return {}
+    return dict(provider=provider, model=client.model,
+                model_version=response_model, provisional=provider != 'anthropic',
+                reasoning_effort=getattr(client, 'effort', 'low'))
+
+
+def save_record(role, record, *, root=None):
+    """Persist provisional live S10 outputs separately from the Claude outputs."""
+    if record['provenance'].get('provider') != 'azure_openai':
+        return
+    folder = Path(root or ROOT) / 'data/runs/azure_openai' / role.lower()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / (uuid4().hex + '.json')).write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

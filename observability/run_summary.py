@@ -159,6 +159,7 @@ class Summary:
     ttft_s: list = field(default_factory=list)
     window_s: float = 0.0
     observation_latencies_s: dict = field(default_factory=lambda: defaultdict(list))
+    provenance: list = field(default_factory=list)
 
 
 def summarize(rows: list, window_s: float, agent: str | None = None) -> Summary:
@@ -183,6 +184,12 @@ def summarize(rows: list, window_s: float, agent: str | None = None) -> Summary:
 
         trace_failed = False
         for o in obs:
+            metadata = _meta(o)
+            if metadata.get('provider'):
+                identity = {k: metadata.get(k) for k in
+                            ('provider', 'model', 'model_version', 'provisional', 'reasoning_effort')}
+                if identity not in s.provenance:
+                    s.provenance.append(identity)
             elapsed = duration(o)
             if elapsed is not None:
                 s.observation_latencies_s[_get(o, 'name', '(unnamed)')].append(elapsed)
@@ -248,6 +255,8 @@ def render(s: Summary) -> str:
     for name, values in sorted(s.observation_latencies_s.items()):
         output += f'\n{name} | {len(values)} | {ms(percentile(values, 50))} | {ms(percentile(values, 95))}'
     output += '\nP95 from <100 runs is noisy. Parent and child durations are never summed.'
+    if s.provenance:
+        output += '\nProvenance: ' + json.dumps(s.provenance, sort_keys=True)
     return output
 
 

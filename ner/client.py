@@ -20,6 +20,9 @@ class RawResult:
     stop_reason: str = 'end_turn'
     model: str = MODEL
     usage: dict = field(default_factory=dict)
+    provenance: dict = field(default_factory=dict)
+    latency_s: float | None = None
+    finish_reason: str | None = None
 
 
 class LLMClient(Protocol):
@@ -73,6 +76,7 @@ class FakeClient:
 
 class AnthropicClient:
     model = MODEL
+    provider = 'anthropic'
 
     def __init__(self, *, effort='low', mode='structured', sdk_client=None):
         import anthropic
@@ -91,9 +95,13 @@ class AnthropicClient:
 
     def extract(self, clause, *, max_tokens=4000):
         from observability.tracing import stage, record_response
-        with stage('ner.extract', as_type='generation', model=self.model) as observation:
+        from llm.provider import provenance
+        with stage('ner.extract', as_type='generation', model=self.model,
+                   metadata=provenance(self)) as observation:
             response = self.client.messages.create(**request(clause, effort=self.effort, mode=self.mode, max_tokens=max_tokens))
             record_response(observation, response)
+            if observation is not None:
+                observation.update(metadata=provenance(self, response.model))
         if self.mode == 'strict_tool':
             blocks = [b for b in response.content if b.type == 'tool_use' and b.name == 'emit_entities']
             data = blocks[0].input if blocks else {}
@@ -103,4 +111,5 @@ class AnthropicClient:
                 data = json.loads(content)
             except json.JSONDecodeError:
                 data = {}
-        return RawResult(data, response.stop_reason, response.model, response.usage.model_dump())
+        return RawResult(data, response.stop_reason, response.model, response.usage.model_dump(),
+                         provenance(self, response.model))

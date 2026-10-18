@@ -1,6 +1,6 @@
 """Sonnet request contract, installed anthropic 1.14.0 adapter, offline fixtures."""
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from typing import Protocol
@@ -36,6 +36,11 @@ PROMPT_SHA256 = hashlib.sha256(PROMPT.encode()).hexdigest()
 class LLMResponse:
     data: object
     stop_reason: str = 'end_turn'
+    model: str | None = None
+    usage: dict = field(default_factory=dict)
+    provenance: dict = field(default_factory=dict)
+    latency_s: float | None = None
+    finish_reason: str | None = None
 
 
 class LLMClient(Protocol):
@@ -76,6 +81,8 @@ class FakeLLM:
 
 class AnthropicLLM:
     model = MODEL
+    provider = 'anthropic'
+    effort = 'low'
 
     def __init__(self, client=None):
         # Creating the SDK client does not send a request. Tests inject a spec'd mock.
@@ -85,8 +92,13 @@ class AnthropicLLM:
         self.client = client
 
     def classify(self, request):
-        with stage('standards.classify', as_type='generation', model=request['model']) as observation:
+        from llm.provider import provenance
+        with stage('standards.classify', as_type='generation', model=request['model'],
+                   metadata=provenance(self)) as observation:
             response = self.client.messages.create(**request)
             record_response(observation, response)
+            if observation is not None:
+                observation.update(metadata=provenance(self, response.model))
         return LLMResponse(''.join(block.text for block in response.content if block.type == 'text'),
-                           response.stop_reason)
+                           response.stop_reason, response.model, response.usage.model_dump(),
+                           provenance(self, response.model))
