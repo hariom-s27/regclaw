@@ -29,6 +29,13 @@ Python 3.11 · Windows (PowerShell) laptop · repo root = `D:\sem_iitk\sem9\meri
 ```
 Also list every file created or changed, and the test results.
 
+## Decision checklist (before any non-trivial change)
+1. **Options:** list at least 2 options, including "do nothing / keep current".
+2. **Worst case + undo:** state the worst realistic outcome and how hard it is to undo: **easy** (revert one file) · **medium** (re-run a step) · **hard** (lost data, rebuilt store, changed frozen artefact). **Hard** = make a backup + do a dry run + get the user's explicit yes first.
+3. **Downstream + frozen files:** check effects on later steps and on frozen files: corpus sha, `queries.yaml`, freeze manifests, prompt freeze, holdout. If a frozen file would change, stop and report; a change needs a versioned amendment (new version + log entry/ADR + rerun what depends on it). It is a `DESIGN CONFLICT` only if it changes the report's design.
+4. **Rule changes:** test any parser/normaliser/labelling rule change across the **whole corpus**, not one example, and produce a suspicious-change list (items whose output changed unexpectedly) for review.
+5. **Report:** state the reason for the choice and its main risk (in the step log under *Decided*).
+
 ## Commands
 - `python tasks.py up` — start Neo4j + Postgres (Docker)
 - `python tasks.py check` — check services, keys, libraries
