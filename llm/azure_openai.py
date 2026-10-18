@@ -115,6 +115,12 @@ class AzureOpenAIAdapter:
             raw_usage = response.usage
             usage = {} if raw_usage is None else dict(
                 input_tokens=raw_usage.prompt_tokens, output_tokens=raw_usage.completion_tokens)
+            completion_details = getattr(raw_usage, 'completion_tokens_details', None)
+            prompt_details = getattr(raw_usage, 'prompt_tokens_details', None)
+            if completion_details is not None:
+                usage['reasoning_tokens'] = getattr(completion_details, 'reasoning_tokens', 0) or 0
+            if prompt_details is not None:
+                usage['cache_read_input_tokens'] = getattr(prompt_details, 'cached_tokens', 0) or 0
             details = provenance(self, getattr(response, 'model', None))
             record_response(observation, SimpleNamespace(model=self.model, usage=usage))
             if observation is not None:

@@ -2,6 +2,7 @@
 import argparse
 from collections import Counter
 import json
+import hashlib
 from pathlib import Path
 
 from ner.normalise import Normaliser
@@ -75,14 +76,33 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--obligation-source', default='weak')
     parser.add_argument('--allow-missing-ner', action='store_true')
+    parser.add_argument('--ner', type=Path, default=ROOT / 'data/ner.json')
+    parser.add_argument('--output', type=Path, default=ROOT / 'data/enriched.json')
     args = parser.parse_args(argv)
     path = {'weak': ROOT / 'data/weak_labels.json', 'legalbert': ROOT / 'data/obligation_predictions.json'}.get(
         args.obligation_source, Path(args.obligation_source))
     read = lambda p: json.loads(Path(p).read_text(encoding='utf-8'))
-    rows = merge(read(ROOT / 'data/clauses.json'), read(ROOT / 'data/ner.json'), read(path), args.allow_missing_ner)
+    ner_rows = read(args.ner)
+    rows = merge(read(ROOT / 'data/clauses.json'), ner_rows, read(path), args.allow_missing_ner)
     from ner.validate_enriched import validate
     validate(rows, read(ROOT / 'data/clauses.json'))
-    (ROOT / 'data/enriched.json').write_text(json.dumps(rows, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    metadata = [n['provenance'] for n in ner_rows if n.get('provenance')]
+    provisional = metadata and any(m.get('provisional') for m in metadata)
+    if provisional:
+        providers = {m['provider'] for m in metadata}
+        if len(providers) != 1:
+            raise ValueError('Do not mix providers in a provisional enriched file')
+        separated = (ROOT / 'data/runs' / next(iter(providers))).resolve()
+        if not args.output.resolve().is_relative_to(separated):
+            raise ValueError('Provisional enriched output must stay in the provider-separated run directory')
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(rows, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    if provisional:
+        manifest = dict(provenance=metadata[0], model_versions=sorted({m['model_version'] for m in metadata if m.get('model_version')}),
+                        ner_source=str(args.ner), obligation_source=str(path),
+                        input_sha256=hashlib.sha256(args.ner.read_bytes()).hexdigest(),
+                        output_sha256=hashlib.sha256(args.output.read_bytes()).hexdigest())
+        args.output.with_suffix('.provenance.json').write_text(json.dumps(manifest, indent=2)+'\n', encoding='utf-8')
     print(f'enriched={len(rows)} obligation={dict(Counter(r["obligation"] for r in rows))}')
     return 0
 
