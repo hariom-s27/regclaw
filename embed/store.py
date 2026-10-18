@@ -84,5 +84,5 @@ class PostgresStore:
 
     def stats(self):
         row = self.connection.execute('''SELECT count(DISTINCT clause_id), count(*),
-            min(l2_norm(embedding)), max(l2_norm(embedding)) FROM clause_embeddings''').fetchone()
+            min(vector_norm(embedding)), max(vector_norm(embedding)) FROM clause_embeddings''').fetchone()
         return dict(zip(('distinct_ids', 'total_rows', 'norm_min', 'norm_max'), row))

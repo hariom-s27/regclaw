@@ -1,10 +1,13 @@
 import math
+import json
 import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from embed.embed import FakeEmbedder, OpenAIEmbedder, dry_run, pack, prepare, reconcile, run, text_hash
+from embed.embed import (AzureOpenAIEmbedder, EmbeddingConfig, FakeEmbedder, OpenAIEmbedder,
+                         RollingTokenBudget, dry_run, make_embedder, pack, prepare,
+                         reconcile, retry_after, run, text_hash)
 from embed.store import CREATE_TABLE, DIMS, INDEX_SQL, MemoryStore, PostgresStore, RANK_SQL, UPSERT_SQL, assert_no_ann
 
 
@@ -39,8 +42,8 @@ def test_both_request_packing_limits():
     large = [dict(token_count=8191) for _ in range(100)]
     batches = list(pack(large))
     assert sum(map(len, batches)) == 100
-    assert all(len(b) <= 2048 and sum(r['token_count'] for r in b) <= 300000 for b in batches)
-    assert [len(b) for b in batches] == [36, 36, 28]
+    assert all(len(b) <= 2048 and sum(r['token_count'] for r in b) <= 60000 for b in batches)
+    assert [len(b) for b in batches] == [7] * 14 + [2]
 
 
 def test_fake_norm_hash_skip_and_missing_vector_repair():
@@ -135,3 +138,215 @@ def test_sql_contract_upsert_ann_and_mock_connection(monkeypatch):
     store.upsert([('x:1', [0.0] * DIMS)])
     assert connection.values[0][0] == 'x:1'
     assert len(connection.values[0][1]) == DIMS
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def test_rolling_budget_partial_expiry_and_exact_boundary():
+    clock = Clock()
+    pacer = RollingTokenBudget(80000, clock=clock, sleep=clock.sleep)
+    pacer.reserve(30000)
+    clock.now = 10
+    pacer.reserve(40000)
+    clock.now = 20
+    pacer.reserve(20000)
+    assert clock.now == 60 and clock.sleeps == [40]
+    pacer.reserve(20000)
+    assert clock.now == 60  # 40K + 20K + 20K equals the budget.
+    pacer.reserve(1)
+    assert clock.now == 70 and clock.sleeps == [40, 10]
+    assert sum(n for _, n in pacer.events) == 40001
+    for tokens in (0, 80001):
+        with pytest.raises(ValueError):
+            pacer.reserve(tokens)
+
+
+def test_custom_packing_and_planned_pacing():
+    rows = [dict(token_count=5000) for _ in range(25)]
+    batches = list(pack(rows, max_tokens=15000, tpm_budget=20000))
+    assert [len(b) for b in batches] == [3] * 8 + [1]
+    plan = dry_run(rows, EmbeddingConfig(max_tokens=15000, tpm_budget=20000))
+    assert plan['planned_requests'] == 9 and plan['estimated_pacing_seconds'] == 420
+    # A request cap above TPM must produce feasible batches too.
+    assert all(sum(r['token_count'] for r in b) <= 10000
+               for b in pack(rows, max_tokens=60000, tpm_budget=10000))
+    with pytest.raises(ValueError, match='cannot fit'):
+        list(pack(rows, max_tokens=4999))
+    for limit in (0, -1):
+        with pytest.raises(ValueError):
+            list(pack(rows, max_tokens=limit))
+
+
+def fake_sdk():
+    calls = []
+    vector = [1.0] + [0.0] * (DIMS-1)
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(data=[SimpleNamespace(index=i, embedding=vector)
+                                      for i, _ in enumerate(kwargs['input'])],
+                               usage=SimpleNamespace(prompt_tokens=len(kwargs['input'])))
+    return SimpleNamespace(embeddings=SimpleNamespace(create=create)), calls
+
+
+@pytest.mark.parametrize('provider', [None, 'openai'])
+def test_default_openai_constructor_and_request_regression(monkeypatch, provider):
+    import openai
+    for name in ('EMBED_PROVIDER', 'EMBED_MAX_TOKENS_PER_REQUEST', 'EMBED_TPM_BUDGET'):
+        monkeypatch.delenv(name, raising=False)
+    if provider:
+        monkeypatch.setenv('EMBED_PROVIDER', provider)
+    # An Azure key/deployment must never implicitly switch the provider.
+    monkeypatch.setenv('AZURE_OPENAI_EMBED_DEPLOYMENT', 'ignored-deployment')
+    sdk, calls = fake_sdk()
+    constructors = []
+    def constructor(**kwargs):
+        constructors.append(kwargs)
+        return sdk
+    monkeypatch.setattr(openai, 'OpenAI', constructor)
+    embedder = make_embedder(encoding=WordEncoding())
+    assert type(embedder) is OpenAIEmbedder
+    embedder.embed(['Title\nBody'])
+    assert constructors == [{'max_retries': 0}]
+    assert calls == [{'model': 'text-embedding-3-small', 'input': ['Title\nBody']}]
+    assert embedder.config.max_tokens == 60000 and embedder.config.tpm_budget == 80000
+
+
+def test_azure_selection_url_config_and_provenance(monkeypatch):
+    import openai
+    monkeypatch.setenv('EMBED_PROVIDER', 'azure_openai')
+    monkeypatch.setenv('AZURE_OPENAI_ENDPOINT', 'https://fixture.openai.azure.com///')
+    monkeypatch.setenv('AZURE_OPENAI_API_KEY', 'offline-fixture')
+    monkeypatch.setenv('AZURE_OPENAI_EMBED_DEPLOYMENT', 'fixture-deployment')
+    monkeypatch.delenv('AZURE_OPENAI_EMBED_MODEL_VERSION', raising=False)
+    monkeypatch.setenv('EMBED_MAX_TOKENS_PER_REQUEST', '100')
+    monkeypatch.setenv('EMBED_TPM_BUDGET', '200')
+    sdk, calls = fake_sdk()
+    constructors = []
+    def constructor(**kwargs):
+        constructors.append(kwargs)
+        return sdk
+    monkeypatch.setattr(openai, 'OpenAI', constructor)
+    embedder = make_embedder(encoding=WordEncoding())
+    assert type(embedder) is AzureOpenAIEmbedder
+    assert constructors == [dict(base_url='https://fixture.openai.azure.com/openai/v1/',
+                                 api_key='offline-fixture', max_retries=0)]
+    rows = prepare([clause()], WordEncoding())
+    records, receipt = run(rows, embedder, MemoryStore())
+    for metadata in (records[0], receipt):
+        assert metadata['provider'] == 'azure_openai'
+        assert metadata['deployment'] == 'fixture-deployment'
+        assert metadata['model_version'] == '1' and metadata['model_version_source'] == 'configured'
+        assert metadata['versionUpgradeOption'] == 'OnceNewDefaultVersionAvailable'
+        assert metadata['versionUpgradeOption_source'] == 'configured'
+        assert 'auto-upgrade' in metadata['version_note']
+    assert calls[0] == dict(model='fixture-deployment', input=['Title\nBody'])
+    monkeypatch.setenv('AZURE_OPENAI_EMBED_MODEL_VERSION', '2')
+    assert EmbeddingConfig.from_env().model_version == '2'
+    monkeypatch.setenv('EMBED_PROVIDER', 'invalid')
+    with pytest.raises(ValueError, match='EMBED_PROVIDER'):
+        make_embedder()
+
+
+def test_provider_deployment_version_hash_and_reembedding():
+    baseline = text_hash('same')
+    assert baseline != text_hash('same', provider='azure_openai')
+    assert baseline != text_hash('same', deployment='other')
+    assert baseline != text_hash('same', model_version='1')
+    rows = prepare([clause()], WordEncoding())
+    store = MemoryStore()
+    sdk, calls = fake_sdk()
+    first = OpenAIEmbedder(sdk, WordEncoding())
+    records, _ = run(rows, first, store)
+    # Same model/deployment, different host: must re-embed.
+    azure = AzureOpenAIEmbedder(sdk, EmbeddingConfig(provider='azure_openai'), encoding=WordEncoding())
+    changed, result = run(rows, azure, store, records)
+    assert result['embedded'] == 1 and len(calls) == 2
+    _, result = run(rows, azure, store, changed)
+    assert result['skipped_unchanged'] == 1 and len(calls) == 2
+    assert result['api_requests'] == 0 and result['retries'] == 0
+    # Old manifests lacking provider identity also safely re-embed.
+    _, result = run(rows, first, store, [dict(clause_id='x:1', text_sha256='legacy-hash')])
+    assert result['embedded'] == 1
+
+
+@pytest.mark.parametrize('status', [429, 503])
+def test_retries_honor_retry_after_and_count_attempts_in_budget(status):
+    clock = Clock()
+    sdk, calls = fake_sdk()
+    original = sdk.embeddings.create
+    attempts = []
+    def create(**kwargs):
+        attempts.append(clock.now)
+        if len(attempts) == 1:
+            error = RuntimeError('fixture')
+            error.status_code = status
+            error.response = SimpleNamespace(headers={'retry-after': '12'})
+            raise error
+        return original(**kwargs)
+    sdk.embeddings.create = create
+    embedder = OpenAIEmbedder(sdk, WordEncoding(), clock=clock, sleep=clock.sleep,
+                             config=EmbeddingConfig(max_tokens=2, tpm_budget=2))
+    embedder.embed(['two tokens'])
+    assert attempts == [0, 60] and clock.sleeps == [12, 48]
+    assert embedder.api_requests == 2 and embedder.retries == 1
+    assert embedder.rate_limits == int(status == 429)
+
+
+def test_retry_after_http_date_and_milliseconds(monkeypatch):
+    monkeypatch.setattr('embed.embed.time.time', lambda: 0)
+    for headers, expected in (({'retry-after': 'Thu, 01 Jan 1970 00:03:00 GMT'}, 180),
+                              ({'retry-after-ms': '2500'}, 2.5),
+                              ({'retry-after': 'bad'}, None)):
+        assert retry_after(SimpleNamespace(response=SimpleNamespace(headers=headers))) == expected
+
+
+def test_cli_persists_provider_manifest_and_zero_call_rerun(monkeypatch, tmp_path, capsys):
+    from contextlib import nullcontext
+    import embed.embed as module
+    import embed.store as stores
+    monkeypatch.setattr('dotenv.load_dotenv', lambda *_: None)
+    monkeypatch.setenv('EMBED_PROVIDER', 'azure_openai')
+    monkeypatch.setenv('AZURE_OPENAI_EMBED_DEPLOYMENT', 'text-embedding-3-small')
+    monkeypatch.delenv('AZURE_OPENAI_EMBED_MODEL_VERSION', raising=False)
+    monkeypatch.setattr(module, 'offline_encoding', WordEncoding)
+    monkeypatch.setattr('psycopg.connect', lambda *_: nullcontext(None))
+    store = MemoryStore()
+    monkeypatch.setattr(stores, 'PostgresStore', lambda _: store)
+    monkeypatch.setenv('PG_DSN', 'offline-fixture')
+    sdk, calls = fake_sdk()
+    monkeypatch.setattr(module, 'make_embedder', lambda config: AzureOpenAIEmbedder(
+        sdk, config, encoding=WordEncoding()))
+    source, manifest = tmp_path / 'clauses.json', tmp_path / 'manifest.json'
+    source.write_text(json.dumps([clause()]), encoding='utf-8')
+    args = ['--live', '--input', str(source), '--manifest', str(manifest)]
+    assert module.main(args) == 0
+    assert module.main(args) == 0
+    saved = json.loads(manifest.read_text())
+    assert saved['provider'] == 'azure_openai' and saved['model_version_source'] == 'configured'
+    assert saved['records'][0]['action'] == 'skipped_unchanged'
+    assert [r['api_requests'] for r in saved['runs']] == [1, 0]
+    assert len(calls) == 1
+    assert 'offline-fixture' not in capsys.readouterr().out
+
+
+def test_postgres_stats_uses_vector_norm_for_vector_column():
+    # pgvector exposes l2_norm for halfvec/sparsevec; vector_norm accepts vector.
+    queries = []
+    def execute(query):
+        queries.append(query)
+        return SimpleNamespace(fetchone=lambda: (2, 2, 0.9999, 1.0001))
+    store = PostgresStore.__new__(PostgresStore)
+    store.connection = SimpleNamespace(execute=execute)
+    assert store.stats() == dict(distinct_ids=2, total_rows=2, norm_min=0.9999, norm_max=1.0001)
+    assert 'min(vector_norm(embedding)), max(vector_norm(embedding))' in queries[0]
