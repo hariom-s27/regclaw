@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -96,18 +97,15 @@ def test_plugin_pool_union_best_rank_and_source_fit(capsys):
 
 
 def test_frozen_topics_review_before_results_and_cli(tmp_path):
+    document = yaml.safe_load((Path(__file__).resolve().parents[1] / 'retrieval_eval/queries.yaml').read_bytes())
     topics = read_queries(Path(__file__).resolve().parents[1] / 'retrieval_eval/queries.yaml')
-    assert len(topics) == 15
-    q7 = next(q for q in topics if q['qid'] == 'Q7')
-    assert q7['type'] == 'hard_negative'
-    assert q7['note'] == 'near-miss: reporting topics exist, no deadline in corpus (EU Art 87 outside slice; 21 CFR 803 not in corpus)'
-    assert [q['query'] for q in topics[:3]] == ['mandatory requirements for biological evaluation',
-        'knee implant biocompatibility tests', 'ethylene oxide sterilization residuals']
+    assert len(topics) == 16
+    assert all(set(q['narrative']) == {'grade3', 'grade2', 'grade1_traps'} for q in topics)
     topic_path = tmp_path / 'topics.yaml'
-    topic_path.write_text(yaml.safe_dump([{**topics[0], 'reviewed_before_results': False}]))
-    with pytest.raises(ValueError, match='review'):
+    topic_path.write_text(yaml.safe_dump({**document, 'status': 'DRAFT'}))
+    with pytest.raises(ValueError, match='FROZEN'):
         read_queries(topic_path)
-    topic_path.write_text(yaml.safe_dump([topics[0]]))
+    topic_path.write_text(yaml.safe_dump({**document, 'queries': [topics[0]]}))
     corpus = tmp_path / 'clauses.json'
     corpus.write_text(json.dumps(toy_corpus()))
     output = tmp_path / 'output'
@@ -122,3 +120,12 @@ def test_frozen_topics_review_before_results_and_cli(tmp_path):
     assert metrics_main(['--qrels', str(qrels), '--rankings', str(rankings), '--corpus-size', '5',
                          '--output', str(output / 'metrics.json')]) == 0
     assert json.loads((output / 'metrics.json').read_text())['mrr'] == 1
+
+
+def test_frozen_topics_integrity():
+    raw = (Path(__file__).resolve().parents[1] / 'retrieval_eval/queries.yaml').read_bytes()
+    document = yaml.safe_load(raw)
+    assert document['status'] == 'FROZEN'
+    assert len(document['queries']) == len({q['qid'] for q in document['queries']}) == 16
+    assert hashlib.sha256(raw.replace(b'\r\n', b'\n').replace(b'\r', b'\n')).hexdigest() == (
+        '83d7813873d6d9e47a732db8778f68c18cfb4654834acfa16ca6847457affc7c')

@@ -1,123 +1,225 @@
-# Topic review completed before the first BM25 run on 2026-10-15.
-# These remain DRAFT for the human relevance judge. Source presence is not relevance.
-- qid: R1
-  query: mandatory requirements for biological evaluation
-  status: DRAFT
-  reviewed_before_results: true
-  description: Duties governing biological evaluation of medical devices.
-  narrative: Relevant clauses require evaluation, planning, testing or documented biological risk assessment. Exclude unrelated electrical or mechanical requirements and incidental uses of evaluation.
-  expected_sources: [fda-iso10993-1, eu-mdr, imdrf-n47, in-ep]
-  type: mandatory
-- qid: R2
-  query: knee implant biocompatibility tests
-  status: DRAFT
-  reviewed_before_results: true
-  description: Biological testing applicable to knee implants and their materials.
-  narrative: Relevant clauses discuss knee prosthesis biocompatibility or general biological evaluation applicable to implants. Exclude purely mechanical knee performance tests unless biologic endpoints are specified.
-  expected_sources: [fda-knee, fda-iso10993-1]
-  type: device/testing
-- qid: R3
-  query: ethylene oxide sterilization residuals
-  status: DRAFT
-  reviewed_before_results: true
-  description: Device residual safety and reporting after ethylene oxide sterilization.
-  narrative: Relevant clauses cover residual ethylene oxide or ethylene chlorohydrin on devices, testing or reporting limits. Facility emissions alone are not device residual requirements.
-  expected_sources: [fda-sterility-510k, fda-iso10993-1, fda-chem-analysis]
-  type: chemical/testing
-- qid: Q1
-  query: What must a manufacturer do before changing the sterilisation method of an already-cleared implant?
-  status: DRAFT
-  reviewed_before_results: true
-  description: Submission and validation duties triggered by a sterilisation-method change.
-  narrative: Relevant clauses explain when a new submission or validation is required after a change, including sterility information. General method descriptions without a change-control duty are only background.
-  expected_sources: [fda-sterility-510k, 'fda-*']
-  type: procedural
-- qid: Q2
-  query: Who checks the technical file for a high-risk orthopaedic device before it can be sold in Europe?
-  status: DRAFT
-  reviewed_before_results: true
-  description: European premarket technical-documentation assessor for high-risk devices.
-  narrative: Relevant clauses identify the notified body or another legally responsible assessor and its technical-documentation review. Exclude generic documentation contents without identifying the assessor. The MDR slices omit much of the conformity-assessment chapters; coverage may be partial.
-  expected_sources: [eu-mdr]
-  type: actor
-- qid: Q3
-  query: How long must records about a device's safety be kept after it leaves the market?
-  status: DRAFT
-  reviewed_before_results: true
-  description: Safety-documentation retention periods and triggering dates.
-  narrative: Relevant clauses state a retention period for device safety or technical records and the applicable starting event. Exclude shelf life, device lifetime and unrelated study durations.
-  expected_sources: [eu-mdr, in-mdr]
-  type: numeric
-- qid: Q4
-  query: Which device risk categories need a clinical investigation rather than literature data?
-  status: DRAFT
-  reviewed_before_results: true
-  description: Risk-class-dependent requirements for clinical investigations.
-  narrative: Relevant clauses connect device risk category or implantable status to a clinical investigation and exceptions allowing existing evidence. General clinical-evidence statements without a category are background.
-  expected_sources: [eu-mdr, imdrf-n47]
-  type: mandatory/class
-- qid: Q5
-  query: What information must appear on the label of a sterile single-use device?
-  status: DRAFT
-  reviewed_before_results: true
-  description: Required sterile and single-use device labelling content.
-  narrative: Relevant clauses specify required label information such as sterility, method, expiry, reuse restriction or traceability. Exclude submission-only content and generic packaging performance without labelling duties.
-  expected_sources: ['fda-*', in-mdr, eu-mdr]
-  type: mandatory
-- qid: Q6
-  query: How is "serious incident" defined for post-market reporting?
-  status: DRAFT
-  reviewed_before_results: true
-  description: Definition of serious incident in medical-device vigilance.
-  narrative: Relevant clauses define serious incident or its death, serious deterioration or public-health criteria. Generic risk management or adverse events without the definitional criteria are background.
-  expected_sources: [imdrf-n47, eu-mdr]
-  type: definition
-- qid: Q7
-  query: Reporting deadline when a device malfunction could cause death
-  status: DRAFT
-  reviewed_before_results: true
-  description: Mandatory deadline for reporting potentially fatal device malfunctions.
-  narrative: Relevant clauses state a device-vigilance reporting time and the triggering malfunction or fatality criterion. Exclude emissions deadlines, premarket timelines and device malfunction prevention without a reporting deadline. FDA vigilance rules and MDR vigilance articles are outside the principal corpus slices, so this is likely unsupported.
-  expected_sources: ['fda-*', eu-mdr]
-  type: hard_negative
-  note: "near-miss: reporting topics exist, no deadline in corpus (EU Art 87 outside slice; 21 CFR 803 not in corpus)"
-- qid: Q8
-  query: Emission controls for facilities that use ethylene oxide to sterilise products
-  status: DRAFT
-  reviewed_before_results: true
-  description: Facility-level ethylene oxide emission-control obligations.
-  narrative: Relevant clauses require emission controls, capture systems, monitoring or compliance for ethylene oxide sterilisation facilities. Exclude residual ethylene oxide on a medical device.
-  expected_sources: [epa-63o]
-  type: mandatory
-- qid: Q9
-  query: Who needs a licence to import a medical device into India?
-  status: DRAFT
-  reviewed_before_results: true
-  description: Persons and procedures subject to Indian device import licensing.
-  narrative: Relevant clauses identify applicants, importers, authorised agents or licensing duties for importing medical devices. Exclude manufacturing-only licences and unrelated clinical study permissions.
-  expected_sources: [in-mdr]
-  type: actor/procedural
-- qid: Q10
-  query: Unique identifier requirements for devices traced through the supply chain
-  status: DRAFT
-  reviewed_before_results: true
-  description: Unique device identification and supply-chain traceability duties.
-  narrative: Relevant clauses prescribe identifiers, labelling or traceability records for devices and economic operators. Generic identification of chemicals is irrelevant. MDR UDI articles are outside Arts 1-10, though Annex I label duties may provide partial coverage.
-  expected_sources: [eu-mdr, imdrf-n47, 'fda-*']
-  type: cross-jurisdiction
-- qid: Q11
-  query: When can a manufacturer rely on an equivalent device's data?
-  status: DRAFT
-  reviewed_before_results: true
-  description: Conditions for relying on clinical evidence from an equivalent device.
-  narrative: Relevant clauses set equivalence criteria, access to data, justification duties or exceptions concerning another device's evidence. Exclude generic same-material comparisons without clinical equivalence.
-  expected_sources: [eu-mdr]
-  type: recommendation vs mandatory
-- qid: Q12
-  query: Requirements for testing contact lenses on animals
-  status: DRAFT
-  reviewed_before_results: true
-  description: Intentional unsupported topic about animal tests specific to contact lenses.
-  narrative: Relevant means explicit requirements for animal testing of contact lenses. General biological testing or generic animal welfare is insufficient. No source is expected to answer this device-specific question; judge retrieved lexical matches carefully.
-  expected_sources: []
-  type: hard_negative
+# retrieval_eval/queries.yaml — S8 query topics v1 — FROZEN 2026-10-18 (approved by Shyam)
+# Written blind (no BM25/pool/system output/clause titles seen). Query texts R1–R3 = report wording, verbatim.
+# Do not edit. Any change = a new version (v1.1) with a logged reason; never change topics from results.
+version: "1.0"
+frozen: "2026-10-18"
+status: FROZEN
+
+common_rules:
+  grades: "3 = directly answers / states the requirement; 2 = relevant (partial answer or necessary condition); 1 = same topic but does not answer; 0 = unrelated. Binary relevant = grade >= 2."
+  judge_text_not_graph: "Mandatory/recommended is judged from the clause's own wording, never from the graph's obligation label (regex weak labels)."
+  jurisdiction: "If a query names a jurisdiction (Europe, India, US-cleared), a clause from another jurisdiction on the same topic gets at most grade 1. IMDRF counts as another jurisdiction for queries that name Europe, India or the US."
+  swap: "After pooling, a query whose pool has no grade-3 clause (judged by the human relevance labels only, never by system scores) is swapped, unless it is a deliberate negative (Q7, Q12). Every swap is logged with its reason."
+  rephrase: "Variant b (ISO-style rephrase) uses formal regulatory vocabulary but must not contain the answer. Variant c (HyDE) is LLM-generated later with a frozen prompt."
+  obligation_dependency: "Record per query whether its generated stage-1 Cypher filters on obligation. If S5b changes the graph's obligation labels, re-score those queries from the cached Cypher."
+
+queries:
+  - qid: R1
+    query: "mandatory requirements for biological evaluation"
+    rephrase_b: "requirements that shall be met for the biological evaluation of medical devices within a risk management process"
+    origin: report
+    type: mandatory
+    jurisdiction: null
+    expected_sources: [fda-*, eu-mdr, in-ep, imdrf-n47]
+    description: "Duties (not recommendations) to carry out or document the biological evaluation of a medical device."
+    narrative:
+      grade3: "A clause that imposes a duty to carry out or document the biological evaluation of a device."
+      grade2: "A duty on one part of the evaluation (an endpoint must be addressed; a report must contain X)."
+      grade1_traps: "Should-only recommendations about biological evaluation; descriptions of the process."
+    notes: "Likely depends on the obligation filter in stage 1."
+
+  - qid: R2
+    query: "knee implant biocompatibility tests"
+    rephrase_b: "biological evaluation endpoints for implant devices with long-term tissue or bone contact"
+    origin: report
+    type: device_bio
+    jurisdiction: null
+    expected_sources: [fda-*]
+    description: "Biocompatibility tests or endpoints that apply to implanted (e.g. orthopaedic/knee) devices."
+    narrative:
+      grade3: "Tests or endpoints for implant devices with long-term tissue/bone contact."
+      grade2: "Implant-specific biocompatibility points (implantation effects, metallic implant materials)."
+      grade1_traps: "General biocompatibility tests not tied to implants."
+
+  - qid: R3
+    query: "ethylene oxide sterilization residuals"
+    rephrase_b: "allowable limits for ethylene oxide and ethylene chlorohydrin residuals in EO-sterilized medical devices"
+    origin: report
+    type: chemical
+    jurisdiction: null
+    expected_sources: [fda-*]
+    description: "Ethylene oxide (or ECH) residues left in devices after EO sterilisation."
+    narrative:
+      grade3: "Limits for, or a duty to evaluate/control, EO or ECH residues in devices."
+      grade2: "EO residuals named as a biocompatibility or sterilisation consideration."
+      grade1_traps: "EO process validation with no residue angle; EO air emissions from facilities (EPA) = 1."
+
+  - qid: Q1
+    query: "What must a manufacturer do before changing the sterilisation method of an already-cleared implant?"
+    rephrase_b: "submission requirements for a change in sterilization method of a device cleared through premarket notification"
+    origin: r15
+    type: procedural
+    jurisdiction: US
+    expected_sources: [fda-*]
+    description: "What is required when the sterilisation method of a US-cleared device changes."
+    narrative:
+      grade3: "What is required (a new submission / the information to provide) when the sterilisation method of a cleared device changes."
+      grade2: "Sterilisation information required in premarket notifications generally."
+      grade1_traps: "Sterilisation validation outside a change context; non-US clauses (max 1)."
+
+  - qid: Q2
+    query: "Who checks the technical file for a high-risk orthopaedic device before it can be sold in Europe?"
+    rephrase_b: "conformity assessment of technical documentation by the notified body for class III implantable devices"
+    origin: r15
+    type: actor
+    jurisdiction: EU
+    expected_sources: [eu-mdr]
+    description: "The body that assesses technical documentation of high-risk devices before EU market access."
+    narrative:
+      grade3: "The notified body assesses the technical documentation of class III / high-risk (implantable) devices."
+      grade2: "The notified body's role in conformity assessment generally; what the technical documentation must contain."
+      grade1_traps: "Classification rules alone; non-EU clauses incl. IMDRF (max 1)."
+
+  - qid: Q3
+    query: "How long must records about a device's safety be kept after it leaves the market?"
+    rephrase_b: "period for which the manufacturer shall keep technical documentation available to the competent authorities after the last device has been placed on the market"
+    origin: r15
+    type: numeric
+    jurisdiction: null
+    expected_sources: [eu-mdr, in-mdr]
+    description: "Retention period for documentation/records after the last device is placed on the market."
+    narrative:
+      grade3: "States a retention period for documentation/records after the last device is placed on the market."
+      grade2: "A duty to keep records, with no period."
+      grade1_traps: "What records must contain."
+
+  - qid: Q4
+    query: "Which device risk categories need a clinical investigation rather than literature data?"
+    rephrase_b: "devices for which clinical investigations shall be performed and conditions under which existing clinical data are sufficient"
+    origin: r15
+    type: mandatory_class
+    jurisdiction: null
+    expected_sources: [eu-mdr, imdrf-n47]
+    description: "Which classes/devices must have clinical investigations, and when existing data suffice."
+    narrative:
+      grade3: "Which classes/devices must have clinical investigations, and the exemptions."
+      grade2: "When clinical evaluation may rest on existing data/literature."
+      grade1_traps: "How to conduct an investigation (ethics, protocol)."
+
+  - qid: Q5
+    query: "What information must appear on the label of a sterile single-use device?"
+    rephrase_b: "particulars to be shown on the label: sterile condition, sterilization method and indication of single use"
+    origin: r15
+    type: mandatory
+    jurisdiction: null
+    expected_sources: [fda-*, in-mdr, eu-mdr]
+    description: "Required label particulars for sterile, single-use devices."
+    narrative:
+      grade3: "Label particulars that include the sterile state / method or the single-use indication."
+      grade2: "General required label content."
+      grade1_traps: "IFU content, language rules, symbols in general."
+
+  - qid: Q6
+    query: "How is \"serious incident\" defined for post-market reporting?"
+    rephrase_b: "definition of serious incident for vigilance reporting of medical devices"
+    origin: r15
+    type: definition
+    jurisdiction: null
+    expected_sources: [imdrf-n47, eu-mdr]
+    description: "The definition of a serious incident."
+    narrative:
+      grade3: "The definition itself."
+      grade2: "Criteria that decide whether an event is serious/reportable."
+      grade1_traps: "Other definitions; reporting procedures."
+
+  - qid: Q7
+    query: "Reporting deadline when a device malfunction could cause death"
+    rephrase_b: "time limit for manufacturer reporting of serious incidents involving death or serious deterioration in health"
+    origin: r15
+    type: hard_negative_near_miss
+    jurisdiction: null
+    expected_sources: [fda-*, eu-mdr]
+    description: "Deliberate near-miss negative: the topic exists, the asked detail probably does not (EU deadline article outside the slice; 21 CFR 803 not in corpus)."
+    narrative:
+      grade3: "Only if a clause states a reporting time limit for such events."
+      grade2: "A duty to report serious incidents with no deadline."
+      grade1_traps: "Vigilance in general."
+
+  - qid: Q8
+    query: "Emission controls for facilities that use ethylene oxide to sterilise products"
+    rephrase_b: "emission standards for ethylene oxide sterilization facilities: chamber exhaust and aeration room vents"
+    origin: r15
+    type: mandatory
+    jurisdiction: US
+    expected_sources: [epa-63o]
+    description: "Emission limits/controls for EO sterilisation sources."
+    narrative:
+      grade3: "An emission limit or control requirement for EO sterilisation sources."
+      grade2: "The compliance/monitoring tied to those limits."
+      grade1_traps: "Applicability/definitions only; EO residues in devices = 1."
+
+  - qid: Q9
+    query: "Who needs a licence to import a medical device into India?"
+    rephrase_b: "application for an import licence for medical devices to the Central Licensing Authority"
+    origin: r15
+    type: actor_procedural
+    jurisdiction: India
+    expected_sources: [in-mdr]
+    description: "Who must obtain an Indian import licence, and how to apply."
+    narrative:
+      grade3: "Who must obtain an import licence, and the application."
+      grade2: "Conditions/forms/fees for an import licence."
+      grade1_traps: "Manufacturing licences; non-India clauses incl. IMDRF (max 1)."
+
+  - qid: Q10
+    query: "Unique identifier requirements for devices traced through the supply chain"
+    rephrase_b: "unique device identification system: assignment of UDI and traceability of devices"
+    origin: r15
+    type: cross_jurisdiction
+    jurisdiction: null
+    expected_sources: [eu-mdr, imdrf-n47, fda-*]
+    description: "UDI requirements and device traceability."
+    narrative:
+      grade3: "UDI requirements (assignment, carrier, database)."
+      grade2: "Traceability duties of economic operators/registration."
+      grade1_traps: "General labelling."
+
+  - qid: Q11
+    query: "When can a manufacturer rely on an equivalent device's data?"
+    rephrase_b: "demonstration of equivalence to another device for clinical evaluation: technical, biological and clinical characteristics"
+    origin: r15
+    type: recommendation_vs_mandatory
+    jurisdiction: null
+    expected_sources: [eu-mdr]
+    description: "Conditions for using an equivalent device's data."
+    narrative:
+      grade3: "The conditions for claiming equivalence."
+      grade2: "Clinical evaluation based on another device's data/literature."
+      grade1_traps: "Clinical investigation conduct."
+
+  - qid: Q12
+    query: "Requirements for testing contact lenses on animals"
+    rephrase_b: "in vivo animal testing requirements for contact lenses"
+    origin: r15
+    type: hard_negative
+    jurisdiction: null
+    expected_sources: []
+    description: "Deliberate hard negative: animal-testing requirements specific to contact lenses."
+    narrative:
+      grade3: "Only if a clause sets animal-testing requirements specifically for contact lenses."
+      grade2: "Animal-testing requirements for lens-type / eye-contact devices."
+      grade1_traps: "General animal-testing or biocompatibility text."
+    notes: "The corpus contains contact-lens device mentions (seen in S4c), so it may not be a true negative; the grade-3 rule stays as written."
+
+  - qid: Q13
+    query: "How does a sterilisation facility prove it is meeting its ethylene oxide limits?"
+    rephrase_b: "performance testing and continuous compliance monitoring for ethylene oxide emission control devices"
+    origin: s8_added
+    type: procedural
+    jurisdiction: US
+    expected_sources: [epa-63o]
+    description: "Added for EPA coverage (R15: >= 2 queries per source). Performance tests, monitoring or compliance demonstration for EO controls."
+    narrative:
+      grade3: "Performance tests, monitoring or compliance demonstration for EO emission controls."
+      grade2: "Records/reports for compliance."
+      grade1_traps: "The emission limits themselves = 2 at most."

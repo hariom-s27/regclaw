@@ -19,13 +19,19 @@ class System(Protocol):
 
 
 def read_queries(path):
-    queries = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    document = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    if not isinstance(document, dict) or document.get('status') != 'FROZEN':
+        raise ValueError('Topics require FROZEN status before viewing rankings')
+    queries = document['queries']
     seen = set()
     for q in queries:
-        required = {'qid', 'query', 'status', 'reviewed_before_results', 'description', 'narrative', 'expected_sources', 'type'}
-        if not required <= set(q) or set(q) - required - {'note'} or q['status'] != 'DRAFT' or q['reviewed_before_results'] is not True:
-            raise ValueError('DRAFT topics require a narrative review before viewing rankings')
-        if 'note' in q and (not isinstance(q['note'], str) or not q['note'].strip()):
+        required = {'qid', 'query', 'rephrase_b', 'origin', 'type', 'jurisdiction',
+                    'expected_sources', 'description', 'narrative'}
+        if not required <= set(q) or set(q) - required - {'notes'}:
+            raise ValueError('Invalid frozen topic fields')
+        if not isinstance(q['narrative'], dict) or set(q['narrative']) != {'grade3', 'grade2', 'grade1_traps'}:
+            raise ValueError('Frozen topics require graded narratives')
+        if 'notes' in q and (not isinstance(q['notes'], str) or not q['notes'].strip()):
             raise ValueError('Topic notes must be nonempty strings')
         if not re.fullmatch(r'[A-Za-z0-9_-]+', q['qid']) or q['qid'] in seen:
             raise ValueError('Invalid or duplicate qid')
