@@ -2,7 +2,7 @@
 
 > All numbers below are from **this rebuild**, on the public substitute corpus
 > described in CORPUS.md, with earlier sections run on 2026-10-16 at commits a6bc968 and f6a461a;
-> the obligation section records its own date and working tree. They are **not** the
+> the obligation and S7 sections record their own dates and working trees. They are **not** the
 > numbers from the original internship system and should not be compared to them.
 
 ### Limitations — read before quoting any number
@@ -136,6 +136,166 @@ The hard ceiling is 8,191 tokens in the producer; the table dimension is 1536 in
 [embed/store.py](../embed/store.py). No embeddings were requested or inserted.
 These are input-size measurements, not throughput, cost, or model quality claims.
 
+## S7 Azure embedding load and reconciliation
+
+Measured on **2026-10-18**, in the working tree based on `04074a3`, on the public
+substitute corpus. Provider decision: [ADR 0026](decisions/0026-azure-hosted-embeddings.md),
+approved conflict C-AZEMB. The model remains `text-embedding-3-small`, 1536 dims;
+Azure is a different host. Version `1` and
+`versionUpgradeOption=OnceNewDefaultVersionAvailable` are **configured** metadata
+supplied from the deployment, not an observed runtime version. Azure may
+auto-upgrade the version. No parser, clause, gold or retrieval code was changed.
+
+Commands, with Docker running and project Python active; credentials are loaded
+from the local, untracked `.env`:
+
+```powershell
+$env:EMBED_PROVIDER = 'azure_openai'
+$env:REGCLAW_STUB = '0'
+python tasks.py embed --dry-run
+python tasks.py embed --live
+python tasks.py embed --reconcile
+```
+
+Producers: [embed/embed.py](../embed/embed.py),
+[embed/store.py](../embed/store.py). The successful live receipt and subsequent
+idempotency receipt are in ignored `data/embed_manifest.json`.
+
+| Dry-run item | Measured/planned value |
+|---|---:|
+| Inputs | 1,143 |
+| `cl100k_base` tokens, title + newline + text | 250,829 |
+| Maximum input / inputs over 8,191 | 7,250 / 0 |
+| Planned requests | 5 |
+| Request input counts | 338, 216, 365, 179, 45 |
+| Request token counts | 59,999; 59,524; 59,758; 59,949; 11,599 |
+| Request token cap / rolling 60-second budget | 60,000 / 80,000 |
+| Minimum pacing schedule, excluding API/store latency and retries | 180 seconds |
+
+The completed load's run id is `041b5897-b197-48f9-9a41-6b4e91af52cc`.
+Captured receipt:
+
+| Completed live load item | Measured value |
+|---|---:|
+| Embedded / skipped unchanged | 1,143 / 0 |
+| Successful batch requests | 5 |
+| API attempts, including retries | 7 |
+| HTTP 429 responses / retries | 2 / 2 |
+| Successful-response API usage tokens | 250,829 |
+| tiktoken tokens in successful batches | 250,829 |
+| API minus tiktoken | 0 |
+| Pacing sleep requested | 276.125 seconds |
+| Loader `run()` wall time | 308.969 seconds |
+
+The wall measurement includes API calls, pacing, upserts and statistics; it
+excludes CLI input preflight and client/database setup. The 429s exercised the
+retry path. An earlier attempt completed all five batch upserts but failed in
+the pre-existing statistics query: `l2_norm(vector)` was ambiguous because the
+installed extension exposes `l2_norm(halfvec)` and `l2_norm(sparsevec)`, with
+`vector_norm(vector)` for this column type. That one statistics expression was
+corrected, regression-tested, and the full load repeated. The earlier attempt
+did not write a manifest/receipt, so its API usage, retry count and wall time
+are unavailable. The table above describes the completed repeat, not aggregate
+provider billing across both attempts. It required five additional successful
+batch requests. Token-price estimates remain unverified Azure billing.
+
+`python tasks.py embed --reconcile` produced:
+
+| Reconciliation item | Measured value |
+|---|---:|
+| Neo4j Clause ids | 1,143 |
+| Postgres distinct clause_ids | 1,143 |
+| Postgres total rows | 1,143 |
+| Clauses without a vector | 0 |
+| Orphan vectors | 0 |
+| Minimum L2 norm | 0.9994254359825807 |
+| Maximum L2 norm | 1.0006130569056302 |
+| Norms within 0.001 of one | true |
+| Recorded completed live runs / API-token delta | 1 / 0 |
+
+The following separate spot-check command uses Azure query embeddings and calls
+the existing `HybridRetriever.stage2_rank` method directly. Its candidate set is
+all 1,143 Neo4j clause ids, without a stage-1 LLM filter. It exercises the exact
+stage-2 cosine SQL and does not measure end-to-end retrieval quality or latency.
+The constructor is bypassed only to supply the already registered database
+connection; no retrieval source is changed.
+
+```powershell
+$env:EMBED_PROVIDER = 'azure_openai'
+$env:LANGFUSE_ENABLED = 'false'
+@'
+import json, os
+from pathlib import Path
+from dotenv import load_dotenv
+import psycopg
+from neo4j import GraphDatabase
+from pgvector import Vector
+from embed.embed import make_embedder, provenance
+from embed.store import PostgresStore, INDEX_SQL
+from embed.token_stats import offline_encoding, token_count
+from retrieval.hybrid_retriever import HybridRetriever, PG_TABLE
+load_dotenv('.env')
+assert PG_TABLE == 'clause_embeddings'
+queries = ['ethylene oxide sterilization residuals',
+           'biocompatibility cytotoxicity testing', 'labeling requirements']
+embedder = make_embedder()
+vectors = embedder.embed(queries)
+with GraphDatabase.driver(os.environ['NEO4J_URI'], auth=(os.environ.get('NEO4J_USER', 'neo4j'), os.environ['NEO4J_PASSWORD'])) as driver:
+    records, _, _ = driver.execute_query('MATCH (c:Clause) RETURN c.id AS id', database_='neo4j')
+    ids = [r['id'] for r in records]
+with psycopg.connect(os.environ['PG_DSN']) as connection:
+    store = PostgresStore(connection)  # Includes the unchanged no-ANN assertion.
+    retriever = HybridRetriever.__new__(HybridRetriever)
+    retriever.pg = connection
+    dimensions = connection.execute('SELECT vector_dims(embedding), count(*) FROM clause_embeddings GROUP BY 1').fetchall()
+    indexes = connection.execute(INDEX_SQL).fetchall()
+    checks = []
+    for query, vector in zip(queries, vectors.vectors):
+        hits = retriever.stage2_rank(Vector(vector), ids, 3)
+        checks.append({'query': query, 'top3': [{'clause_id': h.clause_id, 'cosine_score': h.score} for h in hits]})
+    result = {**provenance(embedder), 'candidate_ids': len(ids),
+              'dimensions_and_rows': dimensions, 'indexes': indexes,
+              'query_api_requests': embedder.api_requests,
+              'query_429s': embedder.rate_limits,
+              'query_api_tokens': vectors.prompt_tokens,
+              'query_tiktoken_tokens': sum(token_count(offline_encoding(), q) for q in queries),
+              'checks': checks}
+    Path('data/embed_spot_checks.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+    print(json.dumps(result, indent=2))
+'@ | python -
+```
+
+Captured dimension inventory: `(1536, 1143)`. The only index returned was
+`clause_embeddings_pkey`, `USING btree (clause_id)`; **no HNSW or IVFFlat index**.
+The startup assertion remains in place. The three queries used one additional
+Azure request, 15 API tokens = 15 tiktoken tokens, and zero 429s. Ignored output:
+`data/embed_spot_checks.json`. Captured top three results, scores rounded to nine
+decimal places:
+
+| Query | Rank | Clause id | Cosine score |
+|---|---:|---|---:|
+| ethylene oxide sterilization residuals | 1 | `epa-63o:§63.361` | 0.517534486 |
+| ethylene oxide sterilization residuals | 2 | `epa-63o:§63.364(i)` | 0.516995451 |
+| ethylene oxide sterilization residuals | 3 | `epa-63o:§63.365(c)` | 0.507077580 |
+| biocompatibility cytotoxicity testing | 1 | `fda-iso10993-1:Attachment C.T1` | 0.636776640 |
+| biocompatibility cytotoxicity testing | 2 | `fda-iso10993-1:VI` | 0.604444824 |
+| biocompatibility cytotoxicity testing | 3 | `fda-iso10993-1:VI.A` | 0.586226685 |
+| labeling requirements | 1 | `in-mdr:Schedule 4.Part III.Appendix II.3` | 0.627550764 |
+| labeling requirements | 2 | `imdrf-n47:3.22` | 0.621888650 |
+| labeling requirements | 3 | `in-mdr:Schedule 4.Part III.Appendix III.20` | 0.594802063 |
+
+**Idempotency:** rerunning `python tasks.py embed --live` produced
+`embedded=0`, `skipped_unchanged=1143`, `requests=0`, `api_requests=0`, no retries,
+and 0.063 seconds in `run()`. The manifest's 1,143 current records all have
+`action=skipped_unchanged`; its live API-attempt receipts are `[7, 0]`. The CLI
+still prints the full-corpus five-request planning preview before the zero-call
+result. No API usage was reported for the rerun because no request was sent.
+
+Frozen clause SHA-256 at start and end (`Get-FileHash data/clauses.json -Algorithm SHA256`):
+`C517FCEE4F89967AD62D49A42A8EFE0D0FFD76DF91AE1E88A2516F2B8B3C585D`.
+The parser, gold files, input v1, table contract, startup assertion, ranking SQL
+and `retrieval/` are unchanged. These documents are uncommitted drafts.
+
 ## Offline tests
 
 Command: `python tasks.py test`.
@@ -148,6 +308,9 @@ Producer: [tasks.py](../tasks.py). Captured local test totals:
 | `a6bc968`, driver fix | 12 | 1 | 273 | 286 |
 | Final S15b documentation validation | 12 | 1 | 273 | 286 |
 | Live-results documentation refresh | 12 | 1 | 273 | 286 |
+| S7b provider implementation | 12 | 1 | 314 | 327 |
+| S7b norm compatibility fix and run-counter validation | 12 | 1 | 315 | 328 |
+| S7b after live load, reconciliation, spot checks and idempotency | 12 | 1 | 315 | 328 |
 
 The runner selects stub mode. Fakes test contracts and guard behavior;
 the totals above are test outcomes, not retrieval or model-quality metrics.
@@ -208,7 +371,9 @@ with GraphDatabase.driver('bolt://localhost:7687', auth=(os.environ.get('NEO4J_U
 
 Captured output: `SMOKE _run_ids stage-1 rows: 6`.
 This exercises the helper's managed read transaction and timeout. No model was called.
-The other retrieval stages were not run live; production vectors are still pending.
+At that earlier verification, the other retrieval stages were not run live and
+production vectors were pending. The S7 section above records the subsequent
+vector load and stage-2 spot checks; complete retrieval evaluation remains pending.
 
 ## Obligation gold and classifier
 
@@ -437,7 +602,7 @@ the same SHA-256 at start and end:
 | Full entity extraction and grounded accuracy | TBD | Live extraction and human evaluation not run |
 | Obligation agreement and LegalBERT quality | Measured | See Obligation gold and classifier; macro-F1 comparison is inconclusive |
 | Visual matrix verification | TBD | Human visual comparison not completed |
-| Production embedding reconciliation | TBD | Production vectors not loaded |
+| Production embedding reconciliation | Measured | S7: 1,143 clauses and vectors, no missing/orphan ids; see commands and counts above |
 | Retrieval quality and pipeline latency | TBD | Judged queries and complete live run pending |
 | Exact-vector latency and its target budget | TBD | Benchmark not run; budget not selected |
 | Part II document, indexing and evaluation | TBD | Intended document and evaluation setup await confirmation |
@@ -456,6 +621,8 @@ Source dates and decision chronology are recorded in the journal without publish
 | Helper smoke row count | `_run_ids` reproducing command above |
 | Matrix rows, cells, mismatch count and source-page numbers | `standards.crosscheck.crosscheck`; captured above |
 | Token totals, maximum and guard count | `python tasks.py embed --dry-run`; captured above |
+| S7 live load, usage, reconciliation and idempotency | `python tasks.py embed --live`, `--reconcile`, then `--live`; receipts and captured counts above |
+| S7 vector dimensions, indexes and exact ranking | Stage-2 spot-check command above; `data/embed_spot_checks.json` (ignored) |
 | Test totals | `python tasks.py test`; captured above |
 | Python version, dependency pins and model identifiers | CI workflow, requirements, `ner/client.py`, `standards/classifier.py` |
 | Clause field count and physical-page origin | `ingest/validate.py`, `pageindex/pi_common.py` |
