@@ -10,6 +10,7 @@
 - **Author-written eval set.** Queries and relevance judged by the author; obligation gold uses a blind first annotator plus an independent second annotator.
 - **LLM-as-judge.** Ragas scores depend on judge model and prompt version.
 - **Single run.** LLM outputs are non-deterministic.
+- Results marked provisional (GPT) use Azure OpenAI GPT in place of Claude; they will be replaced by Claude runs.
 - **Corpus differs from the original system's**, so absolute scores are not comparable; only trends between configurations of this rebuild are reported.
 
 The limitations describe the evaluation protocol. Obligation gold and independent
