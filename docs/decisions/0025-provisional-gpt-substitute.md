@@ -49,6 +49,10 @@ retain their existing environment-loading behavior. Never commit `.env`.
 
 ### Inspected API contract
 
+| Role | REPORT model | Provisional substitute |
+|---|---|---|
+| Retrieval stage-1 Text2Cypher | Claude Haiku (REPORT) | gpt-5-mini, effort low (provisional), role s8_cypher |
+
 The project environment has `openai==2.54.0` and `anthropic==1.14.0`.
 Azure v1 accepts `OpenAI(base_url=endpoint + '/openai/v1/', api_key=...)` with
 `model=<deployment>` and needs no dated `api_version`. This is verified by a
