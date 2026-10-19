@@ -105,6 +105,8 @@ def retriever(monkeypatch, tmp_path, fail=None):
                      obligation='NONE', standard='Public document') for cid in params['ids']], None, None
     r.driver = NS(session=session, execute_query=execute_query)
     def execute(query, params):
+        if not isinstance(query, str):
+            return NS(fetchone=lambda: (1536, 1143))
         if 'format_type' in query:
             return NS(fetchone=lambda: ('vector(1536)',))
         if fail:
@@ -119,9 +121,11 @@ def retriever(monkeypatch, tmp_path, fail=None):
     from retrieval.query_embeddings import QueryEmbeddings, EXPECTED
     r.query_embeddings = QueryEmbeddings(tmp_path / (uuid4().hex + '.jsonl'),
         NS(provider='azure_openai', model='text-embedding-3-small', dimensions=1536,
+           deployment='text-embedding-3-small', model_version='1',
            embed=lambda texts: EmbeddingBatch([[1.] + [0.] * 1535])))
     r.manifest_path = tmp_path / 'identity.json'
-    r.manifest_path.write_text(json.dumps(EXPECTED))
+    r.manifest_path.write_text(json.dumps(dict(EXPECTED, model_version='1',
+                                             input_version='v1', clause_vectors=1143)))
     r.cypher_cache = JsonlCache(tmp_path / (uuid4().hex + '.jsonl'))
     r.fresh = False
     response = NS(content=[NS(type='text', text=json.dumps(dict(

@@ -25,6 +25,7 @@ def offline(monkeypatch):
 
 class FakeEmbedder:
     provider, model, dimensions = 'azure_openai', MODEL, 1536
+    deployment, model_version = MODEL, '1'
 
     def __init__(self):
         self.calls = 0
@@ -32,20 +33,22 @@ class FakeEmbedder:
     def embed(self, texts):
         self.calls += 1
         assert len(texts) == 1
-        return EmbeddingBatch([[1.] + [0.] * 1535])
+        return EmbeddingBatch([[1.] + [0.] * 1535], 3, MODEL)
 
 
 def manifest(tmp_path, **overrides):
-    path = tmp_path / 'embed_manifest.json'
-    path.write_text(json.dumps({**EXPECTED, **overrides}))
+    path = tmp_path / 'embed_identity.json'
+    path.write_text(json.dumps({**EXPECTED, 'model_version': '1', 'input_version': 'v1',
+                                'clause_vectors': 1143, **overrides}))
     return path
 
 
-def identity_pg(column='vector(1536)'):
+def identity_pg(column='vector(1536)', dims=1536, count=1143):
     calls = []
     def execute(sql, params):
         calls.append((sql, params))
-        return NS(fetchone=lambda: (column,) if column else None)
+        return NS(fetchone=lambda: ((column,) if column else None)
+                  if isinstance(sql, str) else (dims, count))
     return NS(execute=execute), calls
 
 
@@ -55,24 +58,27 @@ def test_matching_manifest_query_and_column_pass(tmp_path):
     assert calls[0][0].startswith('SELECT ') and calls[0][1] == ('clause_embeddings', 'embedding')
 
 
-@pytest.mark.parametrize('field,value', [('model', 'wrong-model'), ('dimensions', 3072), ('provider', 'openai')])
+@pytest.mark.parametrize('field,value', [('model', 'wrong-model'), ('dims', 3072),
+                                       ('provider', 'openai'), ('deployment', 'wrong-deployment')])
 @pytest.mark.parametrize('side', ['manifest', 'query'])
 def test_wrong_identity_aborts_before_column_query(tmp_path, side, field, value):
     pg, calls = identity_pg()
     embedder = FakeEmbedder()
     overrides = {field: value} if side == 'manifest' else {}
     if side == 'query':
-        setattr(embedder, field, value)
+        setattr(embedder, 'dimensions' if field == 'dims' else field, value)
     with pytest.raises(EmbeddingIdentityError, match='identity mismatch'):
         check_identity(embedder, manifest(tmp_path, **overrides), pg)
     assert not calls and embedder.calls == 0
 
 
-@pytest.mark.parametrize('kind', ['absent', 'missing_provider', 'missing_model', 'missing_dimensions', 'legacy_list'])
+@pytest.mark.parametrize('kind', ['absent', 'missing_provider', 'missing_model', 'missing_dims',
+                                'missing_deployment', 'missing_model_version', 'missing_input_version',
+                                'missing_clause_vectors', 'legacy_list'])
 def test_missing_identity_aborts(tmp_path, kind):
     path = tmp_path / 'manifest.json'
     if kind != 'absent':
-        identity = dict(EXPECTED)
+        identity = dict(EXPECTED, model_version='1', input_version='v1', clause_vectors=1143)
         if kind.startswith('missing_'):
             identity.pop(kind.removeprefix('missing_'))
         path.write_text(json.dumps([] if kind == 'legacy_list' else identity))
@@ -160,6 +166,8 @@ def full_retriever(tmp_path, monkeypatch, *, missing_vector=False, fulltext_erro
     driver = NS(execute_query=execute_query, session=session, close=lambda: None)
     def pg_execute(sql, params):
         calls['sql'].append(sql)
+        if not isinstance(sql, str):
+            return NS(fetchone=lambda: (1536, 1143))
         if 'format_type' in sql:
             return NS(fetchone=lambda: ('vector(1536)',))
         rows = [('s:1', .9), ('s:2', .8)] if 'ORDER BY' in sql else ([] if missing_vector else [('s:1.1', .85)])
@@ -185,9 +193,9 @@ def test_end_to_end_artifacts_replay_and_tie_breaker(tmp_path, monkeypatch):
     assert run.embedding_provider == 'azure_openai' and run.embedding_model == MODEL
     assert run.generations[0]['role'] == 's8_cypher' and replay.generations[0]['cache_hit']
     json.dumps(run.to_dict())
-    ranked_sql = [sql for sql in calls['sql'] if 'ORDER BY' in sql]
+    ranked_sql = [sql for sql in calls['sql'] if isinstance(sql, str) and 'ORDER BY' in sql]
     assert ranked_sql and all('ORDER BY embedding <=> %s, clause_id LIMIT %s' in sql for sql in ranked_sql)
-    assert all('embedding IS NOT NULL' in sql for sql in calls['sql'] if 'ANY' in sql)
+    assert all('embedding IS NOT NULL' in sql for sql in calls['sql'] if isinstance(sql, str) and 'ANY' in sql)
 
 
 def test_missing_fulltext_index_reaches_all_clauses(tmp_path, monkeypatch):
@@ -225,7 +233,73 @@ def test_identity_rechecked_before_any_retrieval_work(tmp_path, monkeypatch):
     with pytest.raises(EmbeddingIdentityError):
         r.retrieve('synthetic query')
     assert fake.calls == calls['llm'] == 0
-    assert not any('ORDER BY' in sql for sql in calls['sql'])
+    assert not any('ORDER BY' in sql for sql in calls['sql'] if isinstance(sql, str))
+
+
+@pytest.mark.parametrize('dims,count', [(3072, 1143), (None, 1143), (1536, 0), (1536, 1142)])
+def test_live_stored_dimensions_and_count_fail_closed(tmp_path, dims, count):
+    pg, _ = identity_pg(dims=dims, count=count)
+    with pytest.raises(EmbeddingIdentityError, match='stored vector/count'):
+        check_identity(FakeEmbedder(), manifest(tmp_path), pg)
+
+
+@pytest.mark.parametrize('field,value', [('model_version', '2'), ('input_version', 'v2')])
+def test_addendum_version_mismatch_fails_closed(tmp_path, field, value):
+    pg, calls = identity_pg()
+    with pytest.raises(EmbeddingIdentityError, match='identity mismatch'):
+        check_identity(FakeEmbedder(), manifest(tmp_path, **{field: value}), pg)
+    assert not calls
+
+
+def test_actual_request_deployment_must_match_config(tmp_path):
+    fake = FakeEmbedder()
+    fake.config = NS(deployment=MODEL, model_version='1')
+    fake.embedding_model = MODEL
+    fake.model = 'wrong-request-deployment'
+    pg, calls = identity_pg()
+    with pytest.raises(EmbeddingIdentityError, match='identity mismatch'):
+        check_identity(fake, manifest(tmp_path), pg)
+    assert not calls
+
+
+@pytest.mark.parametrize('model,length', [('wrong-model', 1536), (None, 1536),
+                                         (MODEL, 3072), (MODEL + '-unknown', 1536)])
+def test_response_mismatch_aborts_before_ranking_or_confirmation(tmp_path, monkeypatch, model, length):
+    r, fake, calls = full_retriever(tmp_path, monkeypatch)
+    fake.embed = lambda _: EmbeddingBatch([[1.] + [0.] * (length - 1)], 3, model)
+    with pytest.raises((EmbeddingIdentityError, ValueError)):
+        r.retrieve('synthetic mismatch')
+    assert not any('ORDER BY' in sql for sql in calls['sql'] if isinstance(sql, str))
+    assert not r.query_embeddings.cache.path.exists()
+    assert not r.query_embeddings.confirmation_path.exists()
+
+
+def test_confirmation_is_new_and_replay_has_no_calls_or_writes(tmp_path, monkeypatch):
+    r, fake, calls = full_retriever(tmp_path, monkeypatch)
+    _, first = r.retrieve('synthetic confirmed')
+    confirmed_path = r.query_embeddings.confirmation_path
+    before = confirmed_path.read_bytes()
+    confirmed = json.loads(before)
+    assert confirmed['response_model'] == MODEL and confirmed['vector_length'] == 1536
+    assert confirmed['timestamp'] and confirmed['identity_sha']
+    _, replay = r.retrieve('synthetic confirmed')
+    assert fake.calls == calls['llm'] == 1 and confirmed_path.read_bytes() == before
+    assert not first.query_embedding['cache_hit'] and replay.query_embedding['cache_hit']
+    assert first.embedding_identity == EXPECTED
+
+
+def test_embedder_response_model_is_preserved_without_changing_payload():
+    from embed.embed import EmbeddingConfig, OpenAIEmbedder
+    calls = []
+    def create(**kw):
+        calls.append(kw)
+        return NS(model=MODEL, usage=NS(prompt_tokens=2),
+                  data=[NS(index=0, embedding=[1.] + [0.] * 1535)])
+    encoding = NS(encode=lambda text, **kw: [1, 2])
+    embedder = OpenAIEmbedder(NS(embeddings=NS(create=create)), encoding=encoding,
+                              config=EmbeddingConfig())
+    assert embedder.embed(['synthetic']).response_model == MODEL
+    assert calls == [dict(model=MODEL, input=['synthetic'])]
 
 
 def test_setup_is_explicit_and_task_dispatches_without_live_access(monkeypatch):

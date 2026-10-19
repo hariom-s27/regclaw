@@ -103,6 +103,7 @@ def retry_after(exc):
 class EmbeddingBatch:
     vectors: list
     prompt_tokens: int | None = None
+    response_model: str | None = None
 
 
 class Embedder(Protocol):
@@ -134,6 +135,8 @@ class FakeEmbedder:
 class OpenAIEmbedder:
     model = MODEL
     provider = 'openai'
+    embedding_model = MODEL
+    dimensions = DIMS
 
     def __init__(self, client=None, encoding=None, sleep=time.sleep, attempts=5,
                  config=None, clock=time.monotonic):
@@ -184,7 +187,8 @@ class OpenAIEmbedder:
             mapped[item.index] = item.embedding
         if len(mapped) != len(texts):
             raise ValueError('Missing embedding response indices')
-        return EmbeddingBatch([mapped[i] for i in range(len(texts))], response.usage.prompt_tokens)
+        return EmbeddingBatch([mapped[i] for i in range(len(texts))], response.usage.prompt_tokens,
+                              getattr(response, 'model', None))
 
 
 class AzureOpenAIEmbedder(OpenAIEmbedder):

@@ -42,7 +42,7 @@ from observability.tracing import stage, traced
 from llm.provider import make_client, provenance
 from llm.cypher import request as cypher_request, parse_output
 from retrieval.cypher_cache import JsonlCache, cache_path, generation_key, sha
-from retrieval.query_embeddings import QueryEmbeddings, check_identity
+from retrieval.query_embeddings import DEFAULT_IDENTITY, QueryEmbeddings, check_identity
 from retrieval.setup import FULLTEXT_INDEX
 
 load_dotenv()
@@ -278,6 +278,9 @@ class RunLog:
     qid: str | None = None
     variant: str = 'a'
     gen_index: int = 0
+    validator_outcome: str = ''
+    embedding_identity: dict = field(default_factory=dict)
+    query_embedding: dict = field(default_factory=dict)
 
     def to_dict(self):
         return asdict(self)
@@ -289,7 +292,7 @@ class RunLog:
 class HybridRetriever:
     def __init__(self, database: str = "neo4j", cypher_timeout_s: float = 5.0, max_retries: int = 2,
                  *, cache_file=None, run_family=None, fresh=False,
-                 manifest_path=None, driver=None, pg=None, llm=None, embedder=None):
+                 manifest_path=None, confirmation_path=None, driver=None, pg=None, llm=None, embedder=None):
         self.db = database
         self.timeout = cypher_timeout_s
         self.max_retries = max_retries
@@ -308,8 +311,10 @@ class HybridRetriever:
         self.llm = llm if llm is not None else make_client('s8_cypher')
         self.fresh = fresh
         self.cypher_cache = JsonlCache(cache_file or cache_path(self.llm.provider, run_family))
-        self.query_embeddings = QueryEmbeddings(self.cypher_cache.path.with_name('query_embedding_cache.jsonl'), embedder)
-        self.manifest_path = Path(manifest_path) if manifest_path else Path(__file__).resolve().parents[1] / 'data/embed_manifest.json'
+        self.manifest_path = Path(manifest_path) if manifest_path else DEFAULT_IDENTITY
+        self.query_embeddings = QueryEmbeddings(
+            self.cypher_cache.path.with_name('query_embedding_cache.jsonl'), embedder,
+            identity_path=self.manifest_path, confirmation_path=confirmation_path)
         self.embedding_identity = check_identity(self.query_embeddings.embedder, self.manifest_path, self.pg, PG_TABLE)
         self.schema = introspect_schema(self.driver, database)
         self.labels = set(re.findall(r"^\s{2}(\w+) \{", self.schema, re.M)) or {
@@ -332,7 +337,8 @@ class HybridRetriever:
         run.cache_key = key
         cached = None if self.fresh else self.cypher_cache.find(key)
         if cached is not None:
-            run.generations.append({**cached['provenance'], 'cache_hit': True})
+            run.generations.append({**cached['provenance'], 'cache_hit': True, 'usage': {},
+                                    'validator_outcome': cached['validator_outcome']})
             return cached['cypher'], dict(cached['params'])
         msgs = [{"role": "user", "content": f"Question: {question}"}]
         if feedback:
@@ -347,7 +353,9 @@ class HybridRetriever:
                 result = self.llm.generate(cypher_request(render_prompt(self.schema), msgs, max_tokens=budget))
                 row['provenance'] = result['provenance']
                 row['response_model'] = result['provenance'].get('response_model')
-                run.generations.append({**result['provenance'], 'cache_hit': False})
+                row['usage'] = result.get('usage', {})
+                run.generations.append({**result['provenance'], 'cache_hit': False,
+                                        'usage': row['usage']})
                 stop = result['stop_reason']
                 row['validator_outcome'] = stop
                 if stop == 'max_tokens':
@@ -409,6 +417,7 @@ class HybridRetriever:
                     q = f"{q} LIMIT {int(inject_limit)}"
                     run.warnings.append(f"BUG MODE: injected LIMIT {inject_limit}")
                 self._explain_is_read_only(q, params)
+                run.validator_outcome = 'accepted (static validation + read-only EXPLAIN)'
                 ids = self._run_ids(q, params)
                 run.cypher, run.params = q, params
                 if ids:
@@ -535,7 +544,8 @@ class HybridRetriever:
         self.embedding_identity = check_identity(self.query_embeddings.embedder, self.manifest_path, self.pg, PG_TABLE)
         run = RunLog(query=question, qid=qid, variant=variant, gen_index=gen_index,
                      embedding_provider=self.embedding_identity['provider'],
-                     embedding_model=self.embedding_identity['model'])
+                     embedding_model=self.embedding_identity['model'],
+                     embedding_identity=dict(self.embedding_identity))
         t = time.perf_counter()
         with stage('neo4j.cypher') as observation:
             ids = self.stage1_filter(question, run, inject_limit)
@@ -548,6 +558,7 @@ class HybridRetriever:
         with stage('embed.query', metadata={'provider': run.embedding_provider, 'model': run.embedding_model}):
             qvec = self.embed(question)
         run.query_embedding_key = self.query_embedding_key
+        run.query_embedding = dict(self.query_embeddings.last)
         with stage('pgvector.rank') as observation:
             ranked = self.stage2_rank(qvec, ids, top_k)
             if observation is not None:
@@ -614,7 +625,8 @@ if __name__ == "__main__":
     ap.add_argument('--fresh', action='store_true', help='append new Cypher generations instead of replaying')
     ap.add_argument('--cache-path', type=Path, help='path to append-only cypher_cache.jsonl')
     ap.add_argument('--run-family', help='cache family under data/runs/<provider>/s8/')
-    ap.add_argument('--manifest', type=Path, help='S7 embedding identity manifest')
+    ap.add_argument('--identity', '--manifest', dest='manifest', type=Path,
+                    help='S7 identity addendum (default: data/embed_identity.json)')
     ap.add_argument('--qid')
     ap.add_argument('--variant', choices=['a', 'b', 'c'], default='a')
     ap.add_argument('--generations', type=int, default=1, help='generate indices 0..N-1; metrics always use index 0')
