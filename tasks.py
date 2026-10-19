@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 PLACEHOLDERS = (
     "obligation", "retrieve", "eval"
 )
-S8_COMMANDS = ('s8-generate', 's8-pool', 's8-sheet', 's8-prelabel')
+S8_COMMANDS = ('s8-generate', 's8-pool', 's8-sheet', 's8-practice', 's8-prelabel')
 
 # The existing summary file uses script-level assertions, not pytest functions.
 # Collect it as one pytest test without editing the original file.

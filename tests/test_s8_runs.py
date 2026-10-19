@@ -631,3 +631,58 @@ def test_helper_roles_share_s8_deployment_and_effort(monkeypatch, role, name, sp
     monkeypatch.setenv('LLM_PROVIDER', 'anthropic')
     with pytest.raises(ValueError, match='provisional Azure evaluation helper'):
         provider.make_client(role)
+
+
+# ---------------------------------------------------------------- per-query sheets + practice
+def read_csv(path):
+    return list(csv.DictReader(io.StringIO(Path(path).read_text(encoding='utf-8-sig'))))
+
+
+def test_sheet_writes_per_query_csvs_with_same_columns_and_rows(tmp_path):
+    env = Env(tmp_path, generations=1)
+    env.generate()
+    env.pool()
+    result = m.run_sheet(env.queries, RULES, CLAUSES, env.out)
+    folder = env.out / 'sheet'
+    main = read_csv(folder / 's8_sheet.csv')
+    assert result['items'] == len(main) and set(result['per_query']) == {'SYN1', 'SYN2'}
+    union = []
+    for q in env.queries:
+        path = folder / 'per_query' / f"s8_sheet_{q['qid']}.csv"
+        assert path.read_bytes().startswith('﻿'.encode('utf-8'))
+        rows = read_csv(path)
+        assert rows and list(rows[0]) == m.SHEET_COLUMNS and {r['qid'] for r in rows} == {q['qid']}
+        assert rows[0]['common_rules'] and not any(r['common_rules'] for r in rows[1:])
+        union += rows
+    assert union == main
+    again = m.run_sheet(env.queries, RULES, CLAUSES, env.out)
+    assert set(again['states'].values()) - {'skipped (openpyxl not installed)'} == {'unchanged'}
+
+
+def test_practice_questions_are_never_eval_queries():
+    frozen = frozen_queries()['queries']
+    practice = m.practice_queries(frozen)
+    assert [p['qid'] for p in practice] == ['P1', 'P2', 'P3'] and all(p['jurisdiction'] is None for p in practice)
+    assert practice[0]['query'] == 'cytotoxicity test requirements for wound dressings'
+    assert practice[2]['narrative']['grade2'] == "requires an investigator's brochure or names part of its content"
+    clash = [dict(synthetic_query(9), rephrase_b='Mandatory pyrogenicity testing for infusion sets')]
+    with pytest.raises(ValueError, match='overlaps'):
+        m.practice_queries(clash)
+
+
+def test_practice_sheet_is_vector_all_top5_outside_the_pool(tmp_path):
+    env = Env(tmp_path)
+    folder = tmp_path / 'practice'
+    ledger = m.Ledger(folder / 'cost_ledger.jsonl')
+    llm = m.MeteredClient(env.cypher, ledger, 0, replay_only=True)
+    r = HybridRetriever(driver=fake_driver(env.graph), pg=fake_pg(), llm=llm,
+                        embedder=m.MeteredEmbedder(env.embedder, ledger, 3),
+                        manifest_path=identity(tmp_path), cache_file=folder / 'cypher_cache.jsonl')
+    result = m.run_practice(r, env.queries, RULES, CLAUSES, folder)
+    assert result['items'] == 15 and result['per_query'] == {'P1': 5, 'P2': 5, 'P3': 5}
+    assert env.embedder.calls == 3 and env.cypher.calls == 0 and ledger.count('embedding') == 3
+    rows = read_csv(folder / 'practice_sheet.csv')
+    assert list(rows[0]) == m.SHEET_COLUMNS and all(row['item_id'].startswith('S8P-') for row in rows)
+    assert all(row['jurisdiction'] == '' for row in rows) and not (tmp_path / 'c' / 'pool.jsonl').exists()
+    again = m.run_practice(r, env.queries, RULES, CLAUSES, folder)
+    assert set(again['states'].values()) == {'unchanged'} and env.embedder.calls == 3

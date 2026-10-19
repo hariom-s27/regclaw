@@ -753,7 +753,7 @@ def common_rules_text(rules):
     return '\n'.join(f'{name}: {rules[name]}' for name in JUDGING_RULES)
 
 
-def build_sheet(queries, rules, clauses, pairs, seed=SHEET_SEED):
+def build_sheet(queries, rules, clauses, pairs, seed=SHEET_SEED, prefix='S8-'):
     cmap = {c['id']: c for c in clauses}
     missing = sorted({cid for _, cid in pairs if cid not in cmap})
     if missing:
@@ -767,7 +767,7 @@ def build_sheet(queries, rules, clauses, pairs, seed=SHEET_SEED):
         cids = sorted(set(by_qid.get(q['qid'], [])))
         rng.shuffle(cids)
         for i, cid in enumerate(cids):
-            while (item_id := 'S8-' + format(rng.getrandbits(40), '010x')) in used:
+            while (item_id := prefix + format(rng.getrandbits(40), '010x')) in used:
                 pass
             used.add(item_id)
             clause = cmap[cid]
@@ -800,12 +800,67 @@ def run_sheet(queries, rules, clauses, out, *, depth=None, depth_bc=None):
     states = {'s8_sheet.csv': write_once(folder / 's8_sheet.csv', sheet_csv(rows)),
               'item_map.jsonl': write_once(folder / 'item_map.jsonl', jsonl_text(item_map)),
               'sheet_meta.json': write_once(folder / 'sheet_meta.json', json.dumps(meta, indent=2) + '\n')}
+    # One CSV per query (same columns and rows) for judging in sessions.
+    for q in queries:
+        name = f"per_query/s8_sheet_{q['qid']}.csv"
+        states[name] = write_once(folder / name, sheet_csv([r for r in rows if r['qid'] == q['qid']]))
     try:
         import openpyxl  # noqa: F401  (optional; never installed by this module)
         states['xlsx'] = 'openpyxl present but xlsx writer not enabled'
     except ImportError:
         states['xlsx'] = 'skipped (openpyxl not installed)'
     return dict(states=states, items=len(rows), per_query=dict(Counter(r['qid'] for r in rows)))
+
+
+# ---------------------------------------------------------------- practice sheet (calibration only)
+PRACTICE_SEED = 20261020
+PRACTICE_DEPTH = 5
+PRACTICE_QUERIES = [
+    dict(qid='P1', query='cytotoxicity test requirements for wound dressings', narrative=dict(
+        grade3='states cytotoxicity testing expectations for wound dressings or skin-contact/breached-skin devices',
+        grade2='cytotoxicity testing for devices in general, or wound-dressing biocompatibility without cytotoxicity specifics',
+        grade1_traps='biocompatibility in general or other endpoints')),
+    dict(qid='P2', query='mandatory pyrogenicity testing for infusion sets', narrative=dict(
+        grade3='a duty (shall/must) to test or address pyrogenicity for infusion/IV or blood-path devices',
+        grade2='a duty on pyrogenicity for devices in general',
+        grade1_traps='should-only recommendations on pyrogenicity, or endotoxin method details')),
+    dict(qid='P3', query="what must an investigator's brochure contain", narrative=dict(
+        grade3="lists the content of an investigator's brochure",
+        grade2="requires an investigator's brochure or names part of its content",
+        grade1_traps='clinical-investigation documents in general')),
+]
+
+
+def practice_queries(eval_queries):
+    """Calibration questions, never eval queries or rephrases (checked both ways, case-insensitive)."""
+    texts = [t.casefold() for q in eval_queries for t in (q['query'], q['rephrase_b'])]
+    out = []
+    for p in PRACTICE_QUERIES:
+        text = p['query'].casefold()
+        if any(text == t or text in t or t in text for t in texts):
+            raise ValueError(f"practice question {p['qid']} overlaps an eval query or rephrase")
+        if p['qid'] in {q['qid'] for q in eval_queries}:
+            raise ValueError(f"practice qid {p['qid']} collides with an eval qid")
+        out.append({**p, 'jurisdiction': None})
+    return out
+
+
+def run_practice(r, eval_queries, rules, clauses, folder):
+    """vector_all top-5 for 3 non-eval questions -> a 15-item practice sheet (outside the pool)."""
+    folder = Path(folder)
+    practice = practice_queries(eval_queries)
+    universe = all_clause_ids(r)
+    pairs = []
+    for p in practice:
+        ranked = r.stage2_rank(r.embed(p['query']), universe, PRACTICE_DEPTH)
+        pairs += [(p['qid'], h.clause_id) for h in ranked]
+    rows, item_map = build_sheet(practice, rules, clauses, pairs, seed=PRACTICE_SEED, prefix='S8P-')
+    meta = dict(purpose='calibration practice only; never part of the S8 eval pool', system='vector_all',
+                depth=PRACTICE_DEPTH, seed=PRACTICE_SEED, items=len(rows), columns=SHEET_COLUMNS)
+    states = {'practice_sheet.csv': write_once(folder / 'practice_sheet.csv', sheet_csv(rows)),
+              'practice_item_map.jsonl': write_once(folder / 'practice_item_map.jsonl', jsonl_text(item_map)),
+              'practice_meta.json': write_once(folder / 'practice_meta.json', json.dumps(meta, indent=2) + '\n')}
+    return dict(states=states, items=len(rows), per_query=dict(Counter(row['qid'] for row in rows)))
 
 
 # ---------------------------------------------------------------- pre-labels
@@ -901,6 +956,16 @@ def live_retriever(ledger, *, budget, embed_budget, replay_only):
     return r
 
 
+def practice_retriever(folder, ledger, embed_budget=3):
+    """Read-only retriever whose query-embedding cache lives in the practice folder.
+    Its Cypher client is replay-only: the practice sheet never generates Cypher."""
+    from embed.embed import make_embedder
+    from llm.provider import make_client
+    llm = MeteredClient(make_client('s8_cypher'), ledger, 0, replay_only=True)
+    embedder = MeteredEmbedder(make_embedder(), ledger, embed_budget)
+    return HybridRetriever(cache_file=Path(folder) / 'cypher_cache.jsonl', llm=llm, embedder=embedder)
+
+
 def load_inputs(need_clauses=True):
     import yaml
     from retrieval_eval.pool import read_queries
@@ -928,6 +993,7 @@ def main(argv=None):
     sheet = sub.add_parser('s8-sheet', help='Blind labelling sheet + sealed item map (offline)')
     sheet.add_argument('--depth', type=int)
     sheet.add_argument('--depth-bc', type=int)
+    sub.add_parser('s8-practice', help='15-item calibration practice sheet (vector_all top-5; <= 3 embeddings)')
     pre = sub.add_parser('s8-prelabel', help='LLM pre-labels for every sheet item (separate file)')
     pre.add_argument('--budget', type=int, help='default: items + 5%%')
     args = parser.parse_args(argv)
@@ -938,7 +1004,7 @@ def main(argv=None):
         queries, rules, clauses = load_inputs()
         result = run_sheet(queries, rules, clauses, out, depth=args.depth, depth_bc=args.depth_bc)
         print_json('sheet', result)
-        for name in ('s8_sheet.csv', 'item_map.jsonl'):
+        for name in ('s8_sheet.csv', 'item_map.jsonl', *sorted(k for k in result['states'] if k.startswith('per_query/'))):
             print(f'{out / "sheet" / name}  sha256={bytes_sha(out / "sheet" / name)}')
         return 0
 
@@ -958,6 +1024,22 @@ def main(argv=None):
         print_json('ledger (cumulative)', ledger.summary())
         print(f'{out / "prelabels.jsonl"}  sha256={bytes_sha(out / "prelabels.jsonl")}')
         return 0 if result['stopped'] is None else 2
+
+    if args.command == 's8-practice':
+        queries, rules, clauses = load_inputs()
+        folder = out / 'practice'
+        practice_ledger = Ledger(folder / 'cost_ledger.jsonl')
+        before = len(practice_ledger.rows)
+        r = practice_retriever(folder, practice_ledger)
+        try:
+            result = run_practice(r, queries, rules, clauses, folder)
+        finally:
+            r.close()
+        print_json('practice', result)
+        print_json('ledger (this run)', practice_ledger.summary(practice_ledger.rows[before:]))
+        for name in ('practice_sheet.csv', 'practice_item_map.jsonl'):
+            print(f'{folder / name}  sha256={bytes_sha(folder / name)}')
+        return 0
 
     hyde_system, hyde_record = load_frozen(HYDE_PROMPT, HYDE_FREEZE, HYDE_SCHEMA)
     if args.command == 's8-generate':
