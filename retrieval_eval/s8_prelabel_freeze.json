@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+  "frozen": "2026-10-20",
+  "status": "FROZEN",
+  "provisional_model": "gpt-5-mini",
+  "effort": "low",
+  "deployment_env": "AZURE_OPENAI_S8_DEPLOYMENT (same provisional deployment as s8_cypher)",
+  "effort_env": "AZURE_OPENAI_S8_REASONING_EFFORT (default low)",
+  "anthropic_model": null,
+  "sha_method": "sha256 of the LF-normalised UTF-8 prompt file; schema_sha = sha256 of canonical JSON",
+  "output_mechanism": "structured output (strict json_schema)",
+  "max_tokens": 800,
+  "truncation_policy": "one retry at 2x max_tokens; any other non-end_turn stop is an error",
+  "role": "s8_prelabel",
+  "prompt_file": "retrieval_eval/s8_prelabel_prompt.md",
+  "prompt_sha": "74631e7595c7d0a22d5cad6e5cb3b7640bad3852117a177e8cbdaadacb1cbb75",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "query_asks": {
+        "type": "string"
+      },
+      "clause_states": {
+        "type": "string",
+        "enum": [
+          "answers",
+          "partial",
+          "mentions_only",
+          "unrelated"
+        ]
+      },
+      "jurisdiction_match": {
+        "type": "string",
+        "enum": [
+          "yes",
+          "no",
+          "not_applicable"
+        ]
+      },
+      "evidence_span": {
+        "type": "string"
+      },
+      "grade": {
+        "type": "integer",
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    "required": [
+      "query_asks",
+      "clause_states",
+      "jurisdiction_match",
+      "evidence_span",
+      "grade"
+    ]
+  },
+  "schema_sha": "0481b3127696ba3c1ded42eaead9691918c3c61586f326d38cffec427040c1fa",
+  "shots": 0,
+  "items_per_call": 1,
+  "input": "query (variant a), named jurisdiction, narrative, judging rules (grades, judge_text_not_graph, jurisdiction, swap), one clause: source doc code + title + full text",
+  "excluded": "system, arm, variant, rank, score, graph obligation label, other clauses",
+  "use": "suggestion only; written to prelabels.jsonl keyed by item_id; never merged into the sheet; never replaces human labels"
+}

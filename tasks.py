@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent
 PLACEHOLDERS = (
     "obligation", "retrieve", "eval"
 )
+S8_COMMANDS = ('s8-generate', 's8-pool', 's8-sheet', 's8-prelabel')
 
 # The existing summary file uses script-level assertions, not pytest functions.
 # Collect it as one pytest test without editing the original file.
@@ -72,6 +73,9 @@ def main():
         options = sys.argv[2:] or ['--agreement', 'goldset/annotator_a_round1.csv',
                                   'goldset/annotator_b_round1.csv', '--output', 'data/gold/agreement.json']
         return agreement_main(options)
+    if len(sys.argv) > 1 and sys.argv[1] in S8_COMMANDS:
+        from retrieval_eval.s8_runs import main as s8_main
+        return s8_main(sys.argv[1:])
     handlers = {'run-summary': 'observability.run_summary', 'retrieval-setup': 'retrieval.setup',
                 'structure-score': 'ingest.structure_gold', 'standards-demo': 'standards.demo',
                 'gold-score': 'goldset.score', 'enrich': 'ner.merge',
@@ -92,7 +96,7 @@ def main():
         subcommands.add_parser(name, help=description)
     for name in PLACEHOLDERS:
         subcommands.add_parser(name, help="Not implemented yet.")
-    for name in ('obligation-weak', 'gold-sample', 'gold-agreement', *handlers):
+    for name in ('obligation-weak', 'gold-sample', 'gold-agreement', *S8_COMMANDS, *handlers):
         subcommands.add_parser(name, help='Offline preparation; use command --help for options.')
     ingest = subcommands.add_parser('ingest', help='Parse manifest-listed PDFs offline.')
     ingest.add_argument('--doc')

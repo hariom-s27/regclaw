@@ -21,12 +21,18 @@ def live_configured():
     return bool(os.getenv(key))
 
 
+# S8 evaluation helpers (ADR 0025): provisional Azure only, never part of the report pipeline.
+S8_HELPER_ROLES = {'s8_hyde', 's8_prelabel'}
+
+
 def make_client(role, *, effort='low', mode='structured'):
-    if role not in {'S4', 'S10', 's8_cypher'}:
-        raise ValueError('role must be S4, S10 or s8_cypher')
+    if role not in {'S4', 'S10', 's8_cypher', *S8_HELPER_ROLES}:
+        raise ValueError('role must be S4, S10, s8_cypher, s8_hyde or s8_prelabel')
     if provider_name() == 'azure_openai':
         from .azure_openai import AzureOpenAIAdapter
         return AzureOpenAIAdapter(role, mode=mode)
+    if role in S8_HELPER_ROLES:
+        raise ValueError(f'{role} is a provisional Azure evaluation helper; set LLM_PROVIDER=azure_openai')
     if role == 's8_cypher':
         from .cypher import AnthropicCypherClient
         return AnthropicCypherClient()
@@ -44,7 +50,7 @@ def provenance(client, response_model=None):
     details = dict(provider=provider, model=client.model,
                 model_version=response_model, provisional=provider != 'anthropic',
                 reasoning_effort=getattr(client, 'effort', 'low'))
-    if getattr(client, 'role', None) == 's8_cypher':
+    if getattr(client, 'role', None) in {'s8_cypher', *S8_HELPER_ROLES}:
         details.update(role=client.role, requested_model=client.model,
                        response_model=response_model, effort=client.effort)
     return details

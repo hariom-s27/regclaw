@@ -16,19 +16,23 @@ from types import SimpleNamespace
 from observability.tracing import stage, record_response
 from .provider import provenance
 
+S8_ROLES = ('s8_cypher', 's8_hyde', 's8_prelabel')
+SPAN_NAMES = {'s8_cypher': 'cypher.generate', 's8_hyde': 'hyde.generate', 's8_prelabel': 'prelabel.generate'}
+
 
 class AzureOpenAIAdapter:
     provider = 'azure_openai'
 
     def __init__(self, role, *, mode='structured', sdk_client=None):
-        if role not in {'S4', 'S10', 's8_cypher'}:
-            raise ValueError('role must be S4, S10 or s8_cypher')
+        if role not in {'S4', 'S10', *S8_ROLES}:
+            raise ValueError('role must be S4, S10, s8_cypher, s8_hyde or s8_prelabel')
         if mode not in {'structured', 'strict_tool'}:
             raise ValueError('mode must be structured or strict_tool')
         self.role, self.mode = role, mode
-        env_role = 'S8' if role == 's8_cypher' else role
+        # S8 evaluation helpers share the provisional s8_cypher deployment and effort (ADR 0025).
+        env_role = 'S8' if role in S8_ROLES else role
         self.model = (os.getenv('AZURE_OPENAI_S8_DEPLOYMENT', 'gpt-5-mini')
-                      if role == 's8_cypher' else os.environ[f'AZURE_OPENAI_{role}_DEPLOYMENT'])
+                      if role in S8_ROLES else os.environ[f'AZURE_OPENAI_{role}_DEPLOYMENT'])
         self.effort = os.getenv(f'AZURE_OPENAI_{env_role}_REASONING_EFFORT',
                                 'high' if role == 'S10' else 'low')
         if self.effort not in {'minimal', 'low', 'medium', 'high'}:
@@ -84,7 +88,8 @@ class AzureOpenAIAdapter:
         output = request.get('output_config', {}).get('format')
         if output is not None:
             schema = output['schema']
-            name = {'S4': 'entities', 'S10': 'standards', 's8_cypher': 'cypher'}[self.role]
+            name = {'S4': 'entities', 'S10': 'standards', 's8_cypher': 'cypher',
+                    's8_hyde': 'hyde_passage', 's8_prelabel': 'prelabel'}[self.role]
         else:
             tool = next(t for t in request['tools'] if t['name'] == request['tool_choice']['name'])
             schema, name = tool['input_schema'], tool['name']
@@ -146,4 +151,4 @@ class AzureOpenAIAdapter:
         return LLMResponse(**result)
 
     def generate(self, request):
-        return self._complete(request, 'cypher.generate')
+        return self._complete(request, SPAN_NAMES[self.role])

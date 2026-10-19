@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "frozen": "2026-10-20",
+  "status": "FROZEN",
+  "provisional_model": "gpt-5-mini",
+  "effort": "low",
+  "deployment_env": "AZURE_OPENAI_S8_DEPLOYMENT (same provisional deployment as s8_cypher)",
+  "effort_env": "AZURE_OPENAI_S8_REASONING_EFFORT (default low)",
+  "anthropic_model": null,
+  "sha_method": "sha256 of the LF-normalised UTF-8 prompt file; schema_sha = sha256 of canonical JSON",
+  "output_mechanism": "structured output (strict json_schema)",
+  "max_tokens": 800,
+  "truncation_policy": "one retry at 2x max_tokens; any other non-end_turn stop is an error",
+  "role": "s8_hyde",
+  "prompt_file": "retrieval_eval/s8_hyde_prompt.md",
+  "prompt_sha": "a8f8fa673461bf758e393fae37997a932995440fe2c8c10b47eea4d7b5bb4076",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "passage": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "passage"
+    ]
+  },
+  "schema_sha": "b538096aba1274646b5887f57cfd8298654e45d8be45fd76aff928631a57e295",
+  "generations_per_query": 1,
+  "gen_index": 0,
+  "input": "variant-a query text only (\"Question: <text>\"); never narratives, rephrases or clause text",
+  "use": "variant c: stage 2 ranks with the HyDE embedding; stage 1 = the variant-a Cypher of the same arm and gen"
+}
