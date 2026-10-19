@@ -35,3 +35,4 @@ unmeasured performance consequences. Current measurements are in [results](../re
 | [0025](0025-provisional-gpt-substitute.md) | Provisional Azure OpenAI GPT substitute for Claude | accepted (provisional) | Explicit GPT substitute; Claude stays default. |
 | [0026](0026-azure-hosted-embeddings.md) | Azure-hosted text-embedding-3-small embeddings | accepted (documentation draft) | Explicit Azure selection; no fallback. |
 | [0027](0027-normaliser-v1-1-freeze-amendment.md) | Normaliser v1.1 — a versioned amendment to the S4 freeze | accepted (provisional) | Versioned v1.1 rule; re-frozen before holdout. |
+| [0028](0028-s8-prompt-v1-1-obligation-arm.md) | S8: pre-registered Text2Cypher prompt v1.1 (obligation-filter arm) | accepted | v1 headline; v1.1 + v1-noob pre-registered arms. |
