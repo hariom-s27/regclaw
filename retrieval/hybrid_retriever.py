@@ -161,19 +161,49 @@ FEW_SHOTS = [
      "params": [{"name": "n", "value": "10993-18"}, {"name": "t", "value": "chemical characterization"}]},
 ]
 
-def render_fewshots():
+# Prompt v1.1 (pre-registered secondary arm, S8 B3) = v1.0 + rule 8 + few-shot 6. v1.0 objects stay frozen.
+_V1_1_RULE_ANCHOR = "7. If the question names no entity or obligation, fall back to the full-text index on clause text.\n"
+OBLIGATION_RULE_V1_1 = (
+    "8. Add an obligation filter only when the question explicitly restricts the strength of the provision: "
+    "'mandatory', 'binding' or 'legally required' → SHALL; 'recommended' or 'non-binding' → SHOULD; "
+    "'optional' → MAY. Question words such as 'must', 'should' or 'need to', and nouns such as 'requirements', "
+    "'tests', 'rules' or 'guidance', do not by themselves imply a filter.\n")
+assert SYSTEM_PROMPT.count(_V1_1_RULE_ANCHOR) == 1
+SYSTEM_PROMPT_V1_1 = SYSTEM_PROMPT.replace(_V1_1_RULE_ANCHOR, _V1_1_RULE_ANCHOR + OBLIGATION_RULE_V1_1)
+FEW_SHOT_6_V1_1 = {
+    "q": "irritation testing requirements for surgical gloves",
+    "cypher": "MATCH (c:Clause) WHERE EXISTS { (c)-[:MENTIONS]->(d:DeviceType) WHERE toLower(d.name) CONTAINS $a } OR EXISTS { (c)-[:MENTIONS]->(e:BiologicalEffect) WHERE toLower(e.name) CONTAINS $b } OR toLower(c.text) CONTAINS $b OR toLower(c.title) CONTAINS $b RETURN DISTINCT c.id AS clause_id",
+    "params": [{"name": "a", "value": "glove"}, {"name": "b", "value": "irritation"}]}
+
+DEFAULT_PROMPT_VERSION = "1.0"
+PROMPT_VERSIONS = {
+    "1.0": (SYSTEM_PROMPT, FEW_SHOTS),
+    "1.1": (SYSTEM_PROMPT_V1_1, FEW_SHOTS + [FEW_SHOT_6_V1_1]),
+}
+
+
+def prompt_version_parts(prompt_version=DEFAULT_PROMPT_VERSION):
+    if prompt_version not in PROMPT_VERSIONS:
+        raise ValueError(f'Unknown Text2Cypher prompt_version {prompt_version!r}; '
+                         f'expected one of {sorted(PROMPT_VERSIONS)}')
+    return PROMPT_VERSIONS[prompt_version]
+
+
+def render_fewshots(prompt_version=DEFAULT_PROMPT_VERSION):
     return '\n'.join(
         f"Q: {e['q']}\nCYPHER: {e['cypher']}\nPARAMS: {json.dumps(e['params'], ensure_ascii=False, sort_keys=True)}\n"
-        for e in FEW_SHOTS)
+        for e in prompt_version_parts(prompt_version)[1])
 
 
-def render_prompt(schema):
-    return SYSTEM_PROMPT.format(schema=canonical_schema(schema), examples=render_fewshots(), ft=FULLTEXT_INDEX)
+def render_prompt(schema, prompt_version=DEFAULT_PROMPT_VERSION):
+    template = prompt_version_parts(prompt_version)[0]
+    return template.format(schema=canonical_schema(schema), examples=render_fewshots(prompt_version), ft=FULLTEXT_INDEX)
 
 
-def prompt_hashes(schema):
-    return dict(prompt_template_sha=sha(SYSTEM_PROMPT), fewshot_sha=sha(render_fewshots()),
-                rendered_prompt_sha=sha(render_prompt(schema)), schema_sha=sha(canonical_schema(schema)))
+def prompt_hashes(schema, prompt_version=DEFAULT_PROMPT_VERSION):
+    template = prompt_version_parts(prompt_version)[0]
+    return dict(prompt_template_sha=sha(template), fewshot_sha=sha(render_fewshots(prompt_version)),
+                rendered_prompt_sha=sha(render_prompt(schema, prompt_version)), schema_sha=sha(canonical_schema(schema)))
 
 WRITE_PATTERN = re.compile(
     r"\b(CREATE|MERGE|SET|DELETE|DETACH|REMOVE|DROP|FOREACH|LOAD\s+CSV|IN\s+TRANSACTIONS|"
@@ -281,6 +311,7 @@ class RunLog:
     validator_outcome: str = ''
     embedding_identity: dict = field(default_factory=dict)
     query_embedding: dict = field(default_factory=dict)
+    prompt_version: str = DEFAULT_PROMPT_VERSION
 
     def to_dict(self):
         return asdict(self)
@@ -330,10 +361,11 @@ class HybridRetriever:
     def _generate_cypher(self, question: str, feedback: str | None, prev: str | None,
                          *, run=None, records=None) -> tuple[str, dict]:
         run = run if run is not None else RunLog(query=question, attempts=1)
+        version = run.prompt_version
         key = generation_key(question, qid=run.qid, variant=run.variant, gen_index=run.gen_index,
-                             hashes=prompt_hashes(self.schema), provider=self.llm.provider,
+                             hashes=prompt_hashes(self.schema, version), provider=self.llm.provider,
                              requested_model=self.llm.model, effort=self.llm.effort,
-                             attempt_no=run.attempts, feedback=feedback, prev=prev)
+                             attempt_no=run.attempts, feedback=feedback, prev=prev, prompt_version=version)
         run.cache_key = key
         cached = None if self.fresh else self.cypher_cache.find(key)
         if cached is not None:
@@ -346,11 +378,12 @@ class HybridRetriever:
             msgs.append({"role": "user", "content":
                          f"That query failed: {feedback}\nFix it. Follow every HARD RULE. Question: {question}"})
         for budget in (800, 1600):
-            row = dict(**key, key=key, cypher=None, params={}, reusable=False,
+            row = dict(**{**key, 'prompt_version': version}, key=key, cypher=None, params={}, reusable=False,
                        response_model=None, provenance=provenance(self.llm),
                        validator_outcome='generation_error', fallback_path='text2cypher', max_tokens=budget)
             try:
-                result = self.llm.generate(cypher_request(render_prompt(self.schema), msgs, max_tokens=budget))
+                request = cypher_request(render_prompt(self.schema, version), msgs, max_tokens=budget)
+                result = self.llm.generate({**request, 'prompt_version': version})
                 row['provenance'] = result['provenance']
                 row['response_model'] = result['provenance'].get('response_model')
                 row['usage'] = result.get('usage', {})
@@ -539,10 +572,12 @@ class HybridRetriever:
     @traced('retriever', as_type='retriever')
     def retrieve(self, question: str, top_k: int = 10, inject_limit: int | None = None,
                  per_seed: int = 2, neighbour_cap: int = 5, rel_floor: float = 0.85,
-                 *, qid=None, variant='a', gen_index=0) -> tuple[list[Hit], RunLog]:
+                 *, qid=None, variant='a', gen_index=0,
+                 prompt_version=DEFAULT_PROMPT_VERSION) -> tuple[list[Hit], RunLog]:
+        prompt_version_parts(prompt_version)  # unknown version -> ValueError before any call
         # Fail closed before any generation or ranking, even for library callers.
         self.embedding_identity = check_identity(self.query_embeddings.embedder, self.manifest_path, self.pg, PG_TABLE)
-        run = RunLog(query=question, qid=qid, variant=variant, gen_index=gen_index,
+        run = RunLog(query=question, qid=qid, variant=variant, gen_index=gen_index, prompt_version=prompt_version,
                      embedding_provider=self.embedding_identity['provider'],
                      embedding_model=self.embedding_identity['model'],
                      embedding_identity=dict(self.embedding_identity))
@@ -630,6 +665,8 @@ if __name__ == "__main__":
     ap.add_argument('--qid')
     ap.add_argument('--variant', choices=['a', 'b', 'c'], default='a')
     ap.add_argument('--generations', type=int, default=1, help='generate indices 0..N-1; metrics always use index 0')
+    ap.add_argument('--prompt-version', choices=sorted(PROMPT_VERSIONS), default=DEFAULT_PROMPT_VERSION,
+                    help='Text2Cypher prompt version (1.0 = frozen headline; 1.1 = pre-registered arm)')
     a = ap.parse_args()
     if a.generations < 1:
         ap.error('--generations must be positive')
@@ -637,10 +674,11 @@ if __name__ == "__main__":
     try:
         if a.compare:
             for lim in (10, None):
-                _print(*r.retrieve(a.query, a.top_k, inject_limit=lim))
+                _print(*r.retrieve(a.query, a.top_k, inject_limit=lim, prompt_version=a.prompt_version))
         else:
             for gen_index in range(a.generations):
                 _print(*r.retrieve(a.query, a.top_k, inject_limit=a.inject_limit,
-                                  qid=a.qid, variant=a.variant, gen_index=gen_index))
+                                  qid=a.qid, variant=a.variant, gen_index=gen_index,
+                                  prompt_version=a.prompt_version))
     finally:
         r.close()

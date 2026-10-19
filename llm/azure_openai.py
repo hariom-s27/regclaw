@@ -100,8 +100,11 @@ class AzureOpenAIAdapter:
 
     def _complete(self, request, span_name):
         started = time.perf_counter()
+        request = dict(request)
+        version = request.pop('prompt_version', None)  # trace-only; never sent to the API
+        tag = {} if version is None else {'prompt_version': version}
         with stage(span_name, as_type='generation', model=self.model,
-                   metadata=provenance(self)) as observation:
+                   metadata={**provenance(self), **tag}) as observation:
             response = self._send(self.map_request(request))
             choice = response.choices[0]
             message = choice.message
@@ -127,7 +130,7 @@ class AzureOpenAIAdapter:
             details = provenance(self, getattr(response, 'model', None))
             record_response(observation, SimpleNamespace(model=self.model, usage=usage))
             if observation is not None:
-                observation.update(metadata={**details, 'finish_reason': raw_finish,
+                observation.update(metadata={**details, **tag, 'finish_reason': raw_finish,
                                              'stop_reason': stop})
         return dict(data=data, stop_reason=stop, model=self.model, usage=usage,
                     provenance=details, latency_s=time.perf_counter() - started,

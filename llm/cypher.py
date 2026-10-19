@@ -47,14 +47,16 @@ class AnthropicCypherClient:
 
     def generate(self, request):
         request = {**request, 'model': self.model}
+        version = request.pop('prompt_version', None)  # trace-only; never sent to the API
+        tag = {} if version is None else {'prompt_version': version}
         with stage('cypher.generate', as_type='generation', model=self.model,
-                   metadata=provenance(self)) as observation:
+                   metadata={**provenance(self), **tag}) as observation:
             response = self.client.messages.create(**request)
             record_response(observation, response)
             details = provenance(self, getattr(response, 'model', None))
             stop = response.stop_reason
             if observation is not None:
-                observation.update(metadata={**details, 'stop_reason': stop})
+                observation.update(metadata={**details, **tag, 'stop_reason': stop})
         text = ''.join(b.text for b in response.content if b.type == 'text')
         try:
             data = json.loads(text)
