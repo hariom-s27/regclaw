@@ -75,6 +75,9 @@ headroom: the existing budget times 1 for minimal/low, 2 for medium, or 3 for
 high. S10 high therefore sends 24,000 combined tokens; S4 low sends 4,000.
 This changes only the provisional Azure transport budget. It does not guarantee
 that arbitrary future inputs will fit, nor constitute a new quality metric.
+The S8 roles `s8_cypher` and `s8_hyde` instead use a fixed ×5 cap (800 → 4,000, retry
+1,600 → 8,000), because family c truncated 49% of first attempts on hidden reasoning; see
+[S8 Addendum 3](../../retrieval_eval/S8_PREREGISTRATION_ADDENDUM_3.md).
 
 S4's Anthropic SDK has zero automatic retries; `ner.extract` retains four
 attempts for 429/529 with 1/2/4-second backoff, one truncation-budget retry and
