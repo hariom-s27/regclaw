@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "frozen": "2026-10-18",
+  "status": "FROZEN",
+  "template_sha": "137df5ec3edd36652a2647db7f17da7aa6f816b087bac08389402ff1c9e4a9f1",
+  "fewshot_sha": "79cdc038a4315c95bab09de041a07591015c069bf5d0ae522e4bce2d963b20a2",
+  "schema_serialisation_version": "canonical_schema.v1",
+  "live_schema_sha_at_freeze": "61fb4834a4856147d6bea0d0b6f3171705780658a5c412235640dfce2b06a384",
+  "role": "s8_cypher",
+  "provisional_model": "gpt-5-mini",
+  "effort": "low",
+  "anthropic_model": "claude-haiku-5-5",
+  "output_mechanism": "structured output; params as [{name,value}]"
+}
