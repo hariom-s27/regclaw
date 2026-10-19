@@ -18,6 +18,10 @@ from .provider import provenance
 
 S8_ROLES = ('s8_cypher', 's8_hyde', 's8_prelabel')
 SPAN_NAMES = {'s8_cypher': 'cypher.generate', 's8_hyde': 'hyde.generate', 's8_prelabel': 'prelabel.generate'}
+# S8 Addendum 3: in run family c gpt-5-mini spent the whole 800-token cap on hidden reasoning in
+# 49% of first attempts. Only these roles get more completion headroom (x5 at any effort):
+# 800 -> 4,000 on the first attempt, 1,600 -> 8,000 on the retry. S4, S10, s8_prelabel unchanged.
+ROLE_BUDGET_SCALE = {'s8_cypher': 5, 's8_hyde': 5}
 
 
 class AzureOpenAIAdapter:
@@ -96,7 +100,9 @@ class AzureOpenAIAdapter:
         # GPT's cap covers hidden reasoning as well as the schema response.
         # The S10 high-effort smoke exhausted a direct 8,000-token mapping.
         # Reserve two response budgets for high effort, one for medium.
-        budget = request['max_tokens'] * {'minimal': 1, 'low': 1, 'medium': 2, 'high': 3}[self.effort]
+        scale = (ROLE_BUDGET_SCALE.get(self.role)
+                 or {'minimal': 1, 'low': 1, 'medium': 2, 'high': 3}[self.effort])
+        budget = request['max_tokens'] * scale
         return dict(model=self.model, max_completion_tokens=budget,
                     reasoning_effort=self.effort,
                     messages=[dict(role='system', content=system)] + copy.deepcopy(request['messages']),
@@ -110,7 +116,8 @@ class AzureOpenAIAdapter:
         tag = {} if version is None else {'prompt_version': version}
         with stage(span_name, as_type='generation', model=self.model,
                    metadata={**provenance(self), **tag}) as observation:
-            response = self._send(self.map_request(request))
+            mapped = self.map_request(request)
+            response = self._send(mapped)
             choice = response.choices[0]
             message = choice.message
             raw_finish = choice.finish_reason
@@ -133,6 +140,8 @@ class AzureOpenAIAdapter:
             if prompt_details is not None:
                 usage['cache_read_input_tokens'] = getattr(prompt_details, 'cached_tokens', 0) or 0
             details = provenance(self, getattr(response, 'model', None))
+            if self.role in ROLE_BUDGET_SCALE:  # record the real cap; other roles' provenance unchanged
+                details['max_completion_tokens'] = mapped['max_completion_tokens']
             record_response(observation, SimpleNamespace(model=self.model, usage=usage))
             if observation is not None:
                 observation.update(metadata={**details, **tag, 'finish_reason': raw_finish,

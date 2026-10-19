@@ -486,18 +486,126 @@ def test_prelabel_request_is_blind_and_replays(tmp_path):
 
 
 # ---------------------------------------------------------------- roles
-def test_s8_cypher_azure_request_is_byte_identical_to_before():
-    """Golden shas computed from the pre-change (HEAD 720365b) adapter."""
+# Golden request shas of the pre-Addendum-3 adapter (HEAD 0f7105d), synthetic inputs.
+OLD_GOLDEN = {
+    ('s8_cypher', '1.0', 800): 'bab500ad0fafeab5a94e34c9f22981d3cae753e61517a9593b1275a36781e26b',
+    ('s8_cypher', '1.0', 1600): '4142e7183c0df27244f95e281ee10e6e6025550cbb2a3ec140057978371dcb98',
+    ('s8_cypher', '1.1', 800): 'dca0077ebdd23c9bbd71ccc7c733c3bb20f204044632433bd0b7eb482e796de4',
+    ('s8_cypher', '1.1', 1600): '2d509511d0b58df3c11f90747a8b5e675633dc569f2d24ecc3108ef7941505f6',
+}
+
+
+def mapped_sha(mapped):
+    return hashlib.sha256(json.dumps(mapped, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def test_s8_cypher_azure_request_changes_only_the_token_cap():
+    """The only intended change vs 0f7105d (Addendum 3) is max_completion_tokens:
+    800 -> 4,000 and 1,600 -> 8,000. Everything else in the request is byte-identical."""
     from llm.azure_openai import AzureOpenAIAdapter
     from llm.cypher import request
     from retrieval.hybrid_retriever import SCHEMA_FALLBACK, render_prompt
     adapter = AzureOpenAIAdapter('s8_cypher', sdk_client=NS())
-    golden = {'1.0': 'bab500ad0fafeab5a94e34c9f22981d3cae753e61517a9593b1275a36781e26b',
-              '1.1': 'dca0077ebdd23c9bbd71ccc7c733c3bb20f204044632433bd0b7eb482e796de4'}
-    for version, expected in golden.items():
-        req = request(render_prompt(SCHEMA_FALLBACK, version), [dict(role='user', content='Question: synthetic question')])
-        mapped = json.dumps(adapter.map_request(req), sort_keys=True, ensure_ascii=False)
-        assert hashlib.sha256(mapped.encode()).hexdigest() == expected
+    new_golden = {('1.0', 800): '34338af0c53042292011bf8b76bf8ab9ba053f572e02cbecf250f47b455d72de',
+                  ('1.0', 1600): '8a8b4900dae0991d388c483d8ad0c346466c2727db27e6ade307f3db47246f1e',
+                  ('1.1', 800): '0fbaf40507fe53742e2495adf76410b3e6508f7251cc5110a12d189b44143e5f',
+                  ('1.1', 1600): '53ab365e1c1455049113742d65225d88e88641235542876aaea8ee208008d9ae'}
+    for (version, budget), expected in new_golden.items():
+        req = request(render_prompt(SCHEMA_FALLBACK, version),
+                      [dict(role='user', content='Question: synthetic question')], max_tokens=budget)
+        mapped = adapter.map_request(req)
+        assert mapped['max_completion_tokens'] == 5 * budget
+        assert mapped_sha(mapped) == expected
+        assert mapped_sha({**mapped, 'max_completion_tokens': budget}) == OLD_GOLDEN[('s8_cypher', version, budget)]
+
+
+def test_s4_s10_and_prelabel_azure_requests_are_byte_identical(monkeypatch):
+    from llm.azure_openai import AzureOpenAIAdapter
+    from ner.client import request as ner_request
+    from standards.classifier import MODEL, OUTPUT_SCHEMA, PROMPT
+    monkeypatch.setenv('AZURE_OPENAI_S4_DEPLOYMENT', 'synthetic-s4')
+    monkeypatch.setenv('AZURE_OPENAI_S10_DEPLOYMENT', 'synthetic-s10')
+    for key in ('AZURE_OPENAI_S4_REASONING_EFFORT', 'AZURE_OPENAI_S10_REASONING_EFFORT'):
+        monkeypatch.delenv(key, raising=False)
+    clause = dict(id='syn:1', doc='syn-doc', text='Synthetic clause text.')
+    s10 = dict(model=MODEL, max_tokens=8000, system=PROMPT,
+               messages=[{'role': 'user', 'content': json.dumps({'synthetic': True})}],
+               output_config={'format': {'type': 'json_schema', 'schema': OUTPUT_SCHEMA}, 'effort': 'low'})
+    cases = [
+        (AzureOpenAIAdapter('S4', mode='structured', sdk_client=NS()), ner_request(clause, mode='structured'),
+         '7cafd8949399a40e591196b92edbc81313690b579ff2172c14edb33067706448'),
+        (AzureOpenAIAdapter('S4', mode='strict_tool', sdk_client=NS()), ner_request(clause, mode='strict_tool'),
+         '1f3cea1d441ef1ce7922cbae6be6ac057d41e6a6d55ce0593f3c4f085a116fb3'),
+        (AzureOpenAIAdapter('S10', sdk_client=NS()), s10,
+         '37a63e1c1229efc81ef513f8ed710962e711217fbade9de4231ffcddae23b24e'),
+        (AzureOpenAIAdapter('s8_prelabel', sdk_client=NS()),
+         m.structured_request('synthetic system', 'synthetic', m.PRELABEL_SCHEMA, 800),
+         '4c19d0096796017a9a2e7b4b1c65ac5c94582bce464a765e07223990e5cefd21'),
+    ]
+    for adapter, req, expected in cases:
+        assert mapped_sha(adapter.map_request(req)) == expected, adapter.role
+
+
+@pytest.mark.parametrize('effort', ['minimal', 'low', 'medium', 'high'])
+@pytest.mark.parametrize('role,scaled', [('s8_cypher', True), ('s8_hyde', True), ('s8_prelabel', False)])
+def test_s8_completion_budget_per_role(monkeypatch, effort, role, scaled):
+    from llm.azure_openai import AzureOpenAIAdapter
+    monkeypatch.setenv('AZURE_OPENAI_S8_REASONING_EFFORT', effort)
+    adapter = AzureOpenAIAdapter(role, sdk_client=NS())
+    effort_scale = {'minimal': 1, 'low': 1, 'medium': 2, 'high': 3}[effort]
+    for budget in (800, 1600):
+        req = m.structured_request('synthetic system', 'synthetic', m.HYDE_SCHEMA, budget)
+        assert adapter.map_request(req)['max_completion_tokens'] == budget * (5 if scaled else effort_scale)
+
+
+def test_s8_provenance_records_the_real_cap():
+    from llm.azure_openai import AzureOpenAIAdapter
+    def create(**kw):
+        return NS(model='synthetic', usage=None,
+                  choices=[NS(finish_reason='stop', message=NS(content='{"passage": "x"}', refusal=None))])
+    sdk = NS(chat=NS(completions=NS(create=create)))
+    req = m.structured_request('synthetic system', 'synthetic', m.HYDE_SCHEMA, 800)
+    assert AzureOpenAIAdapter('s8_hyde', sdk_client=sdk).generate(req)['provenance']['max_completion_tokens'] == 4000
+    assert 'max_completion_tokens' not in AzureOpenAIAdapter('s8_prelabel', sdk_client=sdk).generate(req)['provenance']
+
+
+def test_run_family_is_c2():
+    assert m.FAMILY == 'c2'
+    assert m.output_dir() == ROOT / 'data' / 'runs' / 'azure_openai' / 's8' / 'c2'
+
+
+class TruncatingCypherLLM(FakeCypherLLM):
+    """Always truncates the v1 prompt for SYN2 variant a: a terminal failure under the stop guard."""
+
+    def generate(self, request):
+        content = request['messages'][-1]['content']
+        if request['prompt_version'] == '1.0' and 'synthetic question 2' in content:
+            self.calls += 1
+            return dict(data={}, stop_reason='max_tokens', provenance=dict(role='s8_cypher'),
+                        usage=dict(input_tokens=100, output_tokens=4000))
+        return super().generate(request)
+
+
+def test_terminal_failure_is_a_system_failure_with_empty_runs(tmp_path):
+    env = Env(tmp_path, generations=1)
+    env.cypher = TruncatingCypherLLM(early_calls=10 ** 6)
+    env.generate()
+    gens = m.read_jsonl(env.out / 'generations.jsonl')
+    failed = [g for g in gens if g['status'] == 'generation_error']
+    assert [(g['arm'], g['qid'], g['variant']) for g in failed] == [('v1', 'SYN2', 'a')]
+    calls = env.cypher.calls
+    env.pool()
+    assert env.cypher.calls == calls  # never regenerated
+    runs = [r for r in m.read_jsonl(env.out / 'runs.jsonl') if r['qid'] == 'SYN2']
+    failures = [r for r in runs if r['status'] == 'system_failure']
+    assert failures and all(r['ranked_ids'] == r['neighbour_ids'] == r['final_ids'] == [] for r in failures)
+    assert {(r['system'], r['arm'], r['variant']) for r in failures} == {
+        ('pipeline', 'v1', 'a'), ('pipeline', 'v1', 'c'), ('pipeline', 'v1-noob', 'a'),
+        ('pipeline', 'v1-noob', 'c'), ('limit', 'v1', 'a')}
+    assert len([r for r in failures if r['system'] == 'limit']) == len(m.LIMITS) * m.LIMIT_REPEATS * len(m.TOP_KS)
+    assert not any(r['status'] == 'replay_miss' and r['system'] == 'pipeline' for r in runs)
+    ok = {(r['system'], r['arm'], r['variant']) for r in runs if r['status'] == 'ok'}
+    assert {('pipeline', 'v1', 'b'), ('pipeline', 'v1.1', 'a'), ('vector_all', None, 'a')} <= ok
 
 
 @pytest.mark.parametrize('role,name,span', [('s8_hyde', 'hyde_passage', 'hyde.generate'),

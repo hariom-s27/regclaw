@@ -28,7 +28,7 @@ from retrieval.hybrid_retriever import (CypherGenerationError, HybridRetriever, 
 ROOT = Path(__file__).resolve().parents[1]
 log = logging.getLogger('s8_runs')
 
-FAMILY = 'c'
+FAMILY = 'c2'  # Addendum 3: new completion budget; family c is kept read-only as evidence
 ARMS = {'v1': '1.0', 'v1.1': '1.1'}
 NOOB = 'v1-noob'
 GEN_VARIANTS = ('a', 'b')
@@ -239,7 +239,9 @@ class MeteredClient:
             self.ledger.add(role=self.role, status='ok', stop_reason=result.get('stop_reason'),
                             response_model=result.get('provenance', {}).get('response_model'),
                             input_tokens=usage.get('input_tokens'), output_tokens=usage.get('output_tokens'),
-                            reasoning_tokens=usage.get('reasoning_tokens'), **self.context)
+                            reasoning_tokens=usage.get('reasoning_tokens'),
+                            max_completion_tokens=result.get('provenance', {}).get('max_completion_tokens'),
+                            **self.context)
             return result
         raise TransportError('retries exhausted')  # pragma: no cover (loop always returns/raises)
 
@@ -577,6 +579,11 @@ def build_runs(r, queries, clauses, out, *, hyde_record, hyde_client):
     out = Path(out)
     passages = cached_hyde(queries, JsonlCache(out / 'hyde_cache.jsonl'), hyde_record, hyde_client)
     noob = {(row['qid'], row['variant']): row for row in read_jsonl(out / 'noob.jsonl') if row['gen_index'] == 0}
+    # Addendum 3: a gen-0 slot that ended in a terminal generation failure is a system failure:
+    # an empty stage-1 result for that slot and every run derived from it (never regenerated).
+    failed = {(row['arm'], row['qid'], row['variant']) for row in read_jsonl(out / 'generations.jsonl')
+              if row['gen_index'] == 0 and row['status'] == 'generation_error'}
+    EMPTY = ([], [])
     universe = all_clause_ids(r)
     bm25 = None
     if clauses is not None:
@@ -599,6 +606,9 @@ def build_runs(r, queries, clauses, out, *, hyde_record, hyde_client):
         for arm, version in ARMS.items():
             for variant in GEN_VARIANTS:
                 for k in TOP_KS:
+                    if (arm, qid, variant) in failed:
+                        add(qid, 'pipeline', arm, variant, k, EMPTY, status='system_failure')
+                        continue
                     try:
                         _, run = r.retrieve(texts[variant], k, qid=qid, variant=variant, gen_index=0,
                                             prompt_version=version)
@@ -610,6 +620,10 @@ def build_runs(r, queries, clauses, out, *, hyde_record, hyde_client):
             if 'c' not in vectors:
                 for k in TOP_KS:
                     add(qid, 'pipeline', arm, 'c', k, status='n/a', reason='no HyDE passage')
+                continue
+            if (arm, qid, 'a') in failed:
+                for k in TOP_KS:
+                    add(qid, 'pipeline', arm, 'c', k, EMPTY, status='system_failure')
                 continue
             stage1 = RunLog(query=texts['a'], qid=qid, variant='a', gen_index=0, prompt_version=version)
             try:
@@ -626,7 +640,9 @@ def build_runs(r, queries, clauses, out, *, hyde_record, hyde_client):
         for variant in ('a', 'b', 'c'):
             source = noob.get((qid, 'a' if variant == 'c' else variant))
             for k in TOP_KS:
-                if source is None or variant not in vectors:
+                if ('v1', qid, 'a' if variant == 'c' else variant) in failed:
+                    add(qid, 'pipeline', NOOB, variant, k, EMPTY, status='system_failure', derived_from='v1')
+                elif source is None or variant not in vectors:
                     add(qid, 'pipeline', NOOB, variant, k, status='n/a', reason='no v1 gen-0 record')
                 elif source['status'] == 'equal_v1':
                     ids = v1_lists.get((variant, k))
@@ -648,6 +664,9 @@ def build_runs(r, queries, clauses, out, *, hyde_record, hyde_client):
         for limit in LIMITS:
             for repeat in range(LIMIT_REPEATS):
                 for k in TOP_KS:
+                    if ('v1', qid, 'a') in failed:
+                        add(qid, 'limit', 'v1', 'a', k, EMPTY, status='system_failure', limit=limit, repeat=repeat)
+                        continue
                     try:
                         _, run = r.retrieve(texts['a'], k, inject_limit=limit, qid=qid, variant='a',
                                             gen_index=0, prompt_version=ARMS['v1'])
@@ -902,7 +921,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog='tasks.py', description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     gen = sub.add_parser('s8-generate', help='HyDE + query embeddings + Text2Cypher gens + stage 1 + v1-noob')
-    gen.add_argument('--budget', type=int, default=700, help='s8_cypher API requests incl. retries (cumulative)')
+    gen.add_argument('--budget', type=int, default=900, help='s8_cypher API requests incl. retries (cumulative)')
     gen.add_argument('--hyde-budget', type=int, default=16)
     gen.add_argument('--embed-budget', type=int, default=60)
     sub.add_parser('s8-pool', help='All pooled runs from cache (0 LLM / 0 embedding calls)')
