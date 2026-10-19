@@ -12,6 +12,9 @@ PLACEHOLDERS = (
     "obligation", "retrieve", "eval"
 )
 S8_COMMANDS = ('s8-generate', 's8-pool', 's8-sheet', 's8-practice', 's8-prelabel')
+S8_D_COMMANDS = {'s8-audit-sample': 'retrieval_eval.s8_judging', 's8-freeze-audit': 'retrieval_eval.s8_judging',
+                 's8-make-kits': 'retrieval_eval.s8_judging', 's8-check-kits': 'retrieval_eval.s8_judging',
+                 's8-label': 'retrieval_eval.s8_label_tool', 's8-merge-labels': 'retrieval_eval.s8_labels'}
 
 # The existing summary file uses script-level assertions, not pytest functions.
 # Collect it as one pytest test without editing the original file.
@@ -76,6 +79,9 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] in S8_COMMANDS:
         from retrieval_eval.s8_runs import main as s8_main
         return s8_main(sys.argv[1:])
+    if len(sys.argv) > 1 and sys.argv[1] in S8_D_COMMANDS:
+        from importlib import import_module
+        return import_module(S8_D_COMMANDS[sys.argv[1]]).main(sys.argv[1:])
     handlers = {'run-summary': 'observability.run_summary', 'retrieval-setup': 'retrieval.setup',
                 'structure-score': 'ingest.structure_gold', 'standards-demo': 'standards.demo',
                 'gold-score': 'goldset.score', 'enrich': 'ner.merge',
@@ -96,7 +102,7 @@ def main():
         subcommands.add_parser(name, help=description)
     for name in PLACEHOLDERS:
         subcommands.add_parser(name, help="Not implemented yet.")
-    for name in ('obligation-weak', 'gold-sample', 'gold-agreement', *S8_COMMANDS, *handlers):
+    for name in ('obligation-weak', 'gold-sample', 'gold-agreement', *S8_COMMANDS, *S8_D_COMMANDS, *handlers):
         subcommands.add_parser(name, help='Offline preparation; use command --help for options.')
     ingest = subcommands.add_parser('ingest', help='Parse manifest-listed PDFs offline.')
     ingest.add_argument('--doc')
