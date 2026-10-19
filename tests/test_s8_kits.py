@@ -1,4 +1,5 @@
 """S8 Part D1 judge kits (s8_judging): built and checked in tmp folders only, never the real kits."""
+import os
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,11 @@ def test_roots_must_not_overlap_repo_or_each_other(tmp_path):
         j.check_roots([repo / 'kitA', tmp_path / 'kitB'], repo)
     with pytest.raises(ValueError, match='overlap'):
         j.check_roots([tmp_path / 'kitA', tmp_path / 'kitA' / 'kitB'], repo)
-    j.check_roots([Path('D:/s8_judgeA'), Path('D:/s8_judgeB')], j.ROOT)  # default roots are outside the repo
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows drive paths')
+def test_default_kit_roots_are_outside_the_repo():
+    j.check_roots([Path('D:/s8_judgeA'), Path('D:/s8_judgeB')], j.ROOT)
 
 
 def test_make_kits_refuses_a_dirty_root(tmp_path):
