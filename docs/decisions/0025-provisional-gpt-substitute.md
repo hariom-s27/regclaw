@@ -52,6 +52,8 @@ retain their existing environment-loading behavior. Never commit `.env`.
 | Role | REPORT model | Provisional substitute |
 |---|---|---|
 | Retrieval stage-1 Text2Cypher | Claude Haiku (REPORT) | gpt-5-mini, effort low (provisional), role s8_cypher |
+| S8 HyDE passage (variant c) | not in the report — evaluation helper only | gpt-5-mini, effort low (provisional), role s8_hyde |
+| S8 relevance pre-label | not in the report — evaluation helper only | gpt-5-mini, effort low (provisional), role s8_prelabel |
 
 The project environment has `openai==2.54.0` and `anthropic==1.14.0`.
 Azure v1 accepts `OpenAI(base_url=endpoint + '/openai/v1/', api_key=...)` with
