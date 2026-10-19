@@ -204,7 +204,7 @@ def test_schema_order_is_canonical_including_obligations():
 def test_prompt_does_not_contain_frozen_queries_or_rephrases():
     path = Path(__file__).resolve().parents[1] / 'retrieval_eval/queries.yaml'
     frozen = path.read_bytes()
-    assert hashlib.sha256(frozen).hexdigest().startswith('83d78138')
+    assert hashlib.sha256(frozen.replace(b'\r\n', b'\n').replace(b'\r', b'\n')).hexdigest().startswith('83d78138')
     queries = yaml.safe_load(frozen)['queries']
     assert len(queries) == 16
     rendered = (render_prompt(SCHEMA_FALLBACK) + render_fewshots()).casefold()
