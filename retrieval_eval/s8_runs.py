@@ -728,7 +728,7 @@ def run_pool(r, queries, clauses, out, *, hyde_record, hyde_client):
     states = {name: write_once(out / name, jsonl_text(rows)) for name, rows in
               (('runs.jsonl', runs), ('pool_key.jsonl', key_rows), ('pool.jsonl', pool_rows))}
     return dict(states=states, runs=len(runs), run_status=dict(Counter(
-        (run['system'], run['status']) for run in runs)), pool=pool_counts(pool_rows, queries))
+        f"{run['system']}/{run['status']}" for run in runs)), pool=pool_counts(pool_rows, queries))
 
 
 def pool_counts(pool_rows, queries):

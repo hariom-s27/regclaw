@@ -315,6 +315,7 @@ def test_generate_pool_replay_and_gen0_only(tmp_path):
 
     before = snapshot(env.out)
     pooled, pool_ledger = env.pool()
+    json.dumps(pooled)  # the CLI prints this summary
     assert env.cypher.calls == 16 and env.embedder.calls == 6 and len(env.hyde.requests) == 2
     assert pooled['states'] == dict.fromkeys(('runs.jsonl', 'pool_key.jsonl', 'pool.jsonl'), 'written')
     assert snapshot(env.out)['cypher_cache.jsonl'] == before['cypher_cache.jsonl']
