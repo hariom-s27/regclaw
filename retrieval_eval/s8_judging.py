@@ -28,7 +28,7 @@ AUDIT_ORDER = 'audit_order.txt'
 AUDIT_N_MIN = 100
 KIT_ROOTS = (Path('D:/s8_judgeA'), Path('D:/s8_judgeB'))
 INSTRUCTIONS = Path(__file__).with_name('s8_judge_instructions.md')
-GUIDELINE = Path(__file__).with_name('S8_RELEVANCE_GUIDELINE_v1.0.md')
+GUIDELINE = Path(__file__).with_name('S8_RELEVANCE_GUIDELINE_v1.0.1.md')  # in force (Addendum 2, note 1)
 KIT_FILES = ('GUIDELINE.md', 'JUDGE_INSTRUCTIONS.md', 'practice/practice_sheet.csv')
 KIT_DIRS = ('practice', 'eval', 'output')
 
@@ -39,7 +39,7 @@ def instructions_bytes(path=INSTRUCTIONS):
 
 
 def guideline_bytes(path=GUIDELINE):
-    """The frozen guideline v1.0, LF-normalised like the instructions."""
+    """The guideline in force (v1.0.1), LF-normalised like the instructions."""
     return instructions_bytes(path)
 
 
@@ -265,7 +265,7 @@ def check_kit(root, practice_sha, per_query_dir, instructions=INSTRUCTIONS, guid
                 problems.append(f'unexpected folder {rel}')
         elif rel == 'GUIDELINE.md':
             if p.read_bytes() != guideline_bytes(guideline):
-                problems.append('GUIDELINE.md differs from the frozen guideline v1.0')
+                problems.append('GUIDELINE.md differs from the guideline in force v1.0.1')
         elif rel == 'JUDGE_INSTRUCTIONS.md':
             if p.read_bytes() != instructions_bytes(instructions):
                 problems.append('JUDGE_INSTRUCTIONS.md differs from the repo text')

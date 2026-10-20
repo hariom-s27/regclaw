@@ -45,7 +45,7 @@ def test_kit_contains_only_allowed_entries(kits):
     for root in roots:
         assert [e['path'] for e in trees[str(root)]] == [
             'GUIDELINE.md', 'JUDGE_INSTRUCTIONS.md', 'eval/', 'output/', 'practice/', 'practice/practice_sheet.csv']
-        assert (root / 'GUIDELINE.md').read_bytes() == j.guideline_bytes()  # frozen v1.0, LF
+        assert (root / 'GUIDELINE.md').read_bytes() == j.guideline_bytes()  # in force v1.0.1, LF
         assert (root / 'practice' / 'practice_sheet.csv').read_bytes() == practice.read_bytes()
         assert not any((root / 'eval').iterdir()) and not any((root / 'output').iterdir())
     assert j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo') == {str(r): [] for r in roots}
@@ -84,22 +84,35 @@ def test_guideline_must_match_between_kits(kits):
     assert all('GUIDELINE.md differs between kits' in p for p in problems.values())
     (roots[1] / 'GUIDELINE.md').write_text('guideline v1.0 ...', encoding='utf-8')
     problems = j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo')
-    assert all(p == ['GUIDELINE.md differs from the frozen guideline v1.0'] for p in problems.values())
+    assert all(p == ['GUIDELINE.md differs from the guideline in force v1.0.1'] for p in problems.values())
 
 
 def test_checker_flags_a_stale_guideline(kits):
     roots, practice, per_query, _ = kits
     a = roots[0]
     (a / 'GUIDELINE.md').write_text('guideline v0.9 for calibration; to be replaced by v1.0\n', encoding='utf-8')
-    assert j.check_kit(a, j.bytes_sha(practice), per_query) == ['GUIDELINE.md differs from the frozen guideline v1.0']
-    v10 = j.guideline_bytes()
-    (a / 'GUIDELINE.md').write_bytes(v10[:-40] + b'one changed rule\n')
-    assert j.check_kit(a, j.bytes_sha(practice), per_query) == ['GUIDELINE.md differs from the frozen guideline v1.0']
-    (a / 'GUIDELINE.md').write_bytes(v10.replace(b'\n', b'\r\n'))  # CRLF copy is a different file
+    assert j.check_kit(a, j.bytes_sha(practice), per_query) == ['GUIDELINE.md differs from the guideline in force v1.0.1']
+    v101 = j.guideline_bytes()
+    (a / 'GUIDELINE.md').write_bytes(v101[:-40] + b'one changed rule\n')
+    assert j.check_kit(a, j.bytes_sha(practice), per_query) == ['GUIDELINE.md differs from the guideline in force v1.0.1']
+    (a / 'GUIDELINE.md').write_bytes(v101.replace(b'\n', b'\r\n'))  # CRLF copy is a different file
     assert j.check_kit(a, j.bytes_sha(practice), per_query) != []
-    (a / 'GUIDELINE.md').write_bytes(v10)
+    (a / 'GUIDELINE.md').write_bytes(v101)
     assert j.check_kit(a, j.bytes_sha(practice), per_query) == []
-    assert b'# S8 relevance-judging guideline v1.0' in v10 and b'\r' not in v10
+    assert v101.startswith(b'# S8 relevance-judging guideline v1.0.1\n') and b'\r' not in v101
+
+
+def test_checker_flags_a_kit_holding_v1_0(kits):
+    roots, practice, per_query, _ = kits
+    v10 = j.guideline_bytes(j.GUIDELINE.with_name('S8_RELEVANCE_GUIDELINE_v1.0.md'))
+    assert b'\r' not in v10 and v10 != j.guideline_bytes()
+    (roots[0] / 'GUIDELINE.md').write_bytes(v10)
+    problems = j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo')
+    assert problems[str(roots[0])] == ['GUIDELINE.md differs from the guideline in force v1.0.1',
+                                       'GUIDELINE.md differs between kits']
+    (roots[1] / 'GUIDELINE.md').write_bytes(v10)  # both kits on v1.0: still flagged
+    problems = j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo')
+    assert all(p == ['GUIDELINE.md differs from the guideline in force v1.0.1'] for p in problems.values())
 
 
 def test_kit_tree_lists_output_names_without_reading_them(kits, monkeypatch):
