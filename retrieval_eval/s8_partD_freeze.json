@@ -1,0 +1,24 @@
+{
+  "created": "2026-10-20",
+  "purpose": "S8 Part D freeze (Addendum 2): relevance guideline v1.0, Addendum 2, judge instructions and the audit sample + order. No guideline change after this commit.",
+  "docs_lf_normalised_sha256": {
+    "retrieval_eval/S8_RELEVANCE_GUIDELINE_v1.0.md": "5e0cec8b2db1120e478acf2aee1ce10960cf9a6baa7d5a60426dc7748fc6a31e",
+    "retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2.md": "7efd5f7d4b21d9e83c01847cf3d1a36fd81158666841150929b7a1a02a4a2d0e",
+    "retrieval_eval/s8_judge_instructions.md": "6ea27aefad633ea9955fef61ee9d4c432ce34ff555c8dee09afc0bc649dfa7f7"
+  },
+  "audit_raw_bytes_sha256": {
+    "data/runs/azure_openai/s8/c2/audit/audit_sheet.csv": "606d4bdbd4dc7686b3998b397b113fdf99b2f0b3866de643964932e82e2a142f",
+    "data/runs/azure_openai/s8/c2/audit/audit_ids.txt": "97069918061950680f776ad2f509d77d21616ceea6b8cc65250576f435e21a60",
+    "data/runs/azure_openai/s8/c2/audit/audit_order.txt": "c1a50ae35cc4d2861ce0fb8891969559736c9117bd0860a3321c9eed82a35779"
+  },
+  "audit": {
+    "sample_seed": 20261020,
+    "items": 200,
+    "order_seed": 20261021,
+    "order_rule": "within each query: sorted item ids shuffled with one random.Random(20261021), queries taken in queries.yaml order; then round-robin in queries.yaml order (R1, R2, R3, Q1 ... Q13), one item per query per round, skipping queries that ran out",
+    "first_100_per_query": {"R1": 7, "R2": 7, "R3": 7, "Q1": 7, "Q2": 6, "Q3": 6, "Q4": 6, "Q5": 6, "Q6": 6, "Q7": 6,
+                            "Q8": 6, "Q9": 6, "Q10": 6, "Q11": 6, "Q12": 6, "Q13": 6},
+    "minimum_n": 100,
+    "freeze_rule": "s8-freeze-audit accepts only a gap-free prefix of audit_order.txt with N >= 100 and records N"
+  }
+}
