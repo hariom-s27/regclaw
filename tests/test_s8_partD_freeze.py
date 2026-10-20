@@ -30,7 +30,8 @@ def test_freeze_covers_guideline_addendum_instructions_and_kit_bytes():
     audit = FREEZE['audit_raw_bytes_sha256']
     assert audit['data/runs/azure_openai/s8/c2/audit/audit_sheet.csv'].startswith('606d4bdb')
     assert audit['data/runs/azure_openai/s8/c2/audit/audit_ids.txt'].startswith('97069918')
-    assert FREEZE['audit']['minimum_n'] == j.AUDIT_N_MIN and FREEZE['audit']['order_seed'] == j.ORDER_SEED
+    assert FREEZE['audit']['minimum_n'] == 100 and FREEZE['audit']['order_seed'] == j.ORDER_SEED  # the record
+    assert FREEZE['audit_minimum_n_in_force'] == j.AUDIT_N_MIN == 50  # note 3 section 4
     assert sum(FREEZE['audit']['first_100_per_query'].values()) == 100
 
 
@@ -78,3 +79,36 @@ def test_local_audit_files_match_the_freeze(rel):
     if not path.exists():
         pytest.skip('local data/ only (not in CI)')
     assert hashlib.sha256(path.read_bytes()).hexdigest() == FREEZE['audit_raw_bytes_sha256'][rel]
+
+
+# ---------------------------------------------------------------- Addendum 2 notes 2-3
+NOTES = FREEZE['addendum_2_notes_2_3']['docs_lf_normalised_sha256']
+HEAD_A9CD028_PREFIX_SHA = 'b9b00f224f9adc398ecea61dd7487eafcccda51a36fd7566a603ceb01194f872'  # bytes before the notes
+
+
+@pytest.mark.parametrize('rel', sorted(NOTES))
+def test_notes_2_3_match_the_freeze(rel):
+    assert lf_sha(ROOT / rel) == NOTES[rel]
+
+
+def test_notes_2_3_keys_in_force():
+    assert set(NOTES) == {'retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_2.md',
+                          'retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_3.md'}
+    assert FREEZE['audit_mode'] == 'check_only (note 2)'
+    assert FREEZE['judges_in_force'] == ['A', 'B', 'C'] and len(j.KIT_ROOTS) == 3
+    assert FREEZE['audit_minimum_n_in_force'] == j.AUDIT_N_MIN == 50
+    note3 = (ROOT / 'retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_3.md').read_text(encoding='utf-8')
+    assert '**Minimum N = 50** (was 100)' in note3 and r'D:\s8_judgeC' in note3
+
+
+def test_existing_freeze_bytes_unchanged():
+    """Every pre-note key keeps its bytes: the file up to the guideline_v1_0_1 record equals HEAD a9cd028's file
+    minus its closing brace; the notes only append keys."""
+    text = (ROOT / 'retrieval_eval/s8_partD_freeze.json').read_bytes().replace(b'\r\n', b'\n')
+    prefix = text[:text.index(b',\n  "addendum_2_notes_2_3"')]
+    assert hashlib.sha256(prefix).hexdigest() == HEAD_A9CD028_PREFIX_SHA
+    old_keys = {'created', 'purpose', 'docs_lf_normalised_sha256', 'audit_raw_bytes_sha256', 'audit',
+                'guideline_in_force', 'guideline_v1_0_1'}
+    assert json.loads(prefix + b'\n}\n').keys() == old_keys
+    assert set(FREEZE) == old_keys | {'addendum_2_notes_2_3', 'audit_mode', 'judges_in_force',
+                                      'audit_minimum_n_in_force'}

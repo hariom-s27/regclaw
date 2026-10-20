@@ -162,8 +162,18 @@ def fake(tmp_path, monkeypatch):
 
 
 def run(tmp, rows, ga, gb, **kw):
+    """Two-judge protocol (note 3 section 6 fallback); three-judge runs are in test_s8_three_judges."""
+    kw.setdefault('fallback_reason', 'TEST two-judge')
     return m.run_merge(sheet=tmp / 'sheet.csv', a_files=write_judge(tmp / 'A', rows, ga),
                        b_files=write_judge(tmp / 'B', rows, gb), out=tmp / 'labels', bootstrap=300, **kw)
+
+
+REF_FIELDS = [*m.LABEL_FIELDS, *m.REFEREE_FIELDS]
+
+
+def ref_label(item_id, grade, reason_code='clear_reading', **kw):
+    return label(item_id, grade, kw.pop('unsure', 'no')) | dict(reason_code=reason_code, override_quote='',
+                                                                override_rule='') | kw
 
 
 def test_stage1_agreement_counts_only(fake):
@@ -235,17 +245,19 @@ def test_audit_pass_builds_referee_list_then_qrels(fake):
     assert [r['item_id'] for r in referee_sheet] == referee_ids
     assert not (tmp / 'labels' / 'qrels.tsv').exists()
 
-    bad = write_labels(tmp / 'ref_bad.csv', [label(i, 3) for i in referee_ids[1:]])
+    bad = write_labels(tmp / 'ref_bad.csv', [ref_label(i, 3) for i in referee_ids[1:]], REF_FIELDS)
     with pytest.raises(ValueError, match='unlabelled'):
         run(tmp, rows, ga, gb, referee_file=bad, **frozen)
-    ref = write_labels(tmp / 'ref.csv', [label(i, 3) for i in referee_ids])
+    flip_text = next(r['text'] for r in rows if r['item_id'] == flip)
+    ref = write_labels(tmp / 'ref.csv', [ref_label(i, 3) | (dict(override_quote=flip_text, override_rule='14')
+                                                           if i == flip else {}) for i in referee_ids], REF_FIELDS)
     s = run(tmp, rows, ga, gb, referee_file=ref, **frozen)
     assert s['stage'] == 3 and s['qrels']['pairs'] == 30
     q = qrels_io.read(tmp / 'labels' / 'qrels.tsv')
     by = {(r['qid'], r['clause_id']): r for r in q}
     for r in rows:
         got = by[(r['qid'], r['clause_id'])]
-        if r['item_id'] in referee_ids:
+        if r['item_id'] in referee_ids:  # splits: referee grade; the audit item: quote + rule -> override
             assert (got['grade'], got['judge']) == (3, 'referee')
         else:
             assert (got['grade'], got['judge']) == (min(ga[r['item_id']], gb[r['item_id']]), 'AB_min')

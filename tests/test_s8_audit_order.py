@@ -116,7 +116,7 @@ def test_freeze_accepts_gap_free_prefix_and_records_n(ordered):
     labels = _write(folder, stamped(order[:120]))
     rec = j.freeze_audit(labels, folder, folder / j.AUDIT_ORDER, now=datetime(2026, 10, 23, tzinfo=timezone.utc))
     assert json.loads((folder / 'audit_freeze.json').read_text(encoding='utf-8')) == rec
-    assert rec['n'] == 120 and rec['minimum'] == 100 and rec['order_items'] == 150
+    assert rec['n'] == 120 and rec['minimum'] == 50 and rec['order_items'] == 150
     assert rec['order_sha256'] == j.bytes_sha(folder / j.AUDIT_ORDER) and rec['order_file'] == j.AUDIT_ORDER
     assert rec['labels_sha256'] == j.bytes_sha(labels)
     assert rec['audit_sheet_sha256'] == j.bytes_sha(folder / 'audit_sheet.csv')
@@ -139,14 +139,35 @@ def test_freeze_refuses_gaps(ordered):
     assert not (folder / 'audit_freeze.json').exists()
 
 
-def test_freeze_refuses_n_below_100(ordered):
+def test_freeze_refuses_n_below_50_and_accepts_50(ordered):
     folder, order = ordered
-    labels = _write(folder, stamped(order[:99]))
-    with pytest.raises(ValueError, match='minimum is 100'):
+    labels = _write(folder, stamped(order[:49]))
+    with pytest.raises(ValueError, match='only 49 item.*minimum is 50'):
         j.freeze_audit(labels, folder, folder / j.AUDIT_ORDER)
     assert not (folder / 'audit_freeze.json').exists()
-    full = _write(folder, stamped(order))
-    assert j.freeze_audit(full, folder, folder / j.AUDIT_ORDER)['n'] == 150
+    fifty = _write(folder, stamped(order[:50]))
+    rec = j.freeze_audit(fifty, folder, folder / j.AUDIT_ORDER)
+    assert rec['n'] == 50 and rec['minimum'] == j.AUDIT_N_MIN == 50
+    assert j.frozen_prefix(folder / 'audit_freeze.json') == order[:50]
+
+
+def test_freeze_records_the_committed_partD_freeze_sha(ordered, tmp_path):
+    import hashlib
+    folder, order = ordered
+    rec = j.freeze_audit(_write(folder, stamped(order[:50])), folder, folder / j.AUDIT_ORDER)
+    committed = j.PARTD_FREEZE.read_bytes().replace(b'\r\n', b'\n')
+    assert rec['partD_freeze_file'] == 's8_partD_freeze.json'
+    assert rec['partD_freeze_lf_sha256'] == hashlib.sha256(committed).hexdigest()
+    assert json.loads(committed)['audit_minimum_n_in_force'] == 50
+    other = tmp_path / 'other'  # a CRLF copy gives the same (LF-normalised) sha
+    other.mkdir()
+    crlf = other / 's8_partD_freeze.json'
+    crlf.write_bytes(committed.replace(b'\n', b'\r\n'))
+    folder2, _ = audit_folder(other, {'R1': 30, 'Q1': 30})
+    j.run_audit_order(folder2, ['R1', 'Q1'])
+    order2 = (folder2 / j.AUDIT_ORDER).read_text(encoding='utf-8').split()
+    rec2 = j.freeze_audit(_write(folder2, stamped(order2[:50])), folder2, folder2 / j.AUDIT_ORDER, partd_freeze=crlf)
+    assert rec2['partD_freeze_lf_sha256'] == rec['partD_freeze_lf_sha256']
 
 
 def test_freeze_refuses_invalid_fields_and_bad_order(ordered):

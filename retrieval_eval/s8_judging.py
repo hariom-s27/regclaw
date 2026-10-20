@@ -1,15 +1,17 @@
-"""S8 Part D: blind audit sample, interleaved audit order, audit freeze and the two isolated judge kits
-(offline, 0 API calls).
+"""S8 Part D: blind audit sample, interleaved audit order, audit freeze and the isolated judge kits
+(A, B, C; Addendum 2 note 3) (offline, 0 API calls).
 
 Commands (via tasks.py): s8-audit-sample, s8-audit-order, s8-freeze-audit, s8-make-kits, s8-check-kits.
 Reads only the blind sheet / practice sheet (never pool_key, runs or item maps). Write-once outputs.
 The audit order (Addendum 2 section 5) uses item_id + qid only; the freeze accepts only a gap-free
-prefix of that order with N >= 100.
+prefix of that order with N >= 50 (Addendum 2 note 3 section 4; was 100) and records the sha of the
+committed s8_partD_freeze.json.
 """
 import argparse
 from collections import Counter, defaultdict
 import csv
 from datetime import datetime, timezone
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -25,8 +27,10 @@ AUDIT_MIN = 8
 AUDIT_LABELS = 'labels_shyam_audit.csv'
 ORDER_SEED = 20261021
 AUDIT_ORDER = 'audit_order.txt'
-AUDIT_N_MIN = 100
-KIT_ROOTS = (Path('D:/s8_judgeA'), Path('D:/s8_judgeB'))
+AUDIT_N_MIN = 50  # Addendum 2 note 3 section 4 (Addendum 2 section 5 had 100)
+KIT_ROOTS = (Path('D:/s8_judgeA'), Path('D:/s8_judgeB'), Path('D:/s8_judgeC'))  # note 3 section 1
+KIT_COUNTS = (2, 3)  # 3 judges; 2 still accepted (note 3 section 6 fallback)
+PARTD_FREEZE = Path(__file__).with_name('s8_partD_freeze.json')
 INSTRUCTIONS = Path(__file__).with_name('s8_judge_instructions.md')
 GUIDELINE = Path(__file__).with_name('S8_RELEVANCE_GUIDELINE_v1.0.1.md')  # in force (Addendum 2, note 1)
 KIT_FILES = ('GUIDELINE.md', 'JUDGE_INSTRUCTIONS.md', 'practice/practice_sheet.csv')
@@ -152,9 +156,10 @@ def median_save_gap(timestamps):
     return statistics.median(gaps) if gaps else None
 
 
-def freeze_audit(labels_path, folder, order, now=None, minimum=AUDIT_N_MIN):
+def freeze_audit(labels_path, folder, order, now=None, minimum=AUDIT_N_MIN, partd_freeze=PARTD_FREEZE):
     """Freeze the audit labels (write-once). They must be exactly the first N items of the audit order,
-    N >= minimum, every field valid. Records N, the shas, a timestamp and the median save gap."""
+    N >= minimum, every field valid. Records N, the shas, a timestamp, the median save gap and the
+    LF-normalised sha of the committed s8_partD_freeze.json (the protocol in force at the freeze)."""
     folder = Path(folder)
     ids = (folder / 'audit_ids.txt').read_text(encoding='utf-8').split()
     order_ids = read_order(order)
@@ -180,7 +185,9 @@ def freeze_audit(labels_path, folder, order, now=None, minimum=AUDIT_N_MIN):
                   audit_ids_sha256=bytes_sha(folder / 'audit_ids.txt'),
                   median_seconds_per_item=median_save_gap(l['timestamp'] for l in labels.values()),
                   median_rule='median gap between consecutive saves, all save timestamps sorted by time',
-                  timestamps=sum(bool(l['timestamp']) for l in labels.values()))
+                  timestamps=sum(bool(l['timestamp']) for l in labels.values()),
+                  partD_freeze_file=Path(partd_freeze).name,
+                  partD_freeze_lf_sha256=hashlib.sha256(instructions_bytes(partd_freeze)).hexdigest())
     write_once(folder / 'audit_freeze.json', json.dumps(record, indent=2, sort_keys=True) + '\n')
     return record
 
@@ -214,6 +221,8 @@ def _inside(path, other):
 
 def check_roots(roots, repo=ROOT):
     roots = [Path(r) for r in roots]
+    if len(roots) not in KIT_COUNTS:
+        raise ValueError(f'expected 2 or 3 kit roots, got {len(roots)}')
     for r in roots:
         if _inside(r, repo) or _inside(repo, r):
             raise ValueError(f'kit root {r} overlaps the repo')
@@ -305,17 +314,19 @@ def main(argv=None):
     audit.add_argument('--folder', default=str(out / 'audit'))
     order = sub.add_parser('s8-audit-order', help='Fixed interleaved audit order (item_id + qid only; write-once)')
     order.add_argument('--folder', default=str(out / 'audit'))
-    freeze = sub.add_parser('s8-freeze-audit', help='Freeze a gap-free prefix (N >= 100) of the audit labels')
+    freeze = sub.add_parser('s8-freeze-audit', help='Freeze a gap-free prefix (N >= 50) of the audit labels')
     freeze.add_argument('--labels', default=str(out / 'audit' / AUDIT_LABELS))
     freeze.add_argument('--folder', default=str(out / 'audit'))
     freeze.add_argument('--order', default=str(out / 'audit' / AUDIT_ORDER))
-    for name, text in (('s8-make-kits', 'Create the two isolated judge kits'),
+    for name, text in (('s8-make-kits', 'Create the isolated judge kits (2 or 3 roots; default A, B, C)'),
                        ('s8-check-kits', 'Check the judge kits hold only the allowed files')):
         kit = sub.add_parser(name, help=text)
-        kit.add_argument('--roots', nargs=2, default=[str(r) for r in KIT_ROOTS])
+        kit.add_argument('--roots', nargs='+', default=[str(r) for r in KIT_ROOTS])
         kit.add_argument('--practice', default=str(out / 'practice' / 'practice_sheet.csv'))
         kit.add_argument('--per-query', default=str(out / 'sheet' / 'per_query'))
     args = parser.parse_args(argv)
+    if args.command in ('s8-make-kits', 's8-check-kits') and len(args.roots) not in KIT_COUNTS:
+        parser.error('--roots takes 2 or 3 kit folders')
 
     if args.command == 's8-audit-sample':
         result = run_audit_sample(args.sheet, args.folder)

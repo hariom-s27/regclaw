@@ -139,7 +139,8 @@ def test_roots_must_not_overlap_repo_or_each_other(tmp_path):
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows drive paths')
 def test_default_kit_roots_are_outside_the_repo():
-    j.check_roots([Path('D:/s8_judgeA'), Path('D:/s8_judgeB')], j.ROOT)
+    assert j.KIT_ROOTS == (Path('D:/s8_judgeA'), Path('D:/s8_judgeB'), Path('D:/s8_judgeC'))
+    j.check_roots(j.KIT_ROOTS, j.ROOT)
 
 
 def test_make_kits_refuses_a_dirty_root(tmp_path):

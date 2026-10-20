@@ -114,7 +114,7 @@ def test_ordered_audit_follows_order_and_is_gap_free(tmp_path, sheet):
     labels = tmp_path / 'labels.csv'
     app = t.LabelApp(path, labels, order=write_order(tmp_path, order))
     assert app.state() == dict(mode='audit', total=5, done=0, first_unlabelled=0, labels_file='labels.csv',
-                               ordered=True, minimum=100)
+                               ordered=True, minimum=50)
     assert app.item(0)['item']['item_id'] == order[0]
     with pytest.raises(ValueError, match='gap-free'):  # "Next" cannot pass the first unlabelled item
         app.item(1)
@@ -166,7 +166,7 @@ def test_ordered_http_refuses_skipping(tmp_path, sheet):
             urllib.request.urlopen(base + '/api/item?i=3')
         assert err.value.code == 400
         state = json.loads(urllib.request.urlopen(base + '/api/state').read())
-        assert state['ordered'] is True and state['minimum'] == 100
+        assert state['ordered'] is True and state['minimum'] == 50  # tool header: "minimum 50" (note 3)
     finally:
         server.shutdown()
         server.server_close()

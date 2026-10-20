@@ -10,8 +10,10 @@
 AUDIT mode shows only blind sheet fields (never grades, ranks, systems or any LLM field).
 With --order, items follow the fixed audit order and labelling is gap-free: nothing past the first
 unlabelled item can be opened or saved (earlier items may be re-labelled until the freeze).
-REFEREE mode also shows both judges' fields from disputes.csv and refuses to start unless the
-audit is frozen (audit_freeze.json). Every save rewrites the labels CSV atomically (resumable).
+REFEREE mode also shows the judges' fields (A, B and C when present) from disputes.csv and refuses to
+start unless the audit is frozen (audit_freeze.json). It also records reason_code (required) and, for
+audit disagreements, override_quote (must appear in the clause text) + override_rule (1-16)
+(Addendum 2 notes 2-3). Every save rewrites the labels CSV atomically (resumable).
 A frozen audit labels file is never opened for editing.
 """
 import argparse
@@ -27,13 +29,14 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 from retrieval_eval.s8_judging import AUDIT_N_MIN, frozen_labels_path, read_order
-from retrieval_eval.s8_labels import (JUDGE_FIELDS, LABEL_FIELDS, read_disputes, read_labels, read_sheet,
-                                      validate_label)
+from retrieval_eval.s8_labels import (JUDGE_FIELDS, LABEL_FIELDS, REFEREE_FIELDS, read_disputes, read_labels,
+                                      read_sheet, validate_label, validate_referee)
 from retrieval_eval.s8_runs import output_dir
 
 SHOWN_FIELDS = ('item_id', 'qid', 'query', 'jurisdiction', 'narrative_grade3', 'narrative_grade2',
                 'narrative_grade1_traps', 'source_doc', 'clause_id', 'title', 'text')
 TOOL_FIELDS = tuple(f for f in LABEL_FIELDS if f != 'query_asks') + ('timestamp',)
+REFEREE_TOOL_FIELDS = TOOL_FIELDS[:-1] + REFEREE_FIELDS + ('timestamp',)
 
 
 class LabelApp:
@@ -43,6 +46,8 @@ class LabelApp:
         if order is not None and mode != 'audit':
             raise ValueError('--order is for AUDIT mode only')
         self.labels_path, self.mode, self.lock = Path(labels), mode, threading.Lock()
+        self.fields = REFEREE_TOOL_FIELDS if mode == 'referee' else TOOL_FIELDS
+        extra = REFEREE_FIELDS if mode == 'referee' else ()
         rows = read_sheet(sheet)
         if freeze is not None and frozen_labels_path(freeze) == self.labels_path.resolve():
             raise PermissionError('this labels file is the frozen audit; it cannot be edited')
@@ -65,10 +70,11 @@ class LabelApp:
             rows = [by_id[i] for i in order_ids]
         self.items = [{**{f: r[f] for f in SHOWN_FIELDS}, 'common_rules': rules} for r in rows]
         self.ids = [r['item_id'] for r in rows]
+        self.texts = {r['item_id']: r['text'] for r in rows}
         self.labels = {}
         if self.labels_path.exists():
-            self.labels = {k: {f: v[f] for f in TOOL_FIELDS} for k, v in
-                           read_labels([self.labels_path], 'labels').items()}
+            self.labels = {k: {f: v[f] for f in self.fields} for k, v in
+                           read_labels([self.labels_path], 'labels', extra).items()}
             unknown = set(self.labels) - set(self.ids)
             if unknown:
                 raise ValueError(f'labels file holds {len(unknown)} item(s) not in this sheet')
@@ -101,7 +107,8 @@ class LabelApp:
         if self.mode == 'referee':
             d = self.judges[item_id]
             result['reason'] = d['reason']
-            result['judges'] = {j: {f: d[f'{j}_{f}'] for f in JUDGE_FIELDS} for j in ('a', 'b')}
+            result['judges'] = {j: {f: d[f'{j}_{f}'] for f in JUDGE_FIELDS} for j in ('a', 'b', 'c')
+                                if j != 'c' or any(d[f'c_{f}'] for f in JUDGE_FIELDS)}
         return result
 
     def save(self, payload):
@@ -109,8 +116,11 @@ class LabelApp:
         if item_id not in self.ids:
             raise ValueError('unknown item_id')
         self._check_reachable(self.ids.index(item_id))
-        label = validate_label({f: str(payload.get(f, '')) for f in LABEL_FIELDS}, item_id)
-        label = {f: label[f] for f in TOOL_FIELDS if f != 'timestamp'}
+        extra = REFEREE_FIELDS if self.mode == 'referee' else ()
+        label = validate_label({f: str(payload.get(f, '')) for f in (*LABEL_FIELDS, *extra)}, item_id, extra)
+        if self.mode == 'referee':
+            validate_referee(label, item_id, self.texts[item_id])
+        label = {f: label[f] for f in self.fields if f != 'timestamp'}
         label['timestamp'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
         with self.lock:
             self.labels[item_id] = label
@@ -119,7 +129,7 @@ class LabelApp:
 
     def csv_text(self):
         stream = io.StringIO(newline='')
-        writer = csv.DictWriter(stream, fieldnames=TOOL_FIELDS, lineterminator='\r\n')
+        writer = csv.DictWriter(stream, fieldnames=self.fields, lineterminator='\r\n')
         writer.writeheader()
         writer.writerows(self.labels[i] for i in self.ids if i in self.labels)
         return '﻿' + stream.getvalue()
@@ -259,12 +269,20 @@ table.j{width:100%;border-collapse:collapse;font-size:13px}table.j td{border-top
 <div class="k">Unsure <kbd>u</kbd></div><div class="opts" id="unsure"></div>
 <div class="k">Evidence span (optional)</div><textarea id="evidence_span" rows="3"></textarea>
 <div class="k">Note</div><textarea id="note" rows="2"></textarea>
+<div id="refbox" hidden><div class="k">Reason code (required)</div><div class="opts" id="reason_code"></div>
+<div class="k">Override quote (audit disagreement only: copied from the clause text)</div><textarea id="override_quote" rows="2"></textarea>
+<div class="k">Override rule (guideline rule 1-16 the quote shows was broken)</div><input id="override_rule" size="4" inputmode="numeric">
+<div class="k">The consensus stands unless both the quote and the rule are given (and unsure = no).</div></div>
 <p><button class="primary" onclick="save()">Save &amp; next <kbd>Enter</kbd></button> <span id="msg"></span></p>
 <div class="k">Keys work outside text boxes; <kbd>Esc</kbd> leaves a text box; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> navigate.</div>
 </div></section></main>
 <script>
 const OPTS={grade:['0','1','2','3'],clause_states:['answers','partial','mentions_only','unrelated'],
  jurisdiction_match:['yes','no','not_applicable'],unsure:['no','yes']};
+const REF={reason_code:['clear_reading','guideline_gap','unclear_text']};
+for(const [f,vals] of Object.entries(REF)){const box=document.getElementById(f);
+ for(const v of vals){const l=document.createElement('label');const i=document.createElement('input');i.type='radio';i.name=f;i.value=v;
+  const s=document.createElement('span');s.textContent=v;l.append(i,s);box.append(l);}}
 const KEYS={'0':['grade','0'],'1':['grade','1'],'2':['grade','2'],'3':['grade','3'],a:['clause_states','answers'],
  p:['clause_states','partial'],m:['clause_states','mentions_only'],x:['clause_states','unrelated'],
  y:['jurisdiction_match','yes'],n:['jurisdiction_match','no'],'-':['jurisdiction_match','not_applicable']};
@@ -290,14 +308,19 @@ function render(d){const it=d.item;$('mode').textContent=d.mode.toUpperCase();
  const L=d.label||{};for(const f of Object.keys(OPTS))setRadio(f,L[f]||'');
  if(!d.label){setRadio('unsure','no');if(!it.jurisdiction)setRadio('jurisdiction_match','not_applicable');}
  $('evidence_span').value=L.evidence_span||'';$('note').value=L.note||'';
+ const ref=d.mode==='referee';$('refbox').hidden=!ref;
+ if(ref){setRadio('reason_code',L.reason_code||'');$('override_quote').value=L.override_quote||'';$('override_rule').value=L.override_rule||'';}
  msg(d.label?'saved earlier '+L.timestamp:'',!!d.label);
  const J=$('judges');if(d.judges){J.hidden=false;$('reason').textContent=d.reason;const t=$('jt');t.textContent='';
-  const h=t.insertRow();h.insertCell().textContent='';h.insertCell().textContent='Judge A';h.insertCell().textContent='Judge B';
+  const js=Object.keys(d.judges);const h=t.insertRow();h.insertCell().textContent='';
+  for(const j of js)h.insertCell().textContent='Judge '+j.toUpperCase();
   for(const f of ['grade','clause_states','jurisdiction_match','unsure','query_asks','evidence_span','note']){
-   const r=t.insertRow();r.insertCell().textContent=f;r.insertCell().textContent=d.judges.a[f];r.insertCell().textContent=d.judges.b[f];}}
+   const r=t.insertRow();r.insertCell().textContent=f;for(const j of js)r.insertCell().textContent=d.judges[j][f];}}
  else J.hidden=true;}
 async function save(){const p={item_id:item.item_id,evidence_span:$('evidence_span').value,note:$('note').value};
  for(const f of Object.keys(OPTS))p[f]=getRadio(f);
+ if(state.mode==='referee'){p.reason_code=getRadio('reason_code');p.override_quote=$('override_quote').value;p.override_rule=$('override_rule').value.trim();
+  if(!p.reason_code){msg('missing: reason_code');return;}}
  const miss=['grade','clause_states','jurisdiction_match'].filter(f=>!p[f]);if(miss.length){msg('missing: '+miss.join(', '));return;}
  const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
  const d=await r.json();if(!r.ok){msg(d.error);return;}
@@ -305,7 +328,7 @@ async function save(){const p={item_id:item.item_id,evidence_span:$('evidence_sp
  if(d.done===d.total&&cur===d.total-1){await go(cur);msg('all items labelled — saved',true);return;}
  await go(cur+1<d.total?cur+1:(d.first_unlabelled??cur));}
 document.addEventListener('keydown',e=>{const t=e.target.tagName;
- if(t==='TEXTAREA'){if(e.key==='Escape')e.target.blur();return;}
+ if(t==='TEXTAREA'||t==='INPUT'){if(e.key==='Escape')e.target.blur();return;}
  if(e.ctrlKey||e.metaKey||e.altKey)return;
  if(e.key==='Enter'){e.preventDefault();save();return;}
  if(e.key==='ArrowRight'){go(cur+1);return;}if(e.key==='ArrowLeft'){go(cur-1);return;}

@@ -30,5 +30,16 @@
       "retrieval_eval/S8_RELEVANCE_GUIDELINE_v1.0.1.md": "437aff0fb9637a34bff22c560be184d4ac14c34c8cf9609fa103f232ff8389f6",
       "retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_v1.0.1.md": "7027efd69dc3e89b416142126a613739ec6c0597561ea8c1928c57cdc38a261b"
     }
-  }
+  },
+  "addendum_2_notes_2_3": {
+    "created": "2026-10-20",
+    "change": "note 2: check-only audit (consensus stands unless a quote found in the clause + a guideline rule; secondary kappa without unsure); note 3: three judges A/B/C (median merge, any split -> dispute), audit minimum N = 50, note 3 section 6 two-judge fallback; the records above are unchanged",
+    "docs_lf_normalised_sha256": {
+      "retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_2.md": "e3bd1d55b79ccd9f58b8d52b88a468c3a8d47e236771c9e6ecf2145e4e18ed48",
+      "retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_3.md": "5049619f3c61e688bf342fafc9a32a68a86f5d166412a1c464b8b410e1d4f67a"
+    }
+  },
+  "audit_mode": "check_only (note 2)",
+  "judges_in_force": ["A", "B", "C"],
+  "audit_minimum_n_in_force": 50
 }
