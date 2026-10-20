@@ -474,9 +474,12 @@ def write_json(path, value):
 
 
 def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=None, audit_ids=None, audit_file=None,
-              freeze_path=None, referee_file=None, bootstrap=BOOTSTRAP, _test_skip_freeze=False):
+              freeze_path=None, referee_file=None, bootstrap=BOOTSTRAP, freeze_dir=None, _test_skip_freeze=False,
+              _test_skip_judge_freeze=False):
     """Returns a counts-only summary; writes what the available inputs allow (write-once).
-    With a freeze, the audit set is the frozen prefix (audit_ids is used only by the test-only path)."""
+    With a freeze, the audit set is the frozen prefix (audit_ids is used only by the test-only path).
+    Before stage 1, every judge given needs judge_<X>_freeze.json in freeze_dir (default: out) with the
+    same files and sha256s (s8-freeze-judge)."""
     out = Path(out)
     if fallback_reason is not None and not str(fallback_reason).strip():
         raise ValueError('--two-judge-fallback needs a reason (note 3 section 6: the fallback is logged with it)')
@@ -484,9 +487,12 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
     if audit_file is not None and mode == 'two_judge':
         raise PermissionError('stage 2 needs judge C (--c) or --two-judge-fallback REASON '
                               '(Addendum 2 note 3 sections 3 and 6)')
+    files = {'A': a_files, 'B': b_files} | ({'C': c_files} if c_files else {})
+    if not _test_skip_judge_freeze:  # every judge given must match its judge_<X>_freeze.json (S8 D4v)
+        from retrieval_eval.s8_judge_check import check_judge_freezes
+        check_judge_freezes(files, out if freeze_dir is None else freeze_dir)
     sheet_rows = read_sheet(sheet)
     sheet_by_id = {r['item_id']: r for r in sheet_rows}
-    files = {'A': a_files, 'B': b_files} | ({'C': c_files} if c_files else {})
     read = {j: read_judge(f, f'judge {j}', sheet_by_id) for j, f in files.items()}
     labels = {j: valid for j, (valid, _) in read.items()}
     c_rate = len(read['C'][1]) / len(sheet_rows) if 'C' in read and sheet_rows else None

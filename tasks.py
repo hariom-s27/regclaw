@@ -15,7 +15,9 @@ S8_COMMANDS = ('s8-generate', 's8-pool', 's8-sheet', 's8-practice', 's8-prelabel
 S8_D_COMMANDS = {'s8-audit-sample': 'retrieval_eval.s8_judging', 's8-audit-order': 'retrieval_eval.s8_judging',
                  's8-freeze-audit': 'retrieval_eval.s8_judging',
                  's8-make-kits': 'retrieval_eval.s8_judging', 's8-check-kits': 'retrieval_eval.s8_judging',
-                 's8-label': 'retrieval_eval.s8_label_tool', 's8-merge-labels': 'retrieval_eval.s8_labels'}
+                 's8-label': 'retrieval_eval.s8_label_tool', 's8-merge-labels': 'retrieval_eval.s8_labels',
+                 's8-validate-judge': 'retrieval_eval.s8_judge_check', 's8-freeze-judge': 'retrieval_eval.s8_judge_check',
+                 's8-compare-runs': 'retrieval_eval.s8_judge_check'}
 
 # The existing summary file uses script-level assertions, not pytest functions.
 # Collect it as one pytest test without editing the original file.

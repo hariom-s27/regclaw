@@ -119,6 +119,7 @@ def files(tmp, rows, grades, judges='ABC'):
 
 
 def run3(tmp, rows, grades, judges='ABC', **kw):
+    kw.setdefault('_test_skip_judge_freeze', True)  # judge freezes: tests/test_s8_judge_check.py
     return m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=300, **files(tmp, rows, grades, judges),
                        **kw)
 
@@ -172,17 +173,17 @@ def test_file_level_problems_still_refuse(three):
     q2 = tmp / 'C' / 'labels_s8_sheet_Q2.csv'
     write_labels(q2, [label(rows[20]['item_id'], 3), label(rows[20]['item_id'], 2)])
     with pytest.raises(ValueError, match='more than once'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
     write_labels(tmp / 'C' / 'labels_s8_sheet_Q1.csv', [label(r['item_id'], 3) for r in rows[1:20]])
     write_labels(q2, [label(rows[0]['item_id'], 3)])  # a Q1 item in the Q2 file
     with pytest.raises(ValueError, match='another query'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
     write_labels(q2, [label('S8-zzz', 3)])
     with pytest.raises(ValueError, match='unknown item id'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
     write_labels(q2, [label(rows[20]['item_id'], 3) | {'score': '1'}], [*m.LABEL_FIELDS, 'score'])
     with pytest.raises(ValueError, match='unknown columns'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
 
 
 def test_two_judge_mode_needs_c_or_a_fallback_reason_for_stage2(three):
