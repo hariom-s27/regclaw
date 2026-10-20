@@ -6,7 +6,8 @@ or item maps), so it cannot report anything per system. Prints COUNTS ONLY. Outp
 Stages (each needs the previous one):
   1. A + B labels      -> agreement_ab.json (kappa binary + quadratic, raw agreement, 4x4 confusion,
                           bootstrap CI over queries)
-  2. + frozen audit    -> audit_check.json (kappa binary Shyam vs A/B consensus; PASS >= 0.60 else STOP);
+  2. + frozen audit    -> (audit set = the N frozen items, a gap-free prefix of audit_order.txt)
+                          audit_check.json (kappa binary Shyam vs A/B consensus; PASS >= 0.60 else STOP);
                           on PASS: disputes.csv, referee_sheet.csv, referee_ids.txt
   3. + referee labels  -> qrels.tsv (accepted = min(A, B); referee items = referee grade) + qrels_meta.json
 """
@@ -275,7 +276,8 @@ def write_json(path, value):
 
 def run_merge(*, sheet, a_files, b_files, out, audit_ids=None, audit_file=None, freeze_path=None,
               referee_file=None, bootstrap=BOOTSTRAP, _test_skip_freeze=False):
-    """Returns a counts-only summary; writes what the available inputs allow (write-once)."""
+    """Returns a counts-only summary; writes what the available inputs allow (write-once).
+    With a freeze, the audit set is the frozen prefix (audit_ids is used only by the test-only path)."""
     out = Path(out)
     sheet_rows = read_sheet(sheet)
     sheet_by_id = {r['item_id']: r for r in sheet_rows}
@@ -298,13 +300,16 @@ def run_merge(*, sheet, a_files, b_files, out, audit_ids=None, audit_file=None, 
         return summary
 
     if not _test_skip_freeze:
+        from retrieval_eval.s8_judging import frozen_prefix
         freeze = load_audit_freeze(freeze_path, audit_file)
+        audit_ids = frozen_prefix(freeze_path)  # the audit set = the N frozen items (gap-free prefix)
     else:
         freeze = dict(labels_sha256=bytes_sha(audit_file), frozen_at='TEST-ONLY 1970-01-01T00:00:00')
     audit = read_labels([audit_file], 'audit')
     check_coverage(audit, audit_ids, 'audit')
     check, disagree = audit_check(audit, accepted, threshold_disputes)
-    check.update(audit_labels_sha256=freeze['labels_sha256'], audit_frozen_at=freeze['frozen_at'])
+    check.update(audit_labels_sha256=freeze['labels_sha256'], audit_frozen_at=freeze['frozen_at'],
+                 audit_n=freeze.get('n'), audit_order_sha256=freeze.get('order_sha256'))
     states['audit_check.json'] = write_json(out / 'audit_check.json', check)
     summary.update(stage=2, audit={k: check[k] for k in ('audit_items', 'on_accepted', 'on_disputes',
                                                           'kappa_binary', 'disagreements', 'flag')})
@@ -373,11 +378,8 @@ def main(argv=None):
     if args.referee and not args.audit:
         parser.error('--referee needs --audit')
     audit_dir = Path(args.audit_dir)
-    audit_ids = None
-    if args.audit:
-        audit_ids = (audit_dir / 'audit_ids.txt').read_text(encoding='utf-8').split()
     summary = run_merge(sheet=args.sheet, a_files=judge_files(args.a), b_files=judge_files(args.b), out=args.out,
-                        audit_ids=audit_ids, audit_file=args.audit, freeze_path=audit_dir / 'audit_freeze.json',
+                        audit_file=args.audit, freeze_path=audit_dir / 'audit_freeze.json',
                         referee_file=args.referee)
     print('merge: ' + json.dumps(summary, indent=1, sort_keys=True))
     for name in summary['states']:

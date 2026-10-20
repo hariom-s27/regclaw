@@ -96,9 +96,81 @@ def test_frozen_audit_labels_cannot_be_reopened(tmp_path, sheet):
     (audit / 'audit_sheet.csv').write_bytes(path.read_bytes())
     (audit / 'audit_ids.txt').write_text(''.join(r['item_id'] + '\n' for r in rows), encoding='utf-8')
     labels = write_labels(audit / 'labels_shyam_audit.csv', [label(r['item_id'], 1) for r in rows])
-    freeze_audit(labels, audit)
+    (audit / 'audit_order.txt').write_text(''.join(r['item_id'] + '\n' for r in rows), encoding='utf-8')
+    freeze_audit(labels, audit, audit / 'audit_order.txt', minimum=1)
     with pytest.raises(PermissionError, match='frozen'):
         t.LabelApp(audit / 'audit_sheet.csv', labels, freeze=audit / 'audit_freeze.json')
+
+
+def write_order(tmp_path, ids):
+    (tmp_path / 'audit_order.txt').write_text(''.join(i + '\n' for i in ids), encoding='utf-8')
+    return tmp_path / 'audit_order.txt'
+
+
+def test_ordered_audit_follows_order_and_is_gap_free(tmp_path, sheet):
+    path, rows = sheet
+    ids = [r['item_id'] for r in rows]
+    order = [ids[3], ids[0], ids[4], ids[2], ids[1]]
+    labels = tmp_path / 'labels.csv'
+    app = t.LabelApp(path, labels, order=write_order(tmp_path, order))
+    assert app.state() == dict(mode='audit', total=5, done=0, first_unlabelled=0, labels_file='labels.csv',
+                               ordered=True, minimum=100)
+    assert app.item(0)['item']['item_id'] == order[0]
+    with pytest.raises(ValueError, match='gap-free'):  # "Next" cannot pass the first unlabelled item
+        app.item(1)
+    with pytest.raises(ValueError, match='gap-free'):  # nor can a later item be saved
+        app.save(payload(order[2]))
+    app.save(payload(order[0]))
+    app.save(payload(order[1]))
+    assert app.state()['first_unlabelled'] == 2 and app.item(2)['item']['item_id'] == order[2]
+    with pytest.raises(ValueError, match='label item 3 first'):
+        app.item(3)
+    app.save(payload(order[0], grade='0', clause_states='unrelated'))  # re-label an earlier item: allowed
+    assert app.state()['done'] == 2
+    with labels.open(encoding='utf-8-sig', newline='') as f:
+        assert [r['item_id'] for r in csv.DictReader(f)] == order[:2]  # written in audit order
+    again = t.LabelApp(path, labels, order=tmp_path / 'audit_order.txt')  # resume follows the order
+    assert again.state()['first_unlabelled'] == 2 and again.item(0)['label']['grade'] == '0'
+
+
+def test_without_order_audit_mode_is_free_navigation(tmp_path, sheet):
+    path, rows = sheet
+    app = t.LabelApp(path, tmp_path / 'labels.csv')
+    assert app.item(4)['item']['item_id'] == rows[4]['item_id']
+    app.save(payload(rows[4]['item_id']))
+    assert 'ordered' not in app.state()
+
+
+def test_bad_order_or_gapped_labels_refused(tmp_path, sheet):
+    path, rows = sheet
+    ids = [r['item_id'] for r in rows]
+    with pytest.raises(ValueError, match='permutation'):
+        t.LabelApp(path, tmp_path / 'l.csv', order=write_order(tmp_path, ids[:-1]))
+    with pytest.raises(ValueError, match='duplicate'):
+        t.LabelApp(path, tmp_path / 'l.csv', order=write_order(tmp_path, ids + ids[:1]))
+    write_labels(tmp_path / 'gap.csv', [label(ids[0], 1), label(ids[2], 1)])
+    with pytest.raises(ValueError, match='gap-free prefix'):
+        t.LabelApp(path, tmp_path / 'gap.csv', order=write_order(tmp_path, ids))
+    with pytest.raises(ValueError, match='AUDIT mode only'):
+        t.LabelApp(path, tmp_path / 'r.csv', 'referee', order=tmp_path / 'audit_order.txt')
+
+
+def test_ordered_http_refuses_skipping(tmp_path, sheet):
+    path, rows = sheet
+    app = t.LabelApp(path, tmp_path / 'labels.csv', order=write_order(tmp_path, [r['item_id'] for r in rows]))
+    server = t.ThreadingHTTPServer(('127.0.0.1', 0), t.make_handler(app))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f'http://127.0.0.1:{server.server_address[1]}'
+    try:
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(base + '/api/item?i=3')
+        assert err.value.code == 400
+        state = json.loads(urllib.request.urlopen(base + '/api/state').read())
+        assert state['ordered'] is True and state['minimum'] == 100
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert '(minimum ${d.minimum})' in t.PAGE and 'gap-free order' in t.PAGE
 
 
 def write_disputes(tmp_path, rows):

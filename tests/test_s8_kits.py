@@ -45,7 +45,7 @@ def test_kit_contains_only_allowed_entries(kits):
     for root in roots:
         assert [e['path'] for e in trees[str(root)]] == [
             'GUIDELINE.md', 'JUDGE_INSTRUCTIONS.md', 'eval/', 'output/', 'practice/', 'practice/practice_sheet.csv']
-        assert (root / 'GUIDELINE.md').read_text(encoding='utf-8') == j.GUIDELINE_PLACEHOLDER
+        assert (root / 'GUIDELINE.md').read_bytes() == j.guideline_bytes()  # frozen v1.0, LF
         assert (root / 'practice' / 'practice_sheet.csv').read_bytes() == practice.read_bytes()
         assert not any((root / 'eval').iterdir()) and not any((root / 'output').iterdir())
     assert j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo') == {str(r): [] for r in roots}
@@ -83,7 +83,37 @@ def test_guideline_must_match_between_kits(kits):
     problems = j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo')
     assert all('GUIDELINE.md differs between kits' in p for p in problems.values())
     (roots[1] / 'GUIDELINE.md').write_text('guideline v1.0 ...', encoding='utf-8')
-    assert not any(j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo').values())
+    problems = j.check_kits(roots, practice, per_query, repo=roots[0].parent / 'repo')
+    assert all(p == ['GUIDELINE.md differs from the frozen guideline v1.0'] for p in problems.values())
+
+
+def test_checker_flags_a_stale_guideline(kits):
+    roots, practice, per_query, _ = kits
+    a = roots[0]
+    (a / 'GUIDELINE.md').write_text('guideline v0.9 for calibration; to be replaced by v1.0\n', encoding='utf-8')
+    assert j.check_kit(a, j.bytes_sha(practice), per_query) == ['GUIDELINE.md differs from the frozen guideline v1.0']
+    v10 = j.guideline_bytes()
+    (a / 'GUIDELINE.md').write_bytes(v10[:-40] + b'one changed rule\n')
+    assert j.check_kit(a, j.bytes_sha(practice), per_query) == ['GUIDELINE.md differs from the frozen guideline v1.0']
+    (a / 'GUIDELINE.md').write_bytes(v10.replace(b'\n', b'\r\n'))  # CRLF copy is a different file
+    assert j.check_kit(a, j.bytes_sha(practice), per_query) != []
+    (a / 'GUIDELINE.md').write_bytes(v10)
+    assert j.check_kit(a, j.bytes_sha(practice), per_query) == []
+    assert b'# S8 relevance-judging guideline v1.0' in v10 and b'\r' not in v10
+
+
+def test_kit_tree_lists_output_names_without_reading_them(kits, monkeypatch):
+    roots, _, _, _ = kits
+    a = roots[0]
+    (a / 'output' / 'labels_practice_sheet.csv').write_text('item_id\nS8-x\n', encoding='utf-8')
+    real = Path.read_bytes
+
+    def guard(self):
+        assert 'output' not in self.parts, f'output file read: {self.name}'
+        return real(self)
+    monkeypatch.setattr(Path, 'read_bytes', guard)
+    tree = {e['path']: e['sha256'] for e in j.kit_tree(a)}
+    assert tree['output/labels_practice_sheet.csv'] is None and tree['GUIDELINE.md'] is not None
 
 
 def test_roots_must_not_overlap_repo_or_each_other(tmp_path):

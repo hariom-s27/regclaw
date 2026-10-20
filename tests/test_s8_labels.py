@@ -218,9 +218,10 @@ def test_audit_pass_builds_referee_list_then_qrels(fake):
     audit_dir.mkdir()
     (audit_dir / 'audit_ids.txt').write_text(''.join(i + '\n' for i in ids), encoding='utf-8')
     (audit_dir / 'audit_sheet.csv').write_text('x', encoding='utf-8')
+    (audit_dir / 'audit_order.txt').write_text(''.join(i + '\n' for i in ids), encoding='utf-8')
     audit = write_labels(audit_dir / 'labels_shyam_audit.csv', audit_rows)
-    freeze_audit(audit, audit_dir)
-    frozen = dict(audit_ids=ids, audit_file=audit, freeze_path=audit_dir / 'audit_freeze.json')
+    freeze_audit(audit, audit_dir, audit_dir / 'audit_order.txt', minimum=len(ids))
+    frozen = dict(audit_file=audit, freeze_path=audit_dir / 'audit_freeze.json')
     s = run(tmp, rows, ga, gb, **frozen)
     assert s['stage'] == 2 and s['audit']['flag'] == 'PASS' and s['audit']['disagreements'] == 1
     assert s['audit']['on_accepted'] == 12 and s['audit']['on_disputes'] == 1
@@ -260,6 +261,43 @@ def test_audit_stop_blocks_referee_and_qrels(fake):
     s = run(tmp, rows, ga, gb, audit_ids=ids, audit_file=audit, _test_skip_freeze=True)
     assert s['audit']['flag'] == 'STOP' and 'stopped' in s
     assert not (tmp / 'labels' / 'disputes.csv').exists() and not (tmp / 'labels' / 'qrels.tsv').exists()
+
+
+def test_stage2_audit_set_is_the_frozen_prefix(fake):
+    from retrieval_eval.s8_judging import freeze_audit
+    tmp, rows, ga, gb = fake
+    accepted, _ = m.merge(rows, {k: dict(grade=str(v)) for k, v in ga.items()},
+                          {k: dict(grade=str(v)) for k, v in gb.items()})
+    order = [r['item_id'] for r in rows][::-1]  # 30 audit items in a fixed order; Shyam stops after 11
+    audit_dir = tmp / 'audit'
+    audit_dir.mkdir()
+    (audit_dir / 'audit_ids.txt').write_text(''.join(r['item_id'] + '\n' for r in rows), encoding='utf-8')
+    (audit_dir / 'audit_sheet.csv').write_text('x', encoding='utf-8')
+    (audit_dir / 'audit_order.txt').write_text(''.join(i + '\n' for i in order), encoding='utf-8')
+    audit = write_labels(audit_dir / 'labels_shyam_audit.csv', [label(i, accepted.get(i, 0)) for i in order[:11]])
+    freeze_audit(audit, audit_dir, audit_dir / 'audit_order.txt', minimum=10)
+    frozen = dict(audit_ids=order, audit_file=audit, freeze_path=audit_dir / 'audit_freeze.json')  # ids ignored
+    s = run(tmp, rows, ga, gb, **frozen)
+    assert s['stage'] == 2 and s['audit']['audit_items'] == 11
+    check = json.loads((tmp / 'labels' / 'audit_check.json').read_text(encoding='utf-8'))
+    assert check['audit_n'] == 11 and check['audit_order_sha256'] == m.bytes_sha(audit_dir / 'audit_order.txt')
+
+
+def test_stage2_refuses_a_changed_order_file(fake):
+    from retrieval_eval.s8_judging import freeze_audit
+    tmp, rows, ga, gb = fake
+    order = [r['item_id'] for r in rows]
+    audit_dir = tmp / 'audit'
+    audit_dir.mkdir()
+    (audit_dir / 'audit_ids.txt').write_text(''.join(i + '\n' for i in order), encoding='utf-8')
+    (audit_dir / 'audit_sheet.csv').write_text('x', encoding='utf-8')
+    (audit_dir / 'audit_order.txt').write_text(''.join(i + '\n' for i in order), encoding='utf-8')
+    audit = write_labels(audit_dir / 'labels_shyam_audit.csv', [label(i, 1) for i in order[:10]])
+    freeze_audit(audit, audit_dir, audit_dir / 'audit_order.txt', minimum=10)
+    (audit_dir / 'audit_order.txt').write_text(''.join(i + '\n' for i in order[::-1]), encoding='utf-8')
+    with pytest.raises(PermissionError, match='sha mismatch'):
+        run(tmp, rows, ga, gb, audit_file=audit, freeze_path=audit_dir / 'audit_freeze.json')
+    assert not (tmp / 'labels' / 'audit_check.json').exists()
 
 
 def test_cli_has_no_test_only_flag():

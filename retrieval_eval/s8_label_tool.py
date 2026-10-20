@@ -1,11 +1,15 @@
 """S8 Part D: local, offline labelling tool for the human auditor / referee (stdlib only, 127.0.0.1).
 
   python tasks.py s8-label --mode audit   --sheet <sheet.csv> --labels <labels.csv>
+  python tasks.py s8-label --mode audit   --sheet audit/audit_sheet.csv --labels audit/labels_shyam_audit.csv
+                           --order audit/audit_order.txt
   python tasks.py s8-label --mode referee --sheet labels/referee_sheet.csv --disputes labels/disputes.csv
                            --labels labels/labels_referee.csv
   python tasks.py s8-label --sheet <sheet.csv> --labels <labels.csv> --export <out.csv>
 
 AUDIT mode shows only blind sheet fields (never grades, ranks, systems or any LLM field).
+With --order, items follow the fixed audit order and labelling is gap-free: nothing past the first
+unlabelled item can be opened or saved (earlier items may be re-labelled until the freeze).
 REFEREE mode also shows both judges' fields from disputes.csv and refuses to start unless the
 audit is frozen (audit_freeze.json). Every save rewrites the labels CSV atomically (resumable).
 A frozen audit labels file is never opened for editing.
@@ -22,7 +26,7 @@ import threading
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
-from retrieval_eval.s8_judging import frozen_labels_path
+from retrieval_eval.s8_judging import AUDIT_N_MIN, frozen_labels_path, read_order
 from retrieval_eval.s8_labels import (JUDGE_FIELDS, LABEL_FIELDS, read_disputes, read_labels, read_sheet,
                                       validate_label)
 from retrieval_eval.s8_runs import output_dir
@@ -33,9 +37,11 @@ TOOL_FIELDS = tuple(f for f in LABEL_FIELDS if f != 'query_asks') + ('timestamp'
 
 
 class LabelApp:
-    def __init__(self, sheet, labels, mode='audit', disputes=None, freeze=None):
+    def __init__(self, sheet, labels, mode='audit', disputes=None, freeze=None, order=None):
         if mode not in ('audit', 'referee'):
             raise ValueError('mode must be audit or referee')
+        if order is not None and mode != 'audit':
+            raise ValueError('--order is for AUDIT mode only')
         self.labels_path, self.mode, self.lock = Path(labels), mode, threading.Lock()
         rows = read_sheet(sheet)
         if freeze is not None and frozen_labels_path(freeze) == self.labels_path.resolve():
@@ -50,6 +56,13 @@ class LabelApp:
             if set(self.judges) != {r['item_id'] for r in rows}:
                 raise ValueError('disputes.csv and the referee sheet hold different items')
         rules = next((r['common_rules'] for r in rows if r['common_rules']), '')
+        self.ordered = order is not None
+        if self.ordered:  # the fixed interleaved audit order; labelling must stay a gap-free prefix
+            order_ids = read_order(order)
+            if sorted(order_ids) != sorted(r['item_id'] for r in rows):
+                raise ValueError('the order file is not a permutation of this sheet')
+            by_id = {r['item_id']: r for r in rows}
+            rows = [by_id[i] for i in order_ids]
         self.items = [{**{f: r[f] for f in SHOWN_FIELDS}, 'common_rules': rules} for r in rows]
         self.ids = [r['item_id'] for r in rows]
         self.labels = {}
@@ -59,15 +72,30 @@ class LabelApp:
             unknown = set(self.labels) - set(self.ids)
             if unknown:
                 raise ValueError(f'labels file holds {len(unknown)} item(s) not in this sheet')
+            if self.ordered and self._first_unlabelled() is not None and \
+                    len(self.labels) > self._first_unlabelled():
+                raise ValueError('labels file is not a gap-free prefix of the order')
+
+    def _first_unlabelled(self):
+        return next((i for i, x in enumerate(self.ids) if x not in self.labels), None)
+
+    def _check_reachable(self, index):
+        """Ordered audit: nothing past the first unlabelled item can be opened or saved."""
+        first = self._first_unlabelled()
+        if self.ordered and first is not None and index > first:
+            raise ValueError(f'gap-free order: label item {first + 1} first')
 
     def state(self):
         done = len(self.labels)
-        first = next((i for i, x in enumerate(self.ids) if x not in self.labels), None)
-        return dict(mode=self.mode, total=len(self.ids), done=done, first_unlabelled=first,
-                    labels_file=self.labels_path.name)
+        result = dict(mode=self.mode, total=len(self.ids), done=done, first_unlabelled=self._first_unlabelled(),
+                      labels_file=self.labels_path.name)
+        if self.ordered:
+            result.update(ordered=True, minimum=AUDIT_N_MIN)
+        return result
 
     def item(self, index):
         index = max(0, min(int(index), len(self.ids) - 1))
+        self._check_reachable(index)
         item_id = self.ids[index]
         result = dict(index=index, item=self.items[index], label=self.labels.get(item_id), **self.state())
         if self.mode == 'referee':
@@ -80,6 +108,7 @@ class LabelApp:
         item_id = payload.get('item_id', '')
         if item_id not in self.ids:
             raise ValueError('unknown item_id')
+        self._check_reachable(self.ids.index(item_id))
         label = validate_label({f: str(payload.get(f, '')) for f in LABEL_FIELDS}, item_id)
         label = {f: label[f] for f in TOOL_FIELDS if f != 'timestamp'}
         label['timestamp'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
@@ -177,12 +206,13 @@ def main(argv=None):
     parser.add_argument('--sheet', required=True)
     parser.add_argument('--labels', required=True)
     parser.add_argument('--disputes')
+    parser.add_argument('--order', help='audit_order.txt: fixed interleaved order, gap-free labelling (audit mode)')
     parser.add_argument('--freeze', default=str(out / 'audit' / 'audit_freeze.json'))
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--export', help='write a validated copy of the labels and exit')
     args = parser.parse_args(argv)
-    app = LabelApp(args.sheet, args.labels, args.mode, args.disputes, args.freeze)
+    app = LabelApp(args.sheet, args.labels, args.mode, args.disputes, args.freeze, args.order)
     if args.export:
         print(json.dumps(app.export(args.export)))
         return 0
@@ -247,10 +277,12 @@ function setRadio(f,v){for(const i of document.getElementsByName(f))i.checked=(i
 function getRadio(f){const i=[...document.getElementsByName(f)].find(x=>x.checked);return i?i.value:'';}
 function msg(t,ok){$('msg').textContent=t;$('msg').className=ok?'saved':'';}
 async function go(i){if(i<0||(state.total!==undefined&&i>=state.total))return;
+ if(state.ordered&&state.first_unlabelled!=null&&i>state.first_unlabelled){msg('gap-free order: label item '+(state.first_unlabelled+1)+' first');return;}
  const r=await fetch('/api/item?i='+i);const d=await r.json();if(!r.ok){msg(d.error);return;}
  cur=d.index;state=d;item=d.item;render(d);}
 function render(d){const it=d.item;$('mode').textContent=d.mode.toUpperCase();
- $('prog').textContent=`item ${d.index+1} / ${d.total} · labelled ${d.done}`;
+ $('prog').textContent=d.ordered?`item ${d.index+1} / ${d.total} · labelled ${d.done} / ${d.total} (minimum ${d.minimum})`
+  :`item ${d.index+1} / ${d.total} · labelled ${d.done}`;
  $('qid').textContent=it.qid;$('jur').textContent=it.jurisdiction||'(none named)';$('query').textContent=it.query;
  $('n3').textContent=it.narrative_grade3;$('n2').textContent=it.narrative_grade2;$('n1').textContent=it.narrative_grade1_traps;
  $('rules').textContent=it.common_rules;$('doc').textContent=it.source_doc;$('cid').textContent=it.clause_id;
@@ -269,6 +301,7 @@ async function save(){const p={item_id:item.item_id,evidence_span:$('evidence_sp
  const miss=['grade','clause_states','jurisdiction_match'].filter(f=>!p[f]);if(miss.length){msg('missing: '+miss.join(', '));return;}
  const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
  const d=await r.json();if(!r.ok){msg(d.error);return;}
+ Object.assign(state,d);
  if(d.done===d.total&&cur===d.total-1){await go(cur);msg('all items labelled — saved',true);return;}
  await go(cur+1<d.total?cur+1:(d.first_unlabelled??cur));}
 document.addEventListener('keydown',e=>{const t=e.target.tagName;

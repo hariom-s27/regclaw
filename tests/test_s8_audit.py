@@ -67,14 +67,16 @@ def test_freeze_audit_requires_complete_labels_and_is_write_once(tmp_path):
     out = tmp_path / 'audit'
     j.run_audit_sample(tmp_path / 's8_sheet.csv', out)
     ids = (out / 'audit_ids.txt').read_text(encoding='utf-8').split()
+    order = out / j.AUDIT_ORDER  # sheet order here; the interleaved order is tested in test_s8_audit_order
+    order.write_text(''.join(i + '\n' for i in ids), encoding='utf-8')
     labels = write_labels(out / j.AUDIT_LABELS, [label(i, 1) for i in ids[:-1]])
-    with pytest.raises(ValueError, match='unlabelled'):
-        j.freeze_audit(labels, out)
+    with pytest.raises(ValueError, match='minimum'):
+        j.freeze_audit(labels, out, order, minimum=len(ids))
     labels = write_labels(out / j.AUDIT_LABELS, [label(i, 1) for i in ids])
-    rec = j.freeze_audit(labels, out, now=datetime(2026, 10, 21, tzinfo=timezone.utc))
+    rec = j.freeze_audit(labels, out, order, now=datetime(2026, 10, 21, tzinfo=timezone.utc), minimum=len(ids))
     saved = json.loads((out / 'audit_freeze.json').read_text(encoding='utf-8'))
-    assert saved == rec and rec['items'] == len(ids) and rec['frozen_at'] == '2026-10-21T00:00:00+00:00'
+    assert saved == rec and rec['n'] == len(ids) and rec['frozen_at'] == '2026-10-21T00:00:00+00:00'
     assert rec['labels_file'] == j.AUDIT_LABELS and len(rec['labels_sha256']) == 64
     assert j.frozen_labels_path(out / 'audit_freeze.json') == labels.resolve()
     with pytest.raises(FileExistsError):
-        j.freeze_audit(labels, out)
+        j.freeze_audit(labels, out, order, minimum=len(ids))

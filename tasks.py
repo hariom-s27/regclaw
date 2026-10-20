@@ -12,7 +12,8 @@ PLACEHOLDERS = (
     "obligation", "retrieve", "eval"
 )
 S8_COMMANDS = ('s8-generate', 's8-pool', 's8-sheet', 's8-practice', 's8-prelabel')
-S8_D_COMMANDS = {'s8-audit-sample': 'retrieval_eval.s8_judging', 's8-freeze-audit': 'retrieval_eval.s8_judging',
+S8_D_COMMANDS = {'s8-audit-sample': 'retrieval_eval.s8_judging', 's8-audit-order': 'retrieval_eval.s8_judging',
+                 's8-freeze-audit': 'retrieval_eval.s8_judging',
                  's8-make-kits': 'retrieval_eval.s8_judging', 's8-check-kits': 'retrieval_eval.s8_judging',
                  's8-label': 'retrieval_eval.s8_label_tool', 's8-merge-labels': 'retrieval_eval.s8_labels'}
 
