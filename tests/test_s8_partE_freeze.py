@@ -43,3 +43,17 @@ def test_freeze_constants():
 def test_part_d_freeze_does_not_mention_addendum_4():
     text = (ROOT / 'retrieval_eval/s8_partD_freeze.json').read_text(encoding='utf-8')
     assert 'ADDENDUM_4' not in text
+
+
+NOTE_1_LF_SHA = '9247fdba5f1abf6a7edff5e7b0bdb360b276eb1aad2fc5d244d9cf32149965f3'
+
+
+def test_addendum_4_note_1_matches_its_sha_and_records_the_decisions():
+    path = ROOT / 'retrieval_eval/S8_PREREGISTRATION_ADDENDUM_4_NOTE_1.md'
+    assert path.is_file()
+    assert lf_sha(path) == NOTE_1_LF_SHA
+    raw = path.read_bytes()
+    assert not raw.startswith(b'\xef\xbb\xbf')  # no BOM
+    text = raw.decode('utf-8')
+    for phrase in ('Conditional R@10', 'Expansion precision', 'n/a', 'ΔR'):
+        assert phrase in text
