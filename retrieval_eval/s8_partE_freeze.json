@@ -1,0 +1,11 @@
+{
+  "created": "2026-10-21",
+  "purpose": "S8 Part E freeze (Addendum 4): analysis details fixed before the merge, the qrels freeze and any metric. s8_partD_freeze.json is unchanged.",
+  "docs_lf_normalised_sha256": {
+    "retrieval_eval/S8_PREREGISTRATION_ADDENDUM_4.md": "e48fdef123f52bfe270b8633fb1ed768b417226b75656057348498fc2898963d"
+  },
+  "descriptive_items": ["limit_dose_response", "candidate_set_jaccard", "judged_at_k",
+                        "terminology_gap_vector_all_bm25", "expansion_precision"],
+  "bootstrap": {"resamples": 10000, "seed": 20261019, "interval": "95% percentile"},
+  "label": "provisional (GPT): stage 1 = Azure gpt-5-mini"
+}
