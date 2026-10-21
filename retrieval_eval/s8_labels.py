@@ -7,7 +7,9 @@ Modes (Addendum 2 note 3):
   three_judge         --a --b --c: all three on the same side of the threshold -> accepted, final = MEDIAN;
                       any split -> dispute. An item where exactly one judge's row is missing or invalid
                       (after the one re-run) uses the two-judge rule; the count is reported. More than 2% of
-                      C's rows missing/invalid -> refused (use the note 3 section 6 fallback).
+                      C's rows missing/invalid -> refused (use the note 3 section 6 fallback). Items a judge
+                      freeze lists as excluded (s8-freeze-judge --exclude-items) are such items: that judge's
+                      rows are ignored, the other two decide (excluded_by_judge counts).
   two_judge_fallback  --a --b [--c] --two-judge-fallback REASON: Addendum 2 + notes 1-2 for every item
                       (same side -> LOWER grade; split -> dispute); C, if given, is a secondary comparison only.
   two_judge           --a --b only: stage 1 only (stage 2 needs --c or the fallback with its reason).
@@ -16,8 +18,9 @@ Stages (each needs the previous one):
   1. judge labels      -> agreement_abc.json (pairwise Cohen kappa binary + quadratic, Fleiss kappa binary)
                           or agreement_ab.json (two-judge modes); bootstrap CIs over queries
   2. + frozen audit    -> (audit set = the N frozen items, a gap-free prefix of audit_order.txt)
-                          audit_check.json (primary kappa binary author vs consensus; secondary without the
-                          author's unsure items; PASS >= 0.60 on the primary else STOP);
+                          audit_check.json (primary kappa binary author vs the three-judge consensus, items
+                          decided by the two-judge rule excluded and counted (note 3 section 4); secondary
+                          without the author's unsure items; PASS >= 0.60 on the primary else STOP);
                           on PASS: disputes.csv, referee_sheet.csv, referee_ids.txt
   3. + referee labels  -> qrels.tsv + qrels_meta.json (note 2 sections 2-3, note 3 section 3):
                           threshold_split -> referee grade (unsure=yes -> median of three / lower of two);
@@ -145,10 +148,11 @@ def read_labels(paths, who, extra=()):
     return labels
 
 
-def read_judge(paths, who, sheet_by_id):
+def read_judge(paths, who, sheet_by_id, excluded=()):
     """Tolerant judge read (note 3 section 3): returns (valid {item_id: label}, problems {item_id: (file, kind)}).
     Row-level problems (an invalid field, a missing item) are returned; file-level problems (columns,
-    empty/unknown item id, an item twice, an item in another query's file) raise."""
+    empty/unknown item id, an item twice, an item in another query's file) raise. Rows of `excluded` items
+    (the judge's freeze) are ignored and are neither labels nor problems."""
     valid, problems, seen = {}, {}, set()
     for path in map(Path, paths):
         columns, rows = read_csv(path)
@@ -160,6 +164,8 @@ def read_judge(paths, who, sheet_by_id):
         for n, row in enumerate(rows, start=2):
             where = f'{who} {path.name} line {n}'
             item_id = (row.get('item_id') or '').strip()
+            if item_id in excluded:
+                continue
             if item_id not in sheet_by_id:
                 raise ValueError(f'{where}: ' + ('unknown item id' if item_id else 'empty item_id'))
             if item_id in seen:
@@ -175,7 +181,7 @@ def read_judge(paths, who, sheet_by_id):
             label['_file'] = path.name
             valid[item_id] = label
     for item_id, row in sheet_by_id.items():
-        if item_id not in seen:
+        if item_id not in seen and item_id not in excluded:
             problems[item_id] = (f"labels_s8_sheet_{row['qid']}.csv", 'missing')
     return valid, problems
 
@@ -337,12 +343,12 @@ def decide(sheet_rows, judges):
     Three valid rows -> three-judge rule (median); two -> two-judge rule (lower); fewer -> refused.
     Returns {item_id: dict(rule, used, grades, tag, fallback_grade, consensus)}; consensus None = split."""
     letters = tuple(judges)
-    decisions, short = {}, Counter()
+    decisions, short = {}, {}
     for row in sheet_rows:
         item_id = row['item_id']
         used = tuple(j for j in letters if item_id in judges[j])
         if len(used) < 2:
-            short.update(j for j in letters if j not in used)
+            short[item_id] = [j for j in letters if j not in used]
             continue
         grades = [int(judges[j][item_id]['grade']) for j in used]
         if len(used) == 3:
@@ -352,10 +358,10 @@ def decide(sheet_rows, judges):
         same = len({is_rel(g) for g in grades}) == 1
         decisions[item_id] = dict(rule=rule, used=used, grades=grades, tag=tag, fallback_grade=fallback,
                                   consensus=fallback if same else None)
-    if short:
-        n = len(sheet_rows) - len(decisions)
-        raise ValueError(f'{n} item(s) have fewer than two valid judge rows (missing/invalid per judge: '
-                         f'{dict(sorted(short.items()))}); re-run the affected files')
+    if short:  # no decision rule for these: refused before anything is written
+        listed = '; '.join(f"{i} (no valid row from {', '.join(js)})" for i, js in short.items())
+        raise ValueError(f'{len(short)} item(s) have fewer than two valid judge rows: {listed} '
+                         '— re-run a judge on these items')
     return decisions
 
 
@@ -369,11 +375,15 @@ def merge(sheet_rows, a, b, c=None):
 
 def audit_check(audit, accepted, threshold_disputes, qid_of=None, two_rule=(), bootstrap=BOOTSTRAP, seed=SEED):
     """The author (blind) vs the consensus on audit items that have one (accepted).
-    Primary kappa: all of them; secondary: without the author's unsure=yes items (note 2 section 4).
-    PASS/STOP on the primary only."""
-    on_accepted = [i for i in sorted(audit) if i in accepted]
+    Primary kappa: those decided by all judges in force (note 3 section 4: all three on the same side); items
+    decided by the two-judge rule are left out and counted. Secondary: the primary set without the author's
+    unsure=yes items (note 2 section 4). PASS/STOP on the primary only. Audit disagreements (sent to the
+    referee) cover every audit item with a consensus, two-judge-rule items included."""
+    two = set(two_rule)
+    with_consensus = [i for i in sorted(audit) if i in accepted]
+    on_accepted = [i for i in with_consensus if i not in two]
     sure = [i for i in on_accepted if audit[i]['unsure'] != 'yes']
-    disagree = [i for i in on_accepted if is_rel(audit[i]['grade']) != is_rel(accepted[i])]
+    disagree = [i for i in with_consensus if is_rel(audit[i]['grade']) != is_rel(accepted[i])]
 
     def block(ids):
         per_qid = defaultdict(lambda: np.zeros((2, 2), dtype=np.int64))
@@ -388,14 +398,16 @@ def audit_check(audit, accepted, threshold_disputes, qid_of=None, two_rule=(), b
     b2, kappa2, ci2 = block(sure)
     flag = 'PASS' if not np.isnan(kappa) and kappa >= AUDIT_PASS else 'STOP'
     return dict(audit_items=len(audit), on_accepted=len(on_accepted),
-                on_two_judge_rule=len(set(on_accepted) & set(two_rule)),
+                on_two_judge_rule=len(set(with_consensus) & two),
                 on_disputes=len(set(audit) & set(threshold_disputes)),
                 kappa_binary=_r(kappa), raw_binary=round(raw_agreement(b), 4) if b.sum() else None,
                 ci95_kappa_binary=ci, confusion_2x2_rows_shyam_cols_consensus=b.tolist(),
                 secondary=dict(excludes='audit items the author marked unsure=yes', n=len(sure),
                                kappa_binary=_r(kappa2), ci95_kappa_binary=ci2,
                                confusion_2x2_rows_shyam_cols_consensus=b2.tolist()),
-                disagreements=len(disagree), audit_mode='check_only (note 2)',
+                disagreements=len(disagree), disagreements_on_two_judge_rule=len(set(disagree) & two),
+                primary_excludes='audit items decided by the two-judge rule (note 3 section 4)',
+                audit_mode='check_only (note 2)',
                 rule=f'primary kappa_binary >= {AUDIT_PASS} -> PASS else STOP', flag=flag,
                 report_sentence=REPORT_SENTENCE.format(n=len(audit))), disagree
 
@@ -457,7 +469,7 @@ def final_grade(decision, reason, referee):
             return (decision['fallback_grade'], decision['tag'],
                     'dispute_unsure_median' if three else 'dispute_unsure_lower')
         return int(referee['grade']), 'referee', 'dispute_referee'
-    if reason == 'audit_disagrees':  # an unsure referee never overrides (plan C4)
+    if reason == 'audit_disagrees':  # unsure -> default: the consensus stands, as unsure -> median on splits (C4)
         if referee['unsure'] == 'no' and referee['override_quote'].strip() and referee['override_rule']:
             return int(referee['grade']), 'referee', 'auditor_override_evidence'
         return decision['consensus'], decision['tag'], 'auditor_disagrees_kept'
@@ -488,14 +500,19 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
         raise PermissionError('stage 2 needs judge C (--c) or --two-judge-fallback REASON '
                               '(Addendum 2 note 3 sections 3 and 6)')
     files = {'A': a_files, 'B': b_files} | ({'C': c_files} if c_files else {})
+    excluded = {}
     if not _test_skip_judge_freeze:  # every judge given must match its judge_<X>_freeze.json (S8 D4v)
         from retrieval_eval.s8_judge_check import check_judge_freezes
-        check_judge_freezes(files, out if freeze_dir is None else freeze_dir)
+        excluded = check_judge_freezes(files, out if freeze_dir is None else freeze_dir)
     sheet_rows = read_sheet(sheet)
     sheet_by_id = {r['item_id']: r for r in sheet_rows}
-    read = {j: read_judge(f, f'judge {j}', sheet_by_id) for j, f in files.items()}
+    for j, ids in excluded.items():
+        if set(ids) - set(sheet_by_id):
+            raise ValueError(f'judge {j}: the freeze excludes {len(set(ids) - set(sheet_by_id))} item(s) not in the sheet')
+    read = {j: read_judge(f, f'judge {j}', sheet_by_id, excluded.get(j, ())) for j, f in files.items()}
     labels = {j: valid for j, (valid, _) in read.items()}
-    c_rate = len(read['C'][1]) / len(sheet_rows) if 'C' in read and sheet_rows else None
+    c_rate = ((len(read['C'][1]) + len(excluded.get('C', ()))) / len(sheet_rows)
+              if 'C' in read and sheet_rows else None)
     if mode == 'three_judge' and c_rate > C_MISSING_MAX:
         raise ValueError(f"judge C: {len(read['C'][1])} of {len(sheet_rows)} rows missing or invalid "
                          f'({c_rate:.1%} > 2%): re-run once; if still above 2%, use --two-judge-fallback REASON '
@@ -511,6 +528,7 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
     common = dict(mode=mode, judges_in_force=list(in_force), judges_read=list(files), fallback_reason=fallback_reason,
                   accepted=len(accepted), threshold_disputes=len(threshold_disputes),
                   two_judge_rule_items_missing_row=len(two_rule),
+                  excluded_by_judge={j: len(excluded.get(j, ())) for j in files},
                   row_problems={j: problem_counts(p) for j, (_, p) in read.items()},
                   c_missing_or_invalid_rate=None if c_rate is None else round(c_rate, 4),
                   grade_counts={j: _grade_counts(l) for j, l in labels.items()},
@@ -595,7 +613,8 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
                 grades=dict(Counter(r['grade'] for r in rows)),
                 relevant=sum(int(r['grade']) >= THRESHOLD for r in rows),
                 mode=mode, judges_in_force=list(in_force), fallback_reason=fallback_reason,
-                two_judge_rule_items_missing_row=len(two_rule), referee_items=len(referee_ids),
+                two_judge_rule_items_missing_row=len(two_rule), excluded_by_judge=common['excluded_by_judge'],
+                referee_items=len(referee_ids),
                 reason_codes={c: sum(referee[i]['reason_code'] == c for i in referee_ids) for c in REASON_CODES},
                 judge_right={j: _right_counts(c) for j, c in right.items()},
                 judge_right_by_reason={r: {j: _right_counts(c) for j, c in d.items()} for r, d in by_reason.items()},
@@ -613,7 +632,7 @@ def _grade_counts(labels):
 
 
 def _brief(agr):
-    keys = ('accepted', 'threshold_disputes', 'two_judge_rule_items_missing_row')
+    keys = ('accepted', 'threshold_disputes', 'two_judge_rule_items_missing_row', 'excluded_by_judge')
     if 'pairs' in agr:
         return {k: agr[k] for k in keys} | {
             'fleiss_kappa_binary': agr['fleiss']['kappa_binary'], 'fleiss_ci95': agr['fleiss']['ci95_kappa_binary'],

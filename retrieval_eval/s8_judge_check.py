@@ -5,10 +5,13 @@ Commands (via tasks.py):
       kit eval/ copies byte-identical to the per-query sheets; per output file: exact header, one row per
       sheet item, allowed values, evidence_span copied from the clause (whitespace-normalised,
       case-sensitive). Writes a NEW labels/validate_<X>_<UTC>.json (counts + failing item_ids only).
-  s8-freeze-judge --judge A|B|C --model TEXT [--root PATH]
+  s8-freeze-judge --judge A|B|C --model TEXT [--root PATH] [--exclude-items FILE --reason TEXT]
       validator with --require-all; every file must PASS (warnings allowed). Write-once
       labels/judge_<X>_freeze.json with the sha256 of each output file; s8-merge-labels refuses
       a judge whose files differ from its freeze.
+      --exclude-items (one item_id per line) + --reason (Addendum 2 note 3 section 3: rows still missing or
+      invalid after the one re-run): only items whose row is missing or fails validation, at most 2% of all
+      sheet items; every other row must PASS. s8-merge-labels decides those items with the other two judges.
   s8-compare-runs --a DIR --b DIR --name NAME
       two output folders of the SAME judge: agreement on common items (aggregate only).
       Writes a NEW labels/compare_<NAME>_<UTC>.json.
@@ -18,6 +21,7 @@ Prints counts and item_ids only, never a grade, clause state, span or note of an
 """
 import argparse
 from collections import Counter
+import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -38,6 +42,7 @@ OUTPUT_NAME = 'labels_s8_sheet_{qid}.csv'
 SHEET_NAME = 's8_sheet_{qid}.csv'
 FREEZE_NAME = 'judge_{judge}_freeze.json'
 NAME_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+EXCLUDE_MAX = 0.02  # note 3 section 3 + 6: at most 2% of the sheet items per judge (1,482 -> 29)
 
 
 def utc_stamp(now=None):
@@ -68,6 +73,38 @@ def check_kit_eval(root, per_query_dir, qids):
         elif bytes_sha(kit) != bytes_sha(Path(per_query_dir) / name):
             problems.append(f'eval/{name} sha256 differs from the source-of-truth sheet')
     return problems
+
+
+def _record_lines(path):
+    """File line (1-based) where each data record starts, in the order csv.DictReader yields them."""
+    with Path(path).open(encoding='utf-8-sig', newline='') as f:
+        reader = csv.reader(f)
+        starts, last, header = [], 0, True
+        for record in reader:
+            if record:  # DictReader skips blank lines
+                if header:
+                    header = False
+                else:
+                    starts.append(last + 1)
+            last = reader.line_num
+    return starts
+
+
+HINTS = {'repeated_header': 'file line {line} repeats the header line (item_id,query_asks,...): delete that line',
+         'bom_inside_file': 'file line {line} holds an invisible BOM character (U+FEFF), left where a second file '
+                            'was pasted in: delete that character (retype the start of the line)'}
+
+
+def file_hints(path, rows):
+    """Likely causes of a resumed / appended file (hints only; they never change PASS / FAIL)."""
+    hints = []
+    for line, row in zip(_record_lines(path), rows):
+        item_id = (row.get('item_id') or '').strip()
+        if item_id.lstrip('﻿') == 'item_id':
+            hints.append(dict(kind='repeated_header', line=line))
+        if any('﻿' in v for v in row.values() if isinstance(v, str)):
+            hints.append(dict(kind='bom_inside_file', line=line))
+    return hints
 
 
 def validate_file(path, sheet_rows):
@@ -109,6 +146,7 @@ def validate_file(path, sheet_rows):
     in_file = list(dict.fromkeys(i for i in ids if i in known))
     order_differs = in_file != [i for i in sheet_ids if i in seen]
     grades = Counter(row['grade'].strip() for row in rows if row.get('grade') is not None)
+    hints = file_hints(path, rows)
     invalid = {c: v for c, v in invalid.items() if v}
     if bad_shape:
         invalid['_row_cells'] = bad_shape
@@ -119,7 +157,10 @@ def validate_file(path, sheet_rows):
         failing_item_ids=dict(missing=missing, duplicates=duplicates, unknown=unknown, invalid_values=invalid,
                               empty_span=empty_span, quote_not_found=not_found),
         warnings=dict(order_differs=order_differs, none_spans=none_spans, evidence_span_over_30_words=span_long,
-                      query_asks_over_20_words=asks_long, note_over_25_words=note_long))
+                      query_asks_over_20_words=asks_long, note_over_25_words=note_long,
+                      repeated_header_lines=sum(h['kind'] == 'repeated_header' for h in hints),
+                      bom_inside_file=sum(h['kind'] == 'bom_inside_file' for h in hints)),
+        hints=hints)
     fails = [k for k in ('missing', 'duplicates', 'unknown', 'invalid_values', 'empty_span', 'quote_not_found')
              if result[k]]
     result.update(status='FAIL' if fails else 'PASS', fail_reasons=fails)
@@ -149,9 +190,11 @@ def validate_judge(judge, root, per_query_dir, require_all=False, now=None):
 
 
 def write_report(report, labels_dir, now=None):
-    path = Path(labels_dir) / f"validate_{report['judge']}_{utc_stamp(now)}.json"
-    if path.exists():
-        raise FileExistsError(f'{path.name} exists; reports are never overwritten')
+    """A NEW report file; within the same UTC second the name gets _2, _3 ... (never overwritten)."""
+    base = f"validate_{report['judge']}_{utc_stamp(now)}"
+    path, n = Path(labels_dir) / f'{base}.json', 2
+    while path.exists():
+        path, n = Path(labels_dir) / f'{base}_{n}.json', n + 1
     write_once(path, json.dumps(report, indent=2, sort_keys=True) + '\n')
     return path
 
@@ -186,42 +229,116 @@ def warning_lines(report):
         warn = {k: v for k, v in f.get('warnings', {}).items() if v}
         if warn:
             lines.append(f'warn {qid} ' + json.dumps(warn, sort_keys=True))
+        lines += [f"hint {qid} {f['file']}: " + HINTS[h['kind']].format(line=h['line']) for h in f.get('hints', [])]
     return lines
 
 
 # ---------------------------------------------------------------- B. freeze
-def freeze_judge(judge, model, root, per_query_dir, labels_dir, now=None):
-    """Write-once judge_<X>_freeze.json; refuses unless every one of the files PASSes."""
+def read_exclusions(path):
+    """--exclude-items: one item_id per line (blank lines ignored); an item listed twice is refused."""
+    ids = [line.strip() for line in Path(path).read_text(encoding='utf-8-sig').splitlines() if line.strip()]
+    twice = sorted({i for i in ids if ids.count(i) > 1})
+    if twice:
+        raise ValueError(f'--exclude-items lists {len(twice)} item(s) twice: {twice}')
+    return ids
+
+
+def _failing_ids(f, sheet_ids):
+    """Sheet items of one file whose row is missing or fails validation (a missing file: all of them)."""
+    if 'failing_item_ids' not in f:
+        return set(sheet_ids) if f.get('fail_reasons') == ['missing file (--require-all)'] else set()
+    ids = f['failing_item_ids']
+    out = set(ids['missing']) | set(ids['duplicates']) | set(ids['empty_span']) | set(ids['quote_not_found'])
+    for listed in ids['invalid_values'].values():
+        out.update(listed)
+    return out & set(sheet_ids)
+
+
+def apply_exclusions(report, per_query_dir, excluded):
+    """Refusals (unknown id, > 2%, an item that PASSes) and the files still failing once the excluded items
+    are set aside. A missing file passes only when every one of its items is excluded."""
+    sheet_ids = {qid: [r['item_id'] for r in read_sheet(Path(per_query_dir) / SHEET_NAME.format(qid=qid))]
+                 for qid in report['files']}
+    qid_of = {i: q for q, ids in sheet_ids.items() for i in ids}
+    total = len(qid_of)
+    unknown = [i for i in excluded if i not in qid_of]
+    if unknown:
+        raise ValueError(f'--exclude-items: {len(unknown)} unknown item_id(s) (not in any sheet): {unknown}')
+    cap = int(EXCLUDE_MAX * total)
+    if len(excluded) > cap:
+        raise PermissionError(f'--exclude-items: {len(excluded)} items > 2% of the {total} sheet items '
+                              f'(max {cap}); use the note 3 section 6 fallback instead')
+    excluded = set(excluded)
+    still_failing, by_file = [], {}
+    for qid, f in report['files'].items():
+        failing = _failing_ids(f, sheet_ids[qid])
+        mine = {i for i in excluded if qid_of[i] == qid}
+        passing = sorted(mine - failing)
+        if passing:
+            raise PermissionError(f"--exclude-items: {len(passing)} item(s) PASS validation in {f['file']} and "
+                                  f'cannot be excluded (only missing or failing rows): {passing}')
+        if mine:
+            by_file[f['file']] = len(mine)
+        if f['status'] == 'PASS':
+            continue
+        unfixable = 'failing_item_ids' not in f and failing != set(sheet_ids[qid]) or \
+            'failing_item_ids' in f and (f['unknown'] or not f['header_ok'])
+        if unfixable or failing - mine:
+            still_failing.append(f['file'])
+    return dict(cap=cap, total=total, by_file=by_file, still_failing=still_failing)
+
+
+def freeze_judge(judge, model, root, per_query_dir, labels_dir, now=None, exclude_items=None, reason=None):
+    """Write-once judge_<X>_freeze.json; refuses unless every one of the files PASSes, apart from the
+    rows listed in exclude_items (with a reason; note 3 section 3)."""
     if not str(model).strip():
         raise ValueError('--model needs the exact model text')
+    if (exclude_items is None) != (reason is None) or (reason is not None and not str(reason).strip()):
+        raise ValueError('--exclude-items and --reason go together (and the reason cannot be empty)')
+    excluded = read_exclusions(exclude_items) if exclude_items is not None else []
     labels_dir = Path(labels_dir)
     target = labels_dir / FREEZE_NAME.format(judge=judge)
     if target.exists():
         raise FileExistsError(f'{target.name} exists; judge {judge} is already frozen')
     report = validate_judge(judge, root, per_query_dir, require_all=True, now=now)
     report_path = write_report(report, labels_dir, now)
-    if report['overall'] != 'PASS':
+    if excluded:
+        if report['kit_eval_problems']:
+            raise PermissionError(f"judge {judge}: kit eval problems {report['kit_eval_problems']}; not frozen "
+                                  f'(report {report_path.name})')
+        applied = apply_exclusions(report, per_query_dir, excluded)
+        if applied['still_failing']:
+            raise PermissionError(f"judge {judge}: {applied['still_failing']} still FAIL once the excluded items "
+                                  f'are set aside; not frozen (report {report_path.name})')
+    elif report['overall'] != 'PASS':
         raise PermissionError(f"judge {judge}: validation {report['overall']} ({report['counts']}); "
                               f'not frozen (report {report_path.name})')
     out = Path(root) / 'output'
-    names = {qid: f['file'] for qid, f in report['files'].items()}
+    present = {q: f for q, f in report['files'].items() if 'grade_counts' in f}  # an all-excluded file may be absent
     record = dict(judge=judge, model=str(model).strip(),
                   frozen_at=(now or datetime.now(timezone.utc)).isoformat(timespec='seconds'),
                   validate_report=report_path.name, root=str(root),
-                  files={name: bytes_sha(out / name) for name in names.values()},
-                  counts={names[q]: dict(rows=f['rows'], grade_counts=f['grade_counts'], none_spans=f['none_spans'],
-                                         warnings=f['warnings']) for q, f in report['files'].items()})
+                  files={f['file']: bytes_sha(out / f['file']) for f in present.values()},
+                  counts={f['file']: dict(rows=f['rows'], grade_counts=f['grade_counts'], none_spans=f['none_spans'],
+                                          warnings=f['warnings']) for f in present.values()})
+    if excluded:
+        record['excluded'] = dict(item_ids=sorted(excluded), count=len(excluded), reason=str(reason).strip(),
+                                  by_file=applied['by_file'], max_allowed=applied['cap'], sheet_items=applied['total'],
+                                  rule='decided by the other two judges (two-judge rule; Addendum 2 note 3 section 3)')
     write_once(target, json.dumps(record, indent=2, sort_keys=True) + '\n')
     return record, target
 
 
 def check_judge_freezes(files_by_judge, freeze_dir):
-    """s8-merge-labels gate: every judge given needs its freeze, with the same file set and shas."""
+    """s8-merge-labels gate: every judge given needs its freeze, with the same file set and shas.
+    Returns {judge: excluded item_ids} (empty for a freeze without --exclude-items)."""
+    excluded = {}
     for judge, paths in files_by_judge.items():
         path = Path(freeze_dir) / FREEZE_NAME.format(judge=judge)
         if not path.exists():
             raise PermissionError(f'{path.name} missing: run s8-freeze-judge --judge {judge} first')
-        frozen = json.loads(path.read_text(encoding='utf-8'))['files']
+        record = json.loads(path.read_text(encoding='utf-8'))
+        frozen = record['files']
         given = {Path(p).name: Path(p) for p in paths}
         if set(given) != set(frozen):
             raise PermissionError(f'judge {judge}: files differ from {path.name} (not given: '
@@ -229,6 +346,8 @@ def check_judge_freezes(files_by_judge, freeze_dir):
         for name in sorted(given):
             if bytes_sha(given[name]) != frozen[name]:
                 raise PermissionError(f'judge {judge}: {name} differs from {path.name} (sha256 mismatch)')
+        excluded[judge] = frozenset(record.get('excluded', {}).get('item_ids', []))
+    return excluded
 
 
 # ---------------------------------------------------------------- D. compare runs
@@ -301,6 +420,10 @@ def main(argv=None):
             p.add_argument('--require-all', action='store_true', help='a missing output file is a FAIL')
         else:
             p.add_argument('--model', required=True, help='the exact model text of this judge')
+            p.add_argument('--exclude-items', metavar='FILE',
+                           help='item_ids (one per line) whose rows are still missing/invalid after the one re-run; '
+                                'needs --reason (note 3 section 3; at most 2%% of the sheet items)')
+            p.add_argument('--reason', help='why the listed rows are excluded (logged in the freeze)')
     cmp = sub.add_parser('s8-compare-runs', help='Agreement between two runs of the same judge (aggregate)')
     cmp.add_argument('--a', required=True)
     cmp.add_argument('--b', required=True)
@@ -316,8 +439,12 @@ def main(argv=None):
         return 0
     root = Path(args.root) if args.root else KIT_DEFAULTS[args.judge]
     if args.command == 's8-freeze-judge':
-        record, path = freeze_judge(args.judge, args.model, root, args.per_query, args.labels_dir)
-        print(f"frozen judge {args.judge}: {len(record['files'])} files, report {record['validate_report']}")
+        if (args.exclude_items is None) != (args.reason is None):
+            parser.error('--exclude-items and --reason go together')
+        record, path = freeze_judge(args.judge, args.model, root, args.per_query, args.labels_dir,
+                                    exclude_items=args.exclude_items, reason=args.reason)
+        print(f"frozen judge {args.judge}: {len(record['files'])} files, report {record['validate_report']}, "
+              f"excluded items {record.get('excluded', {}).get('count', 0)}")
         print(f'{path}  sha256={bytes_sha(path)}')
         return 0
     report = validate_judge(args.judge, root, args.per_query, args.require_all)

@@ -10,7 +10,8 @@
 AUDIT mode shows only blind sheet fields (never grades, ranks, systems or any LLM field).
 With --order, items follow the fixed audit order and labelling is gap-free: nothing past the first
 unlabelled item can be opened or saved (earlier items may be re-labelled until the freeze).
-REFEREE mode also shows the judges' fields (A, B and C when present) from disputes.csv and refuses to
+REFEREE mode also shows the judges' fields (A, B and C when present) from disputes.csv, blinded as Judge 1-3 in
+an order shuffled per item (random.Random(f'{REFEREE_SEED}:{item_id}'); the A/B/C mapping stays server-side), and refuses to
 start unless the audit is frozen (audit_freeze.json). It also records reason_code (required) and, for
 audit disagreements, override_quote (must appear in the clause text) + override_rule (1-16)
 (Addendum 2 notes 2-3). Every save rewrites the labels CSV atomically (resumable).
@@ -24,6 +25,7 @@ import io
 import json
 import os
 from pathlib import Path
+import random
 import threading
 from urllib.parse import parse_qs, urlparse
 import webbrowser
@@ -37,6 +39,7 @@ SHOWN_FIELDS = ('item_id', 'qid', 'query', 'jurisdiction', 'narrative_grade3', '
                 'narrative_grade1_traps', 'source_doc', 'clause_id', 'title', 'text')
 TOOL_FIELDS = tuple(f for f in LABEL_FIELDS if f != 'query_asks') + ('timestamp',)
 REFEREE_TOOL_FIELDS = TOOL_FIELDS[:-1] + REFEREE_FIELDS + ('timestamp',)
+REFEREE_SEED = 20261021  # judge columns shuffled per item, stable across restarts (model identity hidden)
 
 
 class LabelApp:
@@ -99,6 +102,14 @@ class LabelApp:
             result.update(ordered=True, minimum=AUDIT_N_MIN)
         return result
 
+    def judge_order(self, item_id):
+        """Server-side only: the judge letters behind Judge 1, 2, 3 for this item (never sent to the browser).
+        C is left out when it has no row on the item."""
+        d = self.judges[item_id]
+        letters = [j for j in ('a', 'b', 'c') if j != 'c' or any(d[f'c_{f}'] for f in JUDGE_FIELDS)]
+        random.Random(f'{REFEREE_SEED}:{item_id}').shuffle(letters)
+        return letters
+
     def item(self, index):
         index = max(0, min(int(index), len(self.ids) - 1))
         self._check_reachable(index)
@@ -107,8 +118,8 @@ class LabelApp:
         if self.mode == 'referee':
             d = self.judges[item_id]
             result['reason'] = d['reason']
-            result['judges'] = {j: {f: d[f'{j}_{f}'] for f in JUDGE_FIELDS} for j in ('a', 'b', 'c')
-                                if j != 'c' or any(d[f'c_{f}'] for f in JUDGE_FIELDS)}
+            result['judges'] = {str(n): {f: d[f'{j}_{f}'] for f in JUDGE_FIELDS}
+                                for n, j in enumerate(self.judge_order(item_id), start=1)}
         return result
 
     def save(self, payload):
@@ -261,7 +272,7 @@ table.j{width:100%;border-collapse:collapse;font-size:13px}table.j td{border-top
 <div class="card"><div class="k">Source doc <span id="doc"></span> &middot; clause <span id="cid"></span></div>
 <div style="font-weight:600;margin:4px 0" id="title"></div><div id="text"></div><div class="k" id="len"></div></div>
 </section><section>
-<div class="card" id="judges" hidden><div class="k">Referee: judges' labels &middot; reason <span id="reason"></span></div><table class="j" id="jt"></table></div>
+<div class="card" id="judges" hidden><div class="k">Referee: judges' labels (order shuffled per item) &middot; reason <span id="reason"></span></div><table class="j" id="jt"></table></div>
 <div class="card">
 <div class="k">Grade <kbd>0</kbd>-<kbd>3</kbd></div><div class="opts" id="grade"></div>
 <div class="k">Clause states <kbd>a</kbd> <kbd>p</kbd> <kbd>m</kbd> <kbd>x</kbd></div><div class="opts" id="clause_states"></div>
@@ -313,7 +324,7 @@ function render(d){const it=d.item;$('mode').textContent=d.mode.toUpperCase();
  msg(d.label?'saved earlier '+L.timestamp:'',!!d.label);
  const J=$('judges');if(d.judges){J.hidden=false;$('reason').textContent=d.reason;const t=$('jt');t.textContent='';
   const js=Object.keys(d.judges);const h=t.insertRow();h.insertCell().textContent='';
-  for(const j of js)h.insertCell().textContent='Judge '+j.toUpperCase();
+  for(const j of js)h.insertCell().textContent='Judge '+j;
   for(const f of ['grade','clause_states','jurisdiction_match','unsure','query_asks','evidence_span','note']){
    const r=t.insertRow();r.insertCell().textContent=f;for(const j of js)r.insertCell().textContent=d.judges[j][f];}}
  else J.hidden=true;}

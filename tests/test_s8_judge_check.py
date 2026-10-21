@@ -59,8 +59,8 @@ def test_clean_kit_passes_and_the_report_has_no_label_text(env):
     path = jc.write_report(r, tmp / 'labels', NOW)
     assert path.name == 'validate_A_20261021T090000Z.json'
     assert SPAN not in path.read_text(encoding='utf-8')
-    with pytest.raises(FileExistsError):  # a NEW file each run
-        jc.write_report(r, tmp / 'labels', NOW)
+    assert jc.write_report(r, tmp / 'labels', NOW).name == 'validate_A_20261021T090000Z_2.json'  # a NEW file each run
+    assert SPAN not in path.read_text(encoding='utf-8')  # the first one is unchanged
 
 
 def test_missing_duplicate_unknown_ids(env):

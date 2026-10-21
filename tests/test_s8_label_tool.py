@@ -195,10 +195,12 @@ def test_referee_mode_needs_freeze_and_shows_both_judges(tmp_path, sheet):
     app = t.LabelApp(path, tmp_path / 'ref.csv', 'referee', disputes, tmp_path / 'audit_freeze.json')
     got = app.item(0)
     assert got['reason'] == 'threshold_split' and got['mode'] == 'referee'
-    assert got['judges']['a']['grade'] == '1' and got['judges']['b']['grade'] == '2'
-    assert got['judges']['a']['note'] == 'A-note' and got['judges']['b']['evidence_span'] == 'B-span'
-    assert set(got['judges']['a']) == {'query_asks', 'clause_states', 'jurisdiction_match', 'evidence_span',
-                                       'grade', 'unsure', 'note'}
+    shown = {letter: got['judges'][str(n)] for n, letter in enumerate(app.judge_order(got['item']['item_id']), 1)}
+    assert set(got['judges']) == {'1', '2'}  # blinded: Judge 1, Judge 2 (order shuffled per item)
+    assert shown['a']['grade'] == '1' and shown['b']['grade'] == '2'
+    assert shown['a']['note'] == 'A-note' and shown['b']['evidence_span'] == 'B-span'
+    assert set(shown['a']) == {'query_asks', 'clause_states', 'jurisdiction_match', 'evidence_span',
+                               'grade', 'unsure', 'note'}
     write_disputes(tmp_path, rows[:-1])
     with pytest.raises(ValueError, match='different items'):
         t.LabelApp(path, tmp_path / 'ref2.csv', 'referee', tmp_path / 'disputes.csv', tmp_path / 'audit_freeze.json')

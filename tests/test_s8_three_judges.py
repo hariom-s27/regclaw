@@ -236,14 +236,15 @@ def test_stage2_primary_and_secondary_kappa_vs_median_consensus(three):
     s = stage2(tmp, rows, grades)
     check = json.loads((tmp / 'labels' / 'audit_check.json').read_text(encoding='utf-8'))
     assert check['mode'] == 'three_judge' and check['audit_mode'] == 'check_only (note 2)'
-    assert check['on_accepted'] == 37 and check['on_disputes'] == 3 and check['on_two_judge_rule'] == 1  # M1 (C1 a)
+    # note 3 section 4: M1 (A/B two-judge rule, C invalid) is left out of the primary kappa and counted
+    assert check['on_accepted'] == 36 and check['on_disputes'] == 3 and check['on_two_judge_rule'] == 1
     assert check['disagreements'] == 4 and check['flag'] == 'PASS'
-    # primary: 37 items; consensus relevant = the 20 even items; the author says not relevant on D1-D4
+    # primary: 36 items; consensus relevant = the 20 even items; the author says not relevant on D1-D4
     b = np.array(check['confusion_2x2_rows_shyam_cols_consensus'])
-    assert b.sum() == 37 and b[0, 1] == 4 and b[1, 0] == 0
+    assert b.sum() == 36 and b[0, 1] == 4 and b[1, 0] == 0
     assert check['kappa_binary'] == round(m.kappa_from_confusion(b), 4)
     sec = check['secondary']
-    assert sec['n'] == 36 and np.array(sec['confusion_2x2_rows_shyam_cols_consensus'])[0, 1] == 3  # D1 unsure
+    assert sec['n'] == 35 and np.array(sec['confusion_2x2_rows_shyam_cols_consensus'])[0, 1] == 3  # D1 unsure
     assert sec['kappa_binary'] > check['kappa_binary'] and check['ci95_kappa_binary']['seed'] == m.SEED
     assert check['report_sentence'].startswith('The author, a non-specialist, audited 40 items blind;')
     assert s['referee'] == {'threshold_split': 3, 'audit_disagrees': 4, 'total': 7}
@@ -391,8 +392,10 @@ def payload(item_id, **kw):
 def test_referee_tool_shows_judge_c_when_present(referee_app):
     app, rows, _ = referee_app
     first, last = app.item(0), app.item(2)
-    assert set(first['judges']) == {'a', 'b', 'c'} and first['judges']['c']['note'] == 'C-note'
-    assert set(last['judges']) == {'a', 'b'}  # two-judge item / fallback: no empty C column
+    c_column = str(app.judge_order(first['item']['item_id']).index('c') + 1)  # blinded: Judge 1-3
+    assert set(first['judges']) == {'1', '2', '3'} and first['judges'][c_column]['note'] == 'C-note'
+    assert set(last['judges']) == {'1', '2'}  # two-judge item / fallback: no empty C column
+    assert 'c' not in app.judge_order(last['item']['item_id'])
     assert "Object.keys(d.judges)" in t.PAGE and 'reason_code' in t.PAGE and 'override_quote' in t.PAGE
 
 

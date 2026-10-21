@@ -14,6 +14,7 @@ data/models/legalbert_obl_v1/
 data/gold_structure/
 data/retrieval_eval/
 data/.pytest_tmp/
+data/practice_referee_demo/
 pageindex/store/
 pageindex/logs/
 pageindex/results/
