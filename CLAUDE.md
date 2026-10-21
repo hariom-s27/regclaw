@@ -77,3 +77,35 @@ Also list every file created or changed, and the test results.
 
 ## Folder map
 `corpus/` download + counts · `ingest/` Phase 1 parser · `ner/` entities + merge · `obligation/` LegalBERT (weak labels, train, infer, evaluate) · `graph/` Neo4j build · `embed/` pgvector · `retrieval/` 4-stage retriever · `mcp/` FastMCP server · `pageindex/` Part II ingest + agent · `eval/` page metrics + Ragas · `observability/` Langfuse · `data/` local data (gitignored) · `results/` tables for the README.
+
+## Reading depth, token discipline and the SELF-AUDIT REPORT
+Priority: the task prompt wins over this section. If a prompt asks you to print something, run a test, or read a file, do it. Nothing here weakens "Rules for every task" or the frozen-file list in the Decision checklist.
+Two modes. Pick the mode from the task and say which one in the plan. If unsure, use FULL-CONTEXT.
+
+FULL-CONTEXT mode — for planning, building or changing a feature, code review, bug hunting, or checking code against a protocol/pre-registration:
+- In the PLAN step (your first reply, before any edit), read every relevant file in full ONCE: the modules you will change, the modules that call them or that they call, their tests, and the protocol/spec docs named in the prompt. Correctness beats saving tokens.
+- Then write a short CONTEXT MAP in the plan (≤ 25 lines): each relevant file → its role, key functions, how data flows between them, invariants/rules that must not break, and existing tests that cover them.
+- From then on, work from the context map. Re-read the exact lines you are about to edit, or a file that changed since you read it.
+- If the map turns out wrong or incomplete, read that part fully, fix the map, and say so in the report.
+
+TARGETED mode — for small tasks (run commands, commit, a one-function fix, a doc edit):
+- Find code with grep / rg first; read only the functions you need (line ranges).
+
+Both modes:
+- "Context" means code, tests and docs only. Never open data files, holdout sets, or any file a task prompt calls sealed or never-open, to gain context.
+- Do not re-read a file you already read in this chat unless it changed.
+- Print only what a step needs: counts, names, short excerpts. No full file dumps to the chat, no long logs (use tail / grep).
+- Tests: run the narrowest test first (one file or -k). The full suite still runs before finishing every task (rule 4), and also before every STOP that proposes a commit.
+
+SELF-AUDIT REPORT — give it at every STOP, before anything else; every heading, "none" if empty, short bullets, numbers instead of prose:
+1. Asked vs done: each numbered step of the prompt → done / partly / not done.
+2. Decisions I made myself: choice, options rejected, why.
+3. Deviations from the prompt or the agreed plan: what, why, effect (or "no deviations").
+4. Implementation: files created/changed (path + one line), main functions, exact commands run.
+5. Checks with real output: per-suite pass/fail/skip counts, shas, row counts.
+6. Not checked / assumed, and how it could be wrong.
+7. Errors and retries: each error, cause, what I did.
+8. Safety: no sealed/data file opened, no forbidden folder written, no commit/push unless told, API calls (count).
+9. Risks for later steps, with a suggested check.
+10. Next: what I need from Shyam.
+At the end of the whole task, also give the rule-9 step log.
