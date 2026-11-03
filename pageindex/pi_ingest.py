@@ -14,8 +14,9 @@ from datetime import date
 from importlib import metadata
 from pathlib import Path
 
-from pi_common import (DocRecord, Settings, load_manifest, load_settings, now_utc,
-                       page_count, save_manifest, sha256_file, text_layer_report)
+from pi_common import (PAGEINDEX_PIN_SHA, DocRecord, Settings, index_backend,
+                       installed_pageindex_commit, load_manifest, load_settings, model_route,
+                       now_utc, page_count, save_manifest, sha256_file, text_layer_report)
 
 
 def _pageindex_version() -> str:
@@ -26,13 +27,22 @@ def _pageindex_version() -> str:
 
 
 def build_tree(pdf_path: str, s: Settings) -> dict:
-    """Run PageIndex in-process. Returns PageIndex's own output dict unchanged."""
-    # _llm_backend is PageIndex's (private) per-call kwargs override for LiteLLM.
-    # We use it only to raise max_tokens so Claude does not truncate long TOC JSON
-    # (PageIndex raises on finish_reason == "length"). Private API: re-check on upgrade.
+    """Run PageIndex in-process. Returns PageIndex's own output dict unchanged.
+
+    R22 (PageIndex 50a71b6): PageIndex's default mode is now "flash", so the standard
+    (LLM-built tree) pipeline is called directly via page_index_main; flash runs only when
+    index_mode: flash is set explicitly (labelled comparison, ADR 0006). Index and summary
+    models are always passed explicitly (P2).
+    """
+    # _llm_backend is PageIndex's (private) per-call kwargs override for LiteLLM: it is
+    # merged into every completion of the indexing lane. Private API: re-check on upgrade.
+    #   anthropic/ route: {"max_tokens": litellm_max_tokens} so Claude does not truncate
+    #                     long TOC JSON (PageIndex raises on finish_reason == "length").
+    #   Azure route:      {"api_base", "api_key"} only, NO max_tokens cap (P3, P4).
+    backend = index_backend(s)      # validates models, route, deployment names, credentials
     from pageindex.utils import ConfigLoader, _llm_backend
 
-    token = _llm_backend.set({"max_tokens": s.litellm_max_tokens})
+    token = _llm_backend.set(backend or None)
     try:
         if s.index_mode == "flash":
             from pageindex.flash import page_index_flash
@@ -45,6 +55,8 @@ def build_tree(pdf_path: str, s: Settings) -> dict:
             if reason:
                 raise RuntimeError(reason)
             return result
+        if s.index_mode != "standard":   # Settings validates this too; never fall through
+            raise ValueError(f"unknown index_mode {s.index_mode!r}")
 
         from pageindex.page_index_classic import page_index_main
         opt = ConfigLoader().load({
@@ -97,7 +109,10 @@ def ingest(pdf: str, family: str, version: str, title: str | None = None,
     if not pdf_copy.exists():
         shutil.copy2(pdf, pdf_copy)
 
-    # 5) build + persist
+    # 5) build + persist (record which PageIndex commit built it; warn if not the pin)
+    commit = installed_pageindex_commit()
+    if commit != PAGEINDEX_PIN_SHA:
+        print(f"[warn] pageindex commit {commit} != pinned {PAGEINDEX_PIN_SHA[:7]}", file=sys.stderr)
     result = build_tree(str(pdf_copy), s)
     tree_path = store / "trees" / f"{key}.json"
     tree_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -113,6 +128,8 @@ def ingest(pdf: str, family: str, version: str, title: str | None = None,
         index_mode=s.index_mode,
         index_model=s.index_model if s.index_mode == "standard" else s.summary_model,
         pageindex_version=_pageindex_version(), built_at=now_utc(),
+        summary_model=s.summary_model, index_route=model_route(s.summary_model),
+        pageindex_commit=commit,
     )
     m.documents[doc_id] = rec
     save_manifest(s, m)
