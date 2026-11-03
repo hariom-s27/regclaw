@@ -172,6 +172,7 @@ def run(tmp, rows, ga, gb, **kw):
     """Two-judge protocol (note 3 section 6 fallback); three-judge runs are in test_s8_three_judges."""
     kw.setdefault('fallback_reason', 'TEST two-judge')
     kw.setdefault('_test_skip_judge_freeze', True)  # judge freezes: tests/test_s8_judge_check.py
+    kw.setdefault('expected_items', len(rows))  # a fake sheet (the real one: m.SHEET_ITEMS = 1,482)
     return m.run_merge(sheet=tmp / 'sheet.csv', a_files=write_judge(tmp / 'A', rows, ga),
                        b_files=write_judge(tmp / 'B', rows, gb), out=tmp / 'labels', bootstrap=300, **kw)
 

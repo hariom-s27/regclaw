@@ -16,6 +16,8 @@ TEXT = 'The sponsor shall\n  submit   the final\treport to the authority. NOTE: 
 SPAN = 'sponsor shall submit the final report'  # found only after whitespace normalisation
 
 
+ITEMS = 4 * len(QIDS)  # the fake combined sheet (sheet_rows n=4 per query); the real one: 1,482
+
 def sheet_rows(qid, n=4):
     return [{c: '' for c in SHEET_COLUMNS} | dict(item_id=f'S8-{qid.lower()}{i:04d}', qid=qid, query=f'query {qid}',
                                                   source_doc='doc', clause_id=f'doc:{qid}.{i}', title=f't{i}',
@@ -227,7 +229,7 @@ def three_frozen(env):
 
 def test_merge_runs_when_every_judge_matches_its_freeze(three_frozen):
     tmp, roots, files = three_frozen
-    s = m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, **files)
+    s = m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, expected_items=ITEMS, **files)
     assert s['stage'] == 1 and s['mode'] == 'three_judge'
 
 
@@ -236,19 +238,19 @@ def test_merge_refuses_a_changed_sha_and_names_the_file(three_frozen):
     path = roots['B'] / 'output' / 'labels_s8_sheet_R1.csv'
     path.write_bytes(path.read_bytes() + b'\r\n')
     with pytest.raises(PermissionError, match=r'judge B: labels_s8_sheet_R1.csv differs from judge_B_freeze.json'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, **files)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, expected_items=ITEMS, **files)
     assert not (tmp / 'labels' / 'agreement_abc.json').exists()
 
 
 def test_merge_refuses_a_missing_freeze_or_a_different_file_set(three_frozen):
     tmp, roots, files = three_frozen
     with pytest.raises(PermissionError, match='judge_A_freeze.json missing'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'other', freeze_dir=tmp / 'nowhere', bootstrap=50, **files)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'other', freeze_dir=tmp / 'nowhere', bootstrap=50, expected_items=ITEMS, **files)
     with pytest.raises(PermissionError, match=r"judge A: files differ .*not given: \['labels_s8_sheet_R1.csv'\]"):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50,
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, expected_items=ITEMS,
                     **files | {'a_files': files['a_files'][:1]})
     # the test-only bypass is a keyword, not a CLI option
-    s = m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'x', freeze_dir=tmp / 'nowhere', bootstrap=50,
+    s = m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'x', freeze_dir=tmp / 'nowhere', bootstrap=50, expected_items=ITEMS,
                     _test_skip_judge_freeze=True, **files)
     assert s['stage'] == 1
     with pytest.raises(SystemExit):

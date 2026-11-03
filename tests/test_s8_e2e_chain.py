@@ -211,6 +211,7 @@ def audit_setup(w, n, pick, *, unsure=(), cli_freeze=False):
 
 def merge(w, out=None, **kw):
     kw.setdefault('bootstrap', 200)
+    kw.setdefault('expected_items', len(w.rows))  # a fake sheet (the real one: lb.SHEET_ITEMS = 1,482)
     return lb.run_merge(sheet=w.sheet, a_files=lb.judge_files(w.out['A']), b_files=lb.judge_files(w.out['B']),
                         c_files=lb.judge_files(w.out['C']), out=out or w.labels, **kw)
 
@@ -299,6 +300,7 @@ def w1(tmp_path_factory):
     cap = Cap()
     with sealed_guard(), unique_stamps(), pytest.MonkeyPatch.context() as mp:
         mp.setattr('sys.stdout', buffer)
+        mp.setattr(lb, 'SHEET_ITEMS', sum(map(len, W1_SPEC.values())))  # the CLI uses SHEET_ITEMS (1,482 for real)
         w = build_world(tmp_path_factory.mktemp('w1'), W1_SPEC, b_tweak=w1_b_tweak)
         args = lambda j: ['--judge', j, '--root', str(w.kits[j]), '--per-query', str(w.per_query),
                           '--labels-dir', str(w.labels)]
@@ -470,6 +472,7 @@ def test_case8_judge_file_changed_after_freeze_is_refused_by_name(tmp_path, w1):
     target.write_bytes(target.read_bytes().replace(b'RATIONALE-B', b'RATIONALE-b', 1))  # one byte, as an editor would
     with pytest.raises(PermissionError, match=r'judge B: labels_s8_sheet_Q2.csv differs from judge_B_freeze.json'):
         lb.run_merge(sheet=w1.sheet, a_files=lb.judge_files(w1.out['A']), b_files=lb.judge_files(b_copy),
+                     expected_items=len(w1.rows),
                      c_files=lb.judge_files(w1.out['C']), out=tmp_path / 'labels', freeze_dir=w1.labels, bootstrap=50)
     assert not (tmp_path / 'labels').exists()
 

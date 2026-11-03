@@ -31,8 +31,12 @@ Stages (each needs the previous one):
                           the valid judges (note 4 section 3). qrels `date` = the audit-freeze date (note 4
                           section 3).
 
-Before anything is written, stage 1 refuses a sheet with a duplicate (qid, clause_id) or whose item count differs
-from sheet_meta.json, the s8-sheet record next to it (Addendum 2 note 4 section 5).
+Sheet guards (Addendum 2 note 4 section 5), before anything is written: every stage refuses a sheet with a duplicate
+(qid, clause_id), or whose item count is not 1,482 (SHEET_ITEMS) and equal to sheet_meta.json, the s8-sheet record
+next to it. Stage 1 records the sheet's sha256 in agreement_abc.json / agreement_ab.json (inputs.sheet_sha256,
+write-once); stages 2 and 3 refuse a sheet whose sha differs from that recorded value, and qrels_meta.json records the
+sheet sha. The s8-sheet record holds no sheet sha, so note 4 section 5's "s8-sheet record" check is satisfied by the
+count check against sheet_meta.json plus this stage-1 record (no new record is created).
 """
 import argparse
 from collections import Counter, defaultdict
@@ -93,11 +97,14 @@ def read_sheet(path):
 
 
 SHEET_META = 'sheet_meta.json'  # written by s8-sheet next to s8_sheet.csv (s8_runs.run_sheet)
+SHEET_ITEMS = 1482  # the S8 blind sheet (Addendum 2; note 4 section 5)
 
 
-def check_sheet(sheet_path, sheet_rows):
-    """Addendum 2 note 4 section 5: one row per (qid, clause_id), and the item count of the s8-sheet record.
-    Returns the record's sha256 (for the inputs block). Raises before anything is written."""
+def check_sheet(sheet_path, sheet_rows, expected_items=None):
+    """Addendum 2 note 4 section 5: one row per (qid, clause_id); the item count = SHEET_ITEMS (1,482) and = the
+    s8-sheet record (sheet_meta.json). Returns the record's sha256 (for the inputs block). Raises before anything
+    is written."""
+    expected = SHEET_ITEMS if expected_items is None else expected_items
     first, dup = {}, []
     for row in sheet_rows:
         key = (row['qid'], row['clause_id'])
@@ -114,7 +121,26 @@ def check_sheet(sheet_path, sheet_rows):
     if meta.get('items') != len(sheet_rows):
         raise ValueError(f"{Path(sheet_path).name} holds {len(sheet_rows)} items; {SHEET_META} records "
                          f"{meta.get('items')}")
+    if len(sheet_rows) != expected:
+        raise ValueError(f'{Path(sheet_path).name} holds {len(sheet_rows)} items; the S8 sheet has {expected}')
     return bytes_sha(meta_path)
+
+
+def agreement_name(mode):
+    return 'agreement_abc.json' if mode == 'three_judge' else 'agreement_ab.json'
+
+
+def check_recorded_sheet(out, mode, sheet_sha):
+    """Stages 2 and 3 (note 4 section 5): the sheet sha must equal the one stage 1 recorded in the agreement file
+    (inputs.sheet_sha256). When that file does not exist yet, this same call's stage 1 records it from this sheet."""
+    path = Path(out) / agreement_name(mode)
+    if not path.is_file():
+        return 'recorded by this run'
+    recorded = json.loads(path.read_text(encoding='utf-8')).get('inputs', {}).get('sheet_sha256')
+    if recorded != sheet_sha:
+        raise PermissionError(f'the sheet differs from the one stage 1 recorded in {path.name} '
+                              f'(inputs.sheet_sha256 mismatch): stages 2 and 3 refused')
+    return 'matches ' + path.name
 
 
 def validate_label(row, where, extra=()):
@@ -520,12 +546,13 @@ def write_json(path, value):
 
 
 def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=None, audit_ids=None, audit_file=None,
-              freeze_path=None, referee_file=None, bootstrap=BOOTSTRAP, freeze_dir=None, _test_skip_freeze=False,
-              _test_skip_judge_freeze=False):
+              freeze_path=None, referee_file=None, bootstrap=BOOTSTRAP, freeze_dir=None, expected_items=None,
+              _test_skip_freeze=False, _test_skip_judge_freeze=False):
     """Returns a counts-only summary; writes what the available inputs allow (write-once).
     With a freeze, the audit set is the frozen prefix (audit_ids is used only by the test-only path).
     Before stage 1, every judge given needs judge_<X>_freeze.json in freeze_dir (default: out) with the
-    same files and sha256s (s8-freeze-judge)."""
+    same files and sha256s (s8-freeze-judge). expected_items (default SHEET_ITEMS = 1,482) is for fake sheets in
+    tests; the CLI never sets it."""
     out = Path(out)
     if fallback_reason is not None and not str(fallback_reason).strip():
         raise ValueError('--two-judge-fallback needs a reason (note 3 section 6: the fallback is logged with it)')
@@ -539,7 +566,9 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
         from retrieval_eval.s8_judge_check import check_judge_freezes
         excluded = check_judge_freezes(files, out if freeze_dir is None else freeze_dir)
     sheet_rows = read_sheet(sheet)
-    sheet_meta_sha = check_sheet(sheet, sheet_rows)
+    sheet_meta_sha = check_sheet(sheet, sheet_rows, expected_items)
+    sheet_sha = bytes_sha(sheet)
+    sheet_record = check_recorded_sheet(out, mode, sheet_sha) if audit_file is not None else None
     sheet_by_id = {r['item_id']: r for r in sheet_rows}
     for j, ids in excluded.items():
         if set(ids) - set(sheet_by_id):
@@ -558,7 +587,7 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
     accepted = {i: d['consensus'] for i, d in decisions.items() if d['consensus'] is not None}
     threshold_disputes = [r['item_id'] for r in sheet_rows if decisions[r['item_id']]['consensus'] is None]
     two_rule = [i for i, d in decisions.items() if mode == 'three_judge' and d['rule'] == 'two_judge']
-    inputs = dict(sheet_sha256=bytes_sha(sheet), sheet_meta_sha256=sheet_meta_sha, **{f'{j.lower()}_files': {Path(p).name: bytes_sha(p) for p in f}
+    inputs = dict(sheet_sha256=sheet_sha, sheet_meta_sha256=sheet_meta_sha, **{f'{j.lower()}_files': {Path(p).name: bytes_sha(p) for p in f}
                                                      for j, f in files.items()})
     common = dict(mode=mode, judges_in_force=list(in_force), judges_read=list(files), fallback_reason=fallback_reason,
                   accepted=len(accepted), threshold_disputes=len(threshold_disputes),
@@ -569,9 +598,9 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
                   grade_counts={j: _grade_counts(l) for j, l in labels.items()},
                   unsure={j: sum(x['unsure'] == 'yes' for x in l.values()) for j, l in labels.items()}, inputs=inputs)
     if mode == 'three_judge':
-        name, agr = 'agreement_abc.json', agreement3(sheet_rows, force, bootstrap=bootstrap)
+        name, agr = agreement_name(mode), agreement3(sheet_rows, force, bootstrap=bootstrap)
     else:
-        name, agr = 'agreement_ab.json', agreement(sheet_rows, labels['A'], labels['B'], bootstrap=bootstrap)
+        name, agr = agreement_name(mode), agreement(sheet_rows, labels['A'], labels['B'], bootstrap=bootstrap)
         if 'C' in labels:  # note 3 section 6: C only as a secondary comparison
             agr['secondary_c'] = {f'{x}-C': agreement(sheet_rows, labels[x], labels['C'], bootstrap=bootstrap,
                                                       names=(x, 'C')) for x in ('A', 'B')}
@@ -673,6 +702,9 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
                                  '(two-judge rule: the lower of the two) (Addendum 2 note 4 section 3)'),
                 audit_disagrees_two_judge_rule=audit_two_rule,
                 override_flipped_side=flipped,
+                sheet_check=dict(sheet_sha256=sheet_sha, items=len(sheet_rows), stage1_record=sheet_record,
+                                 rule='sheet sha = agreement inputs.sheet_sha256; items = 1,482 = sheet_meta.json '
+                                      '(Addendum 2 note 4 section 5)'),
                 referee_sha256=bytes_sha(referee_file), audit_labels_sha256=freeze['labels_sha256'], **inputs)
     states['qrels_meta.json'] = write_json(out / 'qrels_meta.json', meta)
     summary.update(stage=3, qrels={k: meta[k] for k in ('pairs', 'source', 'categories', 'grades', 'relevant',
