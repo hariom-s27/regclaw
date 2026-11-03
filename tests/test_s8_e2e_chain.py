@@ -581,9 +581,13 @@ def test_case11_manifest_analysis_gate_and_lock(tmp_path, monkeypatch):
     record = read_json(manifest)
     assert record['merge_mode'] == 'three_judge' and set(record['files']) >= {
         'qrels', 'qrels_meta', 'audit_check', 'agreement', 'audit_freeze', 'judge_A_freeze', 'judge_B_freeze',
-        'judge_C_freeze', 'guideline', 'partD_freeze'}
+        'judge_C_freeze', 'guideline', 'partD_freeze', 'notes_freeze'}
+    runs_sha = bytes_sha(w.run / 'runs.jsonl')
+    required = dict(corpus_size=len(read_json(tmp_path / 'w2src' / 'clauses.json')),
+                    expect_runs_sha=f'{runs_sha[:8]}\u2026{runs_sha[-4:]}')  # the logged short form (Note 4 s5)
     folder, shas = an.run_analysis(w.run, queries=queries, clauses_path=tmp_path / 'w2src' / 'clauses.json',
-                                   manifest_path=manifest, now=NOW)
+                                   manifest_path=manifest, now=NOW, **required)
+    assert read_json(folder / 'inputs.json')['runs_sha256'] == runs_sha  # the full sha is recorded
     assert folder == w.run / 'analysis' and read_json(folder / 'inputs.json')['gate'] == 'verified'
     assert read_json(folder / 'agreement.json')['agreement']['excluded_by_judge'] == {'A': 0, 'B': 0, 'C': 0}
     qrels = w.labels / 'qrels.tsv'
@@ -591,14 +595,14 @@ def test_case11_manifest_analysis_gate_and_lock(tmp_path, monkeypatch):
     qrels.write_bytes(original[:-2] + (b'0' if original[-2:-1] != b'0' else b'1') + original[-1:])
     with pytest.raises(PermissionError) as e:
         an.run_analysis(w.run, queries=queries, clauses_path=tmp_path / 'w2src' / 'clauses.json',
-                        manifest_path=manifest, now=NOW + timedelta(hours=1))
+                        manifest_path=manifest, now=NOW + timedelta(hours=1), **required)
     assert str(e.value).startswith('Part E is locked until the qrels freeze.') and 'qrels.tsv differs' in str(e.value)
     # case 12: the manifest is write-once; a re-run of the analysis writes a new folder, never over the old one
     with pytest.raises(FileExistsError, match='already frozen'):
         an.main(['s8-qrels-manifest'])
     qrels.write_bytes(original)
     again, shas2 = an.run_analysis(w.run, queries=queries, clauses_path=tmp_path / 'w2src' / 'clauses.json',
-                                   manifest_path=manifest, now=NOW + timedelta(hours=2))
+                                   manifest_path=manifest, now=NOW + timedelta(hours=2), **required)
     assert again == w.run / 'analysis' / 'run_20261023T110000Z'
     assert {n: bytes_sha(folder / n) for n in shas} == shas
 

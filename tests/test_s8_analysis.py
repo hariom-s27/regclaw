@@ -191,6 +191,8 @@ def freeze(tmp, out):
 
 def analyse(tmp, out, queries, **kw):
     kw.setdefault('manifest_path', tmp / 'manifest.json')
+    kw.setdefault('corpus_size', N)  # required (Addendum 2 Note 4 section 5)
+    kw.setdefault('expect_runs_sha', bytes_sha(out / 'runs.jsonl'))
     return m.run_analysis(out, queries=queries, clauses_path=tmp / 'clauses.json', now=NOW, **kw)
 
 
@@ -498,7 +500,7 @@ def test_manifest_contents_and_write_once(tmp_path):
     record = freeze(tmp_path, out)
     assert record['merge_mode'] == 'three_judge' and record['guideline_in_force'] == 'v1.0.1'
     assert set(record['files']) == {'audit_freeze', 'judge_A_freeze', 'judge_B_freeze', 'judge_C_freeze', 'agreement',
-                                    'audit_check', 'qrels_meta', 'qrels', 'guideline', 'partD_freeze'}
+                                    'audit_check', 'qrels_meta', 'qrels', 'guideline', 'partD_freeze', 'notes_freeze'}
     assert record['files']['qrels']['sha256'] == bytes_sha(out / 'labels/qrels.tsv')
     assert record['files']['guideline']['path'] == 'retrieval_eval/S8_RELEVANCE_GUIDELINE_v1.0.1.md'
     assert record['files']['guideline']['hashing'] == 'lf_normalised'
@@ -579,10 +581,11 @@ def test_test_bypass_is_test_only_and_never_on_real_folders(tmp_path, monkeypatc
     folder, _ = analyse(tmp_path, out, queries, _test_skip_gate=True)  # no manifest at all
     assert load(folder, 'inputs.json')['gate'] == 'TEST-ONLY bypass'
     with pytest.raises(PermissionError, match='real run folder'):
-        m.run_analysis(m.SEALED_ROOT / 'azure_openai' / 's8' / 'c2', queries=queries, _test_skip_gate=True)
+        m.run_analysis(m.SEALED_ROOT / 'azure_openai' / 's8' / 'c2', queries=queries, corpus_size=N,
+                       expect_runs_sha='0' * 64, _test_skip_gate=True)
     monkeypatch.delitem(__import__('sys').modules, 'pytest')
     with pytest.raises(PermissionError, match='tests only'):
-        m.run_analysis(out, queries=queries, _test_skip_gate=True)
+        m.run_analysis(out, queries=queries, corpus_size=N, expect_runs_sha='0' * 64, _test_skip_gate=True)
 
 
 def test_cli_has_no_bypass_option():
@@ -600,7 +603,7 @@ def test_cli_is_locked_without_the_manifest(tmp_path, monkeypatch):
     monkeypatch.setattr(m, 'MANIFEST', tmp_path / 'absent_manifest.json')
     monkeypatch.setattr(m, 'output_dir', lambda: out)
     with pytest.raises(PermissionError, match=m.LOCKED):
-        m.main(['s8-analyze'])
+        m.main(['s8-analyze', '--corpus-size', str(N), '--expect-runs-sha', bytes_sha(out / 'runs.jsonl')])
     assert not (out / 'analysis').exists()
 
 
@@ -622,3 +625,145 @@ def test_no_internship_numbers_in_the_code():
     text = (ROOT / 'retrieval_eval/s8_analysis.py').read_text(encoding='utf-8')
     for number in ('0.5639', '0.6465', '0.5724', '0.4863', '1,149', '1149', '72 candidates'):
         assert number not in text
+
+
+# ---------------------------------------------------------------- Addendum 2 Note 4 (sections 4-6)
+def test_note4_ndcg_gain_is_two_to_the_g_minus_one():
+    grades = {'a': 3, 'b': 1}
+    got = m.score_run(run_record(['b', 'a']), ['a', 'b'], grades, 10)['ndcg@10']
+    exp = (1 / 1 + 7 / math.log2(3)) / (7 / 1 + 1 / math.log2(3))     # gains 2^g - 1: 1 and 7
+    linear = (1 / 1 + 3 / math.log2(3)) / (3 / 1 + 1 / math.log2(3))  # gains g: would be ~0.86
+    assert got == pytest.approx(exp) and got != pytest.approx(linear)
+
+
+def test_note4_ideal_dcg_uses_every_judged_clause_not_only_retrieved():
+    grades = {'a': 3, 'z': 3}  # z is judged but neither candidate nor retrieved
+    got = m.score_run(run_record(['a']), ['a'], grades, 10)['ndcg@10']
+    assert got == pytest.approx(7 / (7 + 7 / math.log2(3)))  # ideal = both grade-3 clauses; retrieved-only would be 1
+    assert got < 1
+
+
+def test_note4_every_difference_is_first_named_minus_second_named():
+    assert [(x, y) for _, _, x, y in m.PRIMARY] == [('v1', 'v1-noob'), ('v1', 'v1.1'), ('v1', 'vector_all')]
+    rec = lambda v: {'Q1': dict(status='ok', reason=None, metrics={'r@10': v})}
+    records = {('v1', 'a'): rec(0.75), ('v1.1', 'a'): rec(0.25)}
+    flags = {'Q1': dict(flag='', report_query=False, v1_obligation_filter='no')}
+    rows, _ = m.compare(records, 'r@10', 'v1', 'v1.1', 'a', ['Q1'], flags)
+    assert rows[0]['diff'] == 0.5  # v1 - v1.1, never the reverse
+
+
+def test_note4_bootstrap_percentile_is_numpy_linear():
+    d = [0.013, -0.27, 0.41, 0.05, 0.33, -0.11, 0.72]
+    got = m.paired_bootstrap(d)
+    means = np.asarray(d)[np.random.default_rng(m.BOOTSTRAP_SEED).integers(7, size=(10_000, 7))].mean(axis=1)
+    pct = lambda method: tuple(round(float(x), 6) for x in np.percentile(means, [2.5, 97.5], method=method))
+    assert (got['lo'], got['hi']) == pct('linear')
+    for method in ('lower', 'higher', 'inverted_cdf'):  # the upper limit differs under these methods
+        assert (got['lo'], got['hi']) != pct(method)
+
+
+@pytest.mark.parametrize('system,variant', [('v1', 'c'), ('hyde', 'c'), ('vector_all', 'a'), ('v1.1', 'b')])
+def test_note4_na_is_refused_for_every_system_but_v1_noob(tmp_path, system, variant):
+    out, queries, _, runs = world(tmp_path)
+    for run in runs:
+        if (m.system_of(run), run['variant'], run['qid'], run['top_k']) == \
+                (system, variant, 'R1', 20 if system in m.FILTER_OFF else 10):
+            run.update(status='n/a', reason='no HyDE passage', ranked_ids=None, neighbour_ids=None, final_ids=None)
+    (out / 'runs.jsonl').write_text(jsonl_text(runs), encoding='utf-8')
+    freeze(tmp_path, out)
+    with pytest.raises(RuntimeError, match=rf'STOP: status n/a on the scored run {system}/{variant}/R1'):
+        analyse(tmp_path, out, queries)
+    assert not (out / 'analysis').exists()
+
+
+def test_note4_na_on_a_limit_run_is_refused(tmp_path):
+    out, queries, _, runs = world(tmp_path)
+    run = next(r for r in runs if r['system'] == 'limit' and r['qid'] == 'R2')
+    run.update(status='n/a', ranked_ids=None, neighbour_ids=None, final_ids=None)
+    (out / 'runs.jsonl').write_text(jsonl_text(runs), encoding='utf-8')
+    freeze(tmp_path, out)
+    with pytest.raises(RuntimeError, match=r"STOP: status 'n/a' on LIMIT run R2/"):
+        analyse(tmp_path, out, queries)
+
+
+@pytest.mark.parametrize('change', ['drop_guideline', 'drop_notes', 'drop_judge_B', 'extra_key', 'no_judges_read'])
+def test_note4_gate_requires_the_full_manifest_key_set(tmp_path, change):
+    out, queries, _, _ = world(tmp_path)
+    record = freeze(tmp_path, out)
+    files = record['files']
+    if change == 'drop_guideline':
+        files.pop('guideline')
+    elif change == 'drop_notes':
+        files.pop('notes_freeze')
+    elif change == 'drop_judge_B':
+        files.pop('judge_B_freeze')
+    elif change == 'extra_key':
+        files['runs'] = dict(files['qrels'])
+    else:
+        record['judges_read'] = []
+    (tmp_path / 'manifest.json').write_text(json.dumps(record), encoding='utf-8')
+    with pytest.raises(PermissionError, match=f'{m.LOCKED} the manifest key set is not the required one'):
+        analyse(tmp_path, out, queries)
+
+
+def test_note4_manifest_records_the_notes_freeze(tmp_path):
+    out, _, _, _ = world(tmp_path)
+    entry = freeze(tmp_path, out)['files']['notes_freeze']
+    assert entry == dict(base='repo', path='retrieval_eval/s8_notes_freeze.json', hashing='lf_normalised',
+                         sha256=m.file_sha(ROOT / 'retrieval_eval/s8_notes_freeze.json'))
+
+
+def test_note4_manifest_refuses_notes_that_differ_from_the_notes_freeze(tmp_path):
+    out, _, _, _ = world(tmp_path)
+    repo = tmp_path / 'repo'
+    notes = json.loads((ROOT / m.NOTES_FREEZE).read_text(encoding='utf-8'))
+    for rel in [m.PARTD_FREEZE, m.NOTES_FREEZE, 'retrieval_eval/S8_RELEVANCE_GUIDELINE_v1.0.1.md',
+                *notes['docs_lf_normalised_sha256']]:
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_bytes((ROOT / rel).read_bytes())
+    note4 = repo / 'retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_4.md'
+    note4.write_bytes(note4.read_bytes() + b'edited\n')
+    with pytest.raises(PermissionError, match='NOTE_4.md differs from s8_notes_freeze.json'):
+        m.write_qrels_manifest(out, tmp_path / 'manifest.json', repo=repo, now=NOW)
+    assert not (tmp_path / 'manifest.json').exists()
+
+
+@pytest.mark.parametrize('form', ['full', 'ellipsis', 'dots', 'upper'])
+def test_note4_runs_sha_full_or_short_form(tmp_path, form):
+    out, queries, _, _ = world(tmp_path)
+    freeze(tmp_path, out)
+    sha = bytes_sha(out / 'runs.jsonl')
+    given = {'full': sha, 'ellipsis': f'{sha[:8]}…{sha[-4:]}', 'dots': f'{sha[:8]}...{sha[-4:]}',
+             'upper': f'{sha[:8]}...{sha[-4:]}'.upper()}[form]
+    folder, _ = analyse(tmp_path, out, queries, expect_runs_sha=given)
+    inputs = load(folder, 'inputs.json')
+    assert inputs['runs_sha256'] == sha and inputs['runs_sha_check']['form'] == ('full' if form == 'full' else 'short')
+
+
+@pytest.mark.parametrize('given,match', [
+    ('wrongend', 'must be 64 hex'), ('0123456…abcd', 'must be 64 hex'), ('', 'must be 64 hex'),
+    ('FIRST8', 'both ends'), ('LAST4', 'both ends')])
+def test_note4_runs_sha_short_form_must_match_both_ends(tmp_path, given, match):
+    out, queries, _, _ = world(tmp_path)
+    freeze(tmp_path, out)
+    sha = bytes_sha(out / 'runs.jsonl')
+    flip = lambda c: '0' if c != '0' else '1'
+    given = {'FIRST8': f'{flip(sha[0])}{sha[1:8]}…{sha[-4:]}', 'LAST4': f'{sha[:8]}…{sha[-4:-1]}{flip(sha[-1])}'}.get(
+        given, given)
+    with pytest.raises(ValueError, match=match):
+        analyse(tmp_path, out, queries, expect_runs_sha=given)
+
+
+@pytest.mark.parametrize('argv', [['s8-analyze'], ['s8-analyze', '--corpus-size', '80'],
+                                  ['s8-analyze', '--expect-runs-sha', '0' * 64]])
+def test_note4_cli_requires_corpus_size_and_runs_sha(argv):
+    with pytest.raises(SystemExit):
+        m.build_parser().parse_args(argv)
+    assert m.build_parser().parse_args(['s8-analyze', '--corpus-size', '80', '--expect-runs-sha', 'x']).corpus_size == 80
+
+
+def test_note4_run_analysis_has_no_default_for_the_required_inputs():
+    import inspect
+    params = inspect.signature(m.run_analysis).parameters
+    assert params['corpus_size'].default is inspect.Parameter.empty
+    assert params['expect_runs_sha'].default is inspect.Parameter.empty
