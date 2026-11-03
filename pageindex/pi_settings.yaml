@@ -1,6 +1,12 @@
 # PageIndex rebuild settings (read by pi_common.load_settings)
 store_dir: ./store
 index_mode: standard            # standard = LLM builds titles/structure (matches report); flash = layout-based
+                                # PageIndex's own default is now flash (R22 P1): always set this.
+# Index/summary models are ALWAYS explicit (R22 P2; PageIndex defaults gpt-6-* 404 on Azure).
+# Default route: anthropic/<model> (needs ANTHROPIC_API_KEY).
+# Opt-in Azure v1 route (ADR 0029 draft): openai/<deployment>, e.g. openai/gpt-5-mini, with
+#   litellm_max_tokens: null and AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY in .env.
+#   Deployment names must be exactly one of: gpt-5-mini, gpt-4.1-mini, o4-mini (R22 D2).
 index_model: anthropic/claude-sonnet-5-5      # LiteLLM name -> needs ANTHROPIC_API_KEY
 summary_model: anthropic/claude-sonnet-5-5
 agent_model: claude-sonnet-5-5                # Anthropic SDK name
@@ -13,9 +19,16 @@ if_add_node_id: "yes"
 if_add_node_summary: "yes"
 if_add_doc_description: "yes"
 if_add_node_text: "no"
-litellm_max_tokens: 16000
+allow_unpinned_pageindex: false # true (or --allow-unpinned-pageindex) = build with a non-pinned PageIndex commit
+litellm_max_tokens: 16000       # anthropic/ route only; must be null on the Azure route (R22 P4)
 
 agent_max_turns: 12
 max_pages_per_fetch: 12
 max_pages_total: 40
 overview_char_budget: 24000
+
+# Ragas judge (eval/eval_pageindex.py; R22 R2/R3/D2). Azure v1 deployment name, REQUIRED for a
+# Ragas run (here or --judge); no default. One of: gpt-5-mini, gpt-4.1-mini, o4-mini.
+judge_model: null
+judge_repeats: 3
+embedding_model: text-embedding-3-small

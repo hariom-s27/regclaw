@@ -10,13 +10,14 @@ import hashlib
 import json
 import os
 import re
+import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 load_dotenv()
 ROOT = Path(__file__).resolve().parent
@@ -44,12 +45,32 @@ class Settings(BaseModel):
     if_add_doc_description: str = "yes"   # repo default is "no"; we want it for the manifest
     if_add_node_text: str = "no"          # keep text in the PDF, not in tree.json
     # LiteLLM sends no max_tokens from PageIndex; give Claude room for long TOC JSON.
-    litellm_max_tokens: int = 16000
+    # anthropic/ route only. The opt-in Azure route (openai/<deployment>) must NOT cap
+    # (R22 P4: hidden reasoning tokens -> finish_reason=length loops), so set null there.
+    litellm_max_tokens: Optional[int] = 16000
+    # Ragas judge (ADR 0029 draft, R22 R2/R3/D2). REQUIRED for a Ragas run; no default.
+    judge_model: Optional[str] = None
+    judge_repeats: int = 3
+    embedding_model: str = "text-embedding-3-small"
+    # R22 D1: ingest refuses a PageIndex commit other than PAGEINDEX_PIN_SHA unless this is
+    # true (or --allow-unpinned-pageindex); the manifest then records "unpinned: <commit>".
+    allow_unpinned_pageindex: bool = False
     # agent budgets
     agent_max_turns: int = 12
     max_pages_per_fetch: int = 12
     max_pages_total: int = 40
     overview_char_budget: int = 24000
+
+    @field_validator("index_mode")
+    @classmethod
+    def _known_mode(cls, v: str) -> str:
+        # R22 P1: PageIndex's own default is now "flash"; we never rely on that default.
+        if v not in INDEX_MODES:
+            raise ValueError(f"index_mode must be one of {INDEX_MODES}, got {v!r}")
+        return v
+
+
+INDEX_MODES = ("standard", "flash")   # standard = primary (ADR 0006); flash = labelled comparison
 
 
 def load_settings(path: Path = ROOT / "pi_settings.yaml") -> Settings:
@@ -58,6 +79,104 @@ def load_settings(path: Path = ROOT / "pi_settings.yaml") -> Settings:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     return Settings(**data)
+
+
+# --------------------------------------------------------------------------- model routes
+# PageIndex commit pinned in requirements_partII.txt (R22 D1). pyproject says 0.2.10,
+# which is not a tag, so the commit is the identity we record.
+PAGEINDEX_PIN_SHA = "50a71b686d0397df7cb193c33806eb035574b890"
+
+# R22 D2: LiteLLM and Ragas both detect reasoning models BY NAME, so an Azure deployment
+# must be named exactly like the model it serves. Anything else is refused at startup.
+KNOWN_AZURE_DEPLOYMENTS = ("gpt-5-mini", "gpt-4.1-mini", "o4-mini", "text-embedding-3-small")
+ANTHROPIC_ROUTE, AZURE_ROUTE = "anthropic/", "openai/"
+
+
+def check_deployment_names(names: dict[str, str]) -> None:
+    """Refuse any Azure deployment name outside KNOWN_AZURE_DEPLOYMENTS (role -> name)."""
+    bad = {role: n for role, n in names.items() if n not in KNOWN_AZURE_DEPLOYMENTS}
+    if bad:
+        raise ValueError(f"Unknown Azure deployment name(s) {bad}; allowed exactly: "
+                         f"{list(KNOWN_AZURE_DEPLOYMENTS)}. Reasoning detection is by name, "
+                         "so the deployment must be named after its model.")
+
+
+def is_reasoning_model(name: str) -> bool:
+    """gpt-5* and o<digit>* are reasoning models (R22 R3)."""
+    return bool(re.match(r"(gpt-5|o\d)", name or ""))
+
+
+def model_route(model: str) -> str:
+    """'anthropic' (default route) or 'azure_openai' (opt-in, LiteLLM openai/<deployment>)."""
+    if model.startswith(ANTHROPIC_ROUTE):
+        return "anthropic"
+    if model.startswith(AZURE_ROUTE):
+        return "azure_openai"
+    raise ValueError(f"PageIndex model {model!r} must start with {ANTHROPIC_ROUTE!r} (default) "
+                     f"or {AZURE_ROUTE!r} (opt-in Azure v1 route, ADR 0029 draft); bare names "
+                     "would go to PageIndex's own default provider.")
+
+
+def azure_v1_base_url(endpoint: str) -> str:
+    """https://<resource>.openai.azure.com -> https://<resource>.openai.azure.com/openai/v1/"""
+    return endpoint.rstrip("/") + "/openai/v1/"
+
+
+def azure_credentials() -> tuple[str, str]:
+    """Endpoint + key from the environment at call time only (never hard-coded or logged)."""
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+    key = os.environ.get("AZURE_OPENAI_API_KEY")
+    if not endpoint or not key:
+        raise RuntimeError("Azure route selected: set AZURE_OPENAI_ENDPOINT and "
+                           "AZURE_OPENAI_API_KEY in .env (see .env.example).")
+    if "OPENAI_BASE_URL" in os.environ:
+        print("[warn] OPENAI_BASE_URL is set: it redirects every OpenAI call in this process. "
+              "The Azure route passes api_base explicitly; unset OPENAI_BASE_URL.", file=sys.stderr)
+    return endpoint, key
+
+
+def require_index_models(s: Settings) -> None:
+    """R22 P2: index and summary models must be set explicitly (PageIndex's own defaults
+    gpt-6-luna / gpt-6-sol 404 on Azure and are not retried)."""
+    for name in ("index_model", "summary_model"):
+        if not (getattr(s, name) or "").strip():
+            raise ValueError(f"{name} must be set explicitly in pi_settings.yaml")
+
+
+def index_backend(s: Settings) -> dict:
+    """Per-call LiteLLM kwargs for PageIndex's indexing lane (pageindex.utils._llm_backend).
+
+    The dict applies to EVERY call in the lane, so index and summary models must share a
+    route (otherwise an Azure key would be sent to Anthropic, or vice versa).
+    The returned dict may hold a secret: never log it or write it to a manifest.
+    """
+    require_index_models(s)
+    routes = {model_route(s.index_model), model_route(s.summary_model)}
+    if len(routes) != 1:
+        raise ValueError("index_model and summary_model must use the same route "
+                         f"(got {s.index_model!r} and {s.summary_model!r})")
+    if routes == {"anthropic"}:
+        return {} if s.litellm_max_tokens is None else {"max_tokens": s.litellm_max_tokens}
+    if s.litellm_max_tokens is not None:
+        raise ValueError("Azure route: set litellm_max_tokens: null. R22 P4: no max_tokens cap on "
+                         "PageIndex calls (hidden reasoning tokens -> finish_reason=length loops).")
+    check_deployment_names({"index_model": s.index_model[len(AZURE_ROUTE):],
+                            "summary_model": s.summary_model[len(AZURE_ROUTE):]})
+    endpoint, key = azure_credentials()
+    return {"api_base": azure_v1_base_url(endpoint), "api_key": key}
+
+
+def installed_pageindex_commit() -> str:
+    """Commit of the installed pageindex (pip's direct_url.json), or 'unknown (...)'."""
+    from importlib import metadata
+    try:
+        raw = metadata.distribution("pageindex").read_text("direct_url.json")
+    except metadata.PackageNotFoundError:
+        return "unknown (not installed)"
+    try:
+        return json.loads(raw or "{}").get("vcs_info", {}).get("commit_id") or "unknown (not a VCS install)"
+    except ValueError:
+        return "unknown (unreadable direct_url.json)"
 
 
 # --------------------------------------------------------------------------- manifest
@@ -77,6 +196,10 @@ class DocRecord(BaseModel):
     index_model: str
     pageindex_version: str
     built_at: datetime
+    # Added for R22 (defaults keep older manifests loadable). Never holds a secret.
+    summary_model: str = ""
+    index_route: str = ""               # "anthropic" | "azure_openai"
+    pageindex_commit: str = "unknown"
 
 
 class Manifest(BaseModel):

@@ -9,8 +9,9 @@ Run from the rebuild/pageindex folder (so pi_settings.yaml and the store/ paths 
         --system pageindex_adapter:run --runs 3
 
 Note: pi_agent returns fetched_pages SORTED, not in fetch order. Page-level hit/recall/precision
-are set-based so they are unaffected; Ragas context_precision is order-sensitive and will see
-page order, not the order the agent read them in. State this if you report context_precision.
+are set-based so they are unaffected; the reported Ragas metrics (faithfulness, answer relevancy,
+answer correctness) do not depend on context order. A failed agent item (R22 R7) arrives with
+status "failed:<reason>" and answer "" and is scored as a system outcome by eval_pageindex.py.
 """
 from __future__ import annotations
 
@@ -35,4 +36,8 @@ def run(question: str) -> dict:
         "timings": {"total": r["latency_s"]},
         "usage": r["usage"],
         "repaired": r["repaired"],
+        # R22 R7: "ok" or "failed:<max_tokens|empty_answer|max_turns>" (a system outcome)
+        "status": r.get("status", "ok"),
+        "cited_not_fetched": r.get("cited_not_fetched", []),
+        "retries": r.get("retries", 0),
     }

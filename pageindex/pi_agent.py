@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 import time
@@ -23,6 +24,8 @@ from observability.tracing import stage, traced, record_response
 
 from pi_common import (Settings, fetch_pages, load_manifest, load_settings, load_tree,
                        node_map, outline, parse_page_spec, resolve_edition, subtree_span)
+
+log = logging.getLogger("pageindex.agent")   # stderr via logging; never prints the question
 
 CITE_RE = re.compile(r"\[(?:p|pp)\.\s*([0-9][0-9,\s\-–]*)\]")
 
@@ -81,6 +84,10 @@ class Session:
     s: Settings
     fetched: dict[int, str] = field(default_factory=dict)   # page -> text
     tool_calls: list[dict] = field(default_factory=list)
+    # R22 R7: set by run_agent when the navigator fails ("max_tokens", "empty_answer",
+    # "max_turns"); None means the last run_agent call produced an answer.
+    failure: str | None = None
+    retries: int = 0
 
 
 @traced('pageindex.tool', as_type='tool')
@@ -130,7 +137,15 @@ def _text_of(resp) -> str:
 
 def run_agent(client: anthropic.Anthropic, sess: Session, question: str,
               extra_user_msg: str | None = None, prior: list | None = None) -> tuple[str, list, dict]:
+    """Navigator loop. R22 R7 (mapped to Anthropic stop reasons, ADR 0029 draft):
+    - stop_reason "max_tokens" (Anthropic's finish_reason == "length") or an empty final
+      text is a failure: logged, retried once per call, then sess.failure is set;
+    - using all agent_max_turns turns without a final answer is a failure
+      (sess.failure = "max_turns"), not a forced answer that would be scored as wrong.
+    On failure the returned answer is "" and the caller must not score it as an answer.
+    """
     s = sess.s
+    sess.failure = None
     system = SYSTEM_TMPL.format(
         title=sess.rec.title, version=sess.rec.version, pages=sess.rec.page_count,
         description=sess.rec.doc_description or "(none)", max_total=s.max_pages_total,
@@ -139,19 +154,32 @@ def run_agent(client: anthropic.Anthropic, sess: Session, question: str,
     if extra_user_msg:
         messages.append({"role": "user", "content": extra_user_msg})
     usage = {"input_tokens": 0, "output_tokens": 0, "turns": 0}
+    retry_left = 1
 
-    for turn in range(s.agent_max_turns + 1):
-        last = turn == s.agent_max_turns
+    turn = 0
+    while turn < s.agent_max_turns:
         with stage('pageindex.navigate', as_type='generation', model=s.agent_model) as observation:
             resp = client.messages.create(
                 model=s.agent_model, max_tokens=4096, system=system, tools=TOOLS,
-                tool_choice={"type": "none"} if last else {"type": "auto"},
-                messages=messages)
+                tool_choice={"type": "auto"}, messages=messages)
             record_response(observation, resp)
         usage["input_tokens"] += resp.usage.input_tokens
         usage["output_tokens"] += resp.usage.output_tokens
         usage["turns"] += 1
+        bad = ("max_tokens" if resp.stop_reason == "max_tokens"
+               else "empty_answer" if resp.stop_reason != "tool_use" and not _text_of(resp)
+               else None)
+        if bad:
+            if retry_left:   # same request again; the truncated/empty reply is not kept
+                retry_left -= 1
+                sess.retries += 1
+                log.warning("navigator %s (stop_reason=%s); retrying once", bad, resp.stop_reason)
+                continue
+            log.error("navigator %s after one retry; item fails", bad)
+            sess.failure = bad
+            return "", messages, usage
         messages.append({"role": "assistant", "content": resp.content})
+        turn += 1
         if resp.stop_reason != "tool_use":
             return _text_of(resp), messages, usage
         results = []
@@ -162,7 +190,9 @@ def run_agent(client: anthropic.Anthropic, sess: Session, question: str,
                 results.append({"type": "tool_result", "tool_use_id": b.id,
                                 "content": out, "is_error": err})
         messages.append({"role": "user", "content": results})
-    return _text_of(resp), messages, usage
+    log.error("navigator hit agent_max_turns=%d without a final answer; item fails", s.agent_max_turns)
+    sess.failure = "max_turns"
+    return "", messages, usage
 
 
 # ----------------------------------------------------------------------------- verification
@@ -276,6 +306,8 @@ def answer_question(question: str, family: str, version: str | None = None,
     client = anthropic.Anthropic()
 
     answer, history, usage = run_agent(client, sess, question)
+    if sess.failure:
+        return _failed(question, rec, sess, usage, t0, repaired=False)
     verdicts = verify(client, s, answer, sess.fetched)
     repaired = False
 
@@ -289,6 +321,8 @@ def answer_question(question: str, family: str, version: str | None = None,
         answer, history, u2 = run_agent(client, sess, question, extra_user_msg=feedback, prior=history)
         for k in usage:
             usage[k] += u2[k]
+        if sess.failure:   # the repair round is an agent call too: same failure rule (R7)
+            return _failed(question, rec, sess, usage, t0, repaired=True)
         verdicts = verify(client, s, answer, sess.fetched)
         bad = [v for v in verdicts if v["verdict"] in FAIL]
         if bad:  # still failing: drop those sentences rather than ship unsupported claims
@@ -297,13 +331,31 @@ def answer_question(question: str, family: str, version: str | None = None,
                 f"\n\n[Note: {len(bad)} statement(s) removed because they could not be "
                 "verified against the cited pages.]")
 
-    cited = sorted({p for v in verdicts if v["verdict"] not in FAIL for p in v["pages"]})
+    # R7: every cited page must be in the fetched set. verify() already marks such claims
+    # unsupported; record them and never let one reach cited_pages.
+    cited_not_fetched = sorted({p for v in verdicts for p in v["pages"] if p not in sess.fetched})
+    cited = sorted({p for v in verdicts if v["verdict"] not in FAIL for p in v["pages"]
+                    if p in sess.fetched})
     return {
-        "question": question, "doc_id": rec.doc_id, "answer": answer,
-        "cited_pages": cited, "fetched_pages": sorted(sess.fetched),
+        "question": question, "doc_id": rec.doc_id, "answer": answer, "status": "ok",
+        "cited_pages": cited, "cited_not_fetched": cited_not_fetched,
+        "fetched_pages": sorted(sess.fetched),
         "verdicts": verdicts, "repaired": repaired, "tool_calls": sess.tool_calls,
-        "usage": usage, "latency_s": round(time.perf_counter() - t0, 2),
+        "usage": usage, "retries": sess.retries, "latency_s": round(time.perf_counter() - t0, 2),
         # keep page texts for Ragas (R7): retrieved_contexts
+        "contexts": [sess.fetched[p] for p in sorted(sess.fetched)],
+    }
+
+
+def _failed(question: str, rec, sess: Session, usage: dict, t0: float, repaired: bool) -> dict:
+    """A navigator failure is a SYSTEM OUTCOME (R7): no answer, nothing cited; the
+    evaluation keeps the item and scores it as a miss (eval_pageindex.py)."""
+    return {
+        "question": question, "doc_id": rec.doc_id, "answer": "",
+        "status": f"failed:{sess.failure}",
+        "cited_pages": [], "cited_not_fetched": [], "fetched_pages": sorted(sess.fetched),
+        "verdicts": [], "repaired": repaired, "tool_calls": sess.tool_calls,
+        "usage": usage, "retries": sess.retries, "latency_s": round(time.perf_counter() - t0, 2),
         "contexts": [sess.fetched[p] for p in sorted(sess.fetched)],
     }
 
@@ -320,6 +372,6 @@ if __name__ == "__main__":
     if a.json:
         print(json.dumps({k: v for k, v in r.items() if k != "contexts"}, indent=2, default=str))
     else:
-        print(r["answer"])
-        print(f"\n[{r['doc_id']}] fetched={r['fetched_pages']} cited={r['cited_pages']} "
+        print(r["answer"] or f"[{r['status']}] no answer")
+        print(f"\n[{r['doc_id']}] status={r['status']} fetched={r['fetched_pages']} cited={r['cited_pages']} "
               f"repaired={r['repaired']} latency={r['latency_s']}s", file=sys.stderr)
