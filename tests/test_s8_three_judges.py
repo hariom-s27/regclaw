@@ -364,7 +364,7 @@ def test_stage1_checks_the_s8_sheet_record(three):
     (tmp / m.SHEET_META).write_text(json.dumps(dict(items=60)), encoding='utf-8')
     run3(tmp, rows, grades)
     agr = json.loads((tmp / 'labels' / 'agreement_abc.json').read_text(encoding='utf-8'))
-    assert agr['inputs']['sheet_meta_sha256'] == m.bytes_sha(tmp / m.SHEET_META)
+    assert 'sheet_meta_sha256' not in agr['inputs']  # stage-1 bytes unchanged; recorded in qrels_meta (stage 3)
 
 
 def _change_one_clause_text(tmp, rows):
@@ -419,6 +419,7 @@ def test_stage3_records_the_checked_sheet_sha_in_qrels_meta(three):
     agr = json.loads((tmp / 'labels' / 'agreement_abc.json').read_text(encoding='utf-8'))
     assert meta['sheet_check']['sheet_sha256'] == agr['inputs']['sheet_sha256'] == m.bytes_sha(tmp / 'sheet.csv')
     assert meta['sheet_check']['items'] == 60 and meta['sheet_check']['stage1_record'] == 'matches agreement_abc.json'
+    assert meta['sheet_check']['sheet_meta_sha256'] == m.bytes_sha(tmp / m.SHEET_META)
 
 
 @pytest.mark.parametrize('item,change,match', [

@@ -587,7 +587,8 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
     accepted = {i: d['consensus'] for i, d in decisions.items() if d['consensus'] is not None}
     threshold_disputes = [r['item_id'] for r in sheet_rows if decisions[r['item_id']]['consensus'] is None]
     two_rule = [i for i, d in decisions.items() if mode == 'three_judge' and d['rule'] == 'two_judge']
-    inputs = dict(sheet_sha256=sheet_sha, sheet_meta_sha256=sheet_meta_sha, **{f'{j.lower()}_files': {Path(p).name: bytes_sha(p) for p in f}
+    # stage-1/2 files keep the 22 Oct bytes for the same inputs: new fields go only into stage-3 files
+    inputs = dict(sheet_sha256=sheet_sha, **{f'{j.lower()}_files': {Path(p).name: bytes_sha(p) for p in f}
                                                      for j, f in files.items()})
     common = dict(mode=mode, judges_in_force=list(in_force), judges_read=list(files), fallback_reason=fallback_reason,
                   accepted=len(accepted), threshold_disputes=len(threshold_disputes),
@@ -703,6 +704,7 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
                 audit_disagrees_two_judge_rule=audit_two_rule,
                 override_flipped_side=flipped,
                 sheet_check=dict(sheet_sha256=sheet_sha, items=len(sheet_rows), stage1_record=sheet_record,
+                                 sheet_meta_sha256=sheet_meta_sha,
                                  rule='sheet sha = agreement inputs.sheet_sha256; items = 1,482 = sheet_meta.json '
                                       '(Addendum 2 note 4 section 5)'),
                 referee_sha256=bytes_sha(referee_file), audit_labels_sha256=freeze['labels_sha256'], **inputs)
