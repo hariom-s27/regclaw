@@ -35,4 +35,8 @@ def run(question: str) -> dict:
         "timings": {"total": r["latency_s"]},
         "usage": r["usage"],
         "repaired": r["repaired"],
+        # R22 R7: "ok" or "failed:<max_tokens|empty_answer|max_turns>" (a system outcome)
+        "status": r.get("status", "ok"),
+        "cited_not_fetched": r.get("cited_not_fetched", []),
+        "retries": r.get("retries", 0),
     }
