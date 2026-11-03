@@ -55,7 +55,9 @@ draft for review). B is explicitly deferred to a separate decision.
   runs only when `index_mode: flash` is set (labelled comparison, ADR 0006). Index and
   summary models are always passed explicitly. The manifest records mode, both models,
   the route and the installed PageIndex commit (pinned at
-  `50a71b686d0397df7cb193c33806eb035574b890`).
+  `50a71b686d0397df7cb193c33806eb035574b890`). An unpinned PageIndex commit is refused
+  unless `--allow-unpinned-pageindex` (or `allow_unpinned_pageindex: true`) is given, and
+  the manifest then records it as `unpinned: <commit>`.
 - **Judge.** `AsyncOpenAI(base_url=<Azure v1>, api_key=env)` →
   `llm_factory(<judge deployment>, client=...)` with the default `openai` provider
   (which maps `max_tokens` to `max_completion_tokens` for reasoning models; not
