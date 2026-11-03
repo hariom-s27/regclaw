@@ -5,8 +5,10 @@ Commands (via tasks.py):
                      retrieval_eval/s8_qrels_manifest.json (committed) with the sha256 of the audit freeze, the
                      judge freezes read, the agreement file of the merge mode, audit_check.json, qrels_meta.json,
                      qrels.tsv, the guideline in force and s8_partD_freeze.json, plus the merge mode.
-  s8-analyze         locked until the qrels freeze: refuses unless the manifest exists, every sha matches and
-                     audit_check.json says PASS. Then reads runs.jsonl, generations.jsonl, noob.jsonl and the qrels
+  s8-analyze         locked until the qrels freeze: refuses unless the manifest exists, holds the full key set
+                     (Addendum 4 section 12 + s8_notes_freeze.json + one judge freeze per judge read), every sha
+                     matches and audit_check.json says PASS. --corpus-size and --expect-runs-sha are required
+                     (Addendum 2 Note 4 section 5); the runs sha may be the full 64 hex or <first 8>…<last 4>. Then reads runs.jsonl, generations.jsonl, noob.jsonl and the qrels
                      and writes JSON + Markdown tables to <run dir>/analysis/ (write-once: if that folder already
                      holds files, a new timestamped subfolder is used).
 
@@ -22,6 +24,7 @@ from itertools import combinations
 import json
 import logging
 import math
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -42,6 +45,12 @@ BOOTSTRAP_SEED = 20261019
 ALPHA = 0.05
 MANIFEST = ROOT / 'retrieval_eval/s8_qrels_manifest.json'
 PARTD_FREEZE = 'retrieval_eval/s8_partD_freeze.json'
+NOTES_FREEZE = 'retrieval_eval/s8_notes_freeze.json'  # Addendum 2 Note 4 section 6
+MANIFEST_KEYS = ('audit_freeze', 'agreement', 'audit_check', 'qrels_meta', 'qrels', 'guideline', 'partD_freeze',
+                 'notes_freeze')  # Addendum 4 section 12 + Note 4 section 6; plus judge_<X>_freeze per judge read
+LIMIT_STATUSES = ('ok', 'system_failure', 'replay_miss')
+SHA_FULL = re.compile(r'^[0-9a-f]{64}$')
+SHA_SHORT = re.compile(r'^([0-9a-f]{8})(?:\u2026|\.\.\.)([0-9a-f]{4})$')  # the logged <first 8>…<last 4>
 SEALED_ROOT = ROOT / 'data' / 'runs'  # the test-only bypass never runs on a real run folder
 K = 10
 REPORT_QIDS = ('R1', 'R2', 'R3')
@@ -310,6 +319,9 @@ def build_records(queries, runs, gen0, noob0, grades_by_qid, corpus_size):
             grades = grades_by_qid.get(qid, {})
             record = dict(qid=qid, status=run['status'], reason=run.get('reason'))
             if run['status'] == 'n/a':
+                if system != NOOB:  # Addendum 2 Note 4 section 5
+                    raise RuntimeError(f'STOP: status n/a on the scored run {system}/{variant}/{qid}: only v1-noob '
+                                       'may be n/a (Addendum 2 Note 4 section 5; a dated note decides this case)')
                 record.update(metrics={m: None for m in METRICS}, candidate_count=None, top10_grades=None,
                               highest_grade=None)
                 records[(system, variant)][qid] = record
@@ -478,6 +490,9 @@ def limit_experiment(queries, runs, records, gen0, grades_by_qid, qsets):
     index, misses = defaultdict(list), Counter()
     for run in runs:
         if run['system'] == 'limit':
+            if run['status'] not in LIMIT_STATUSES:  # Addendum 2 Note 4 section 5: n/a only for v1-noob
+                raise RuntimeError(f"STOP: status {run['status']!r} on LIMIT run {run['qid']}/{run['limit']}/"
+                                   f"{run.get('repeat')}/k={run['top_k']} (Addendum 2 Note 4 section 5)")
             index[(run['qid'], run['limit'], run['top_k'])].append(run)
             misses[run['limit']] += run['status'] == 'replay_miss'
     per_limit = {}
@@ -678,13 +693,18 @@ def write_qrels_manifest(out=None, manifest_path=None, repo=ROOT, now=None):
     if agr.get('mode') != mode or check.get('mode') != mode:
         raise ValueError(f'merge mode differs between qrels_meta.json, {agreement} and audit_check.json')
     partd = json.loads((Path(repo) / PARTD_FREEZE).read_text(encoding='utf-8'))
+    notes = json.loads((Path(repo) / NOTES_FREEZE).read_text(encoding='utf-8'))
+    for rel, sha in notes['docs_lf_normalised_sha256'].items():  # the notes in force are the frozen ones
+        if file_sha(Path(repo) / rel) != sha:
+            raise PermissionError(f'{rel} differs from {Path(NOTES_FREEZE).name}: no qrels freeze')
     guideline = f"retrieval_eval/S8_RELEVANCE_GUIDELINE_{partd['guideline_in_force']}.md"
     files = {'audit_freeze': _entry('run', 'audit/audit_freeze.json', out)}
     files.update({f'judge_{j}_freeze': _entry('run', f'labels/judge_{j}_freeze.json', out) for j in agr['judges_read']})
     files.update(agreement=_entry('run', f'labels/{agreement}', out),
                  audit_check=_entry('run', 'labels/audit_check.json', out),
                  qrels_meta=_entry('run', 'labels/qrels_meta.json', out), qrels=_entry('run', 'labels/qrels.tsv', out),
-                 guideline=_entry('repo', guideline, repo), partD_freeze=_entry('repo', PARTD_FREEZE, repo))
+                 guideline=_entry('repo', guideline, repo), partD_freeze=_entry('repo', PARTD_FREEZE, repo),
+                 notes_freeze=_entry('repo', NOTES_FREEZE, repo))
     record = dict(purpose='S8 qrels freeze (Addendum 2 section 4 step 7; Addendum 4 section 12). s8-analyze '
                           'refuses unless every sha below matches.',
                   frozen_at=(now or datetime.now(timezone.utc)).isoformat(timespec='seconds'),
@@ -705,8 +725,12 @@ def gate(out, manifest_path=None, repo=ROOT):
         raise PermissionError(f'{LOCKED} labels/qrels.tsv missing')
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     files = manifest.get('files', {})
-    if 'qrels' not in files or 'audit_check' not in files:
-        raise PermissionError(f'{LOCKED} the manifest does not cover qrels.tsv and audit_check.json')
+    judges_read = manifest.get('judges_read') or []
+    required = set(MANIFEST_KEYS) | {f'judge_{j}_freeze' for j in judges_read}
+    if not judges_read or set(files) != required:  # Addendum 4 section 12 + Addendum 2 Note 4 sections 5-6
+        raise PermissionError(f'{LOCKED} the manifest key set is not the required one (missing: '
+                              f'{sorted(required - set(files))}, unexpected: {sorted(set(files) - required)}, '
+                              f'judges read: {judges_read})')
     for key, entry in sorted(files.items(), key=lambda kv: kv[0] != 'qrels'):  # qrels first
         path = (Path(repo) if entry['base'] == 'repo' else out) / entry['path']
         if not path.is_file():
@@ -984,9 +1008,26 @@ def analyse(queries, runs, generations, noob_rows, qrels_rows, corpus_size, labe
     return sections, qsets
 
 
-def run_analysis(out=None, *, queries=None, clauses_path=None, corpus_size=None, expect_runs_sha=None,
-                 manifest_path=None, repo=ROOT, now=None, _test_skip_gate=False):
-    """Gate, then the analysis; returns (folder, {file: sha256})."""
+def check_runs_sha(expected, actual):
+    """Addendum 2 Note 4 section 5: the full 64-hex sha, or the logged short form <first 8>…<last 4> ('...' also
+    accepted), matched at both ends. Returns how it was given."""
+    given = str(expected or '').strip().lower()
+    if SHA_FULL.match(given):
+        if given != actual:
+            raise ValueError('runs.jsonl sha256 differs from --expect-runs-sha')
+        return 'full'
+    short = SHA_SHORT.match(given)
+    if not short:
+        raise ValueError('--expect-runs-sha must be 64 hex characters or <first 8>…<last 4> (or <first 8>...<last 4>)')
+    if not (actual.startswith(short.group(1)) and actual.endswith(short.group(2))):
+        raise ValueError('runs.jsonl sha256 differs from --expect-runs-sha (short form, both ends)')
+    return 'short'
+
+
+def run_analysis(out=None, *, corpus_size, expect_runs_sha, queries=None, clauses_path=None, manifest_path=None,
+                 repo=ROOT, now=None, _test_skip_gate=False):
+    """Gate, then the analysis; returns (folder, {file: sha256}). corpus_size and expect_runs_sha are required
+    (Addendum 4 section 11; Addendum 2 Note 4 section 5)."""
     out = Path(out or output_dir())
     unlocked = _test_bypass(out) if _test_skip_gate else gate(out, manifest_path, repo)
     if queries is None:
@@ -994,17 +1035,18 @@ def run_analysis(out=None, *, queries=None, clauses_path=None, corpus_size=None,
         queries, _, _ = load_inputs(need_clauses=False)
     clauses_path = Path(clauses_path or CLAUSES)
     n_clauses = len(json.loads(clauses_path.read_text(encoding='utf-8')))
-    if corpus_size is not None and corpus_size != n_clauses:
+    if corpus_size != n_clauses:
         raise ValueError(f'--corpus-size {corpus_size} != {n_clauses} clauses in {clauses_path.name} '
                          '(Addendum 4 section 11)')
     runs_sha = bytes_sha(out / 'runs.jsonl')
-    if expect_runs_sha is not None and expect_runs_sha != runs_sha:
-        raise ValueError('runs.jsonl sha256 differs from --expect-runs-sha')
+    runs_sha_form = check_runs_sha(expect_runs_sha, runs_sha)
     labels = out / 'labels'
     sections, qsets = analyse(queries, read_jsonl(out / 'runs.jsonl'), read_jsonl(out / 'generations.jsonl'),
                               read_jsonl(out / 'noob.jsonl'), qrels_io.read(labels / 'qrels.tsv'), n_clauses,
                               labels, out / 'audit', unlocked['merge_mode'])
-    inputs = dict(unlocked, runs_sha256=runs_sha, generations_sha256=bytes_sha(out / 'generations.jsonl'),
+    inputs = dict(unlocked, runs_sha256=runs_sha, runs_sha_check=dict(given=str(expect_runs_sha).strip(),
+                                                                      form=runs_sha_form, matched=True),
+                  generations_sha256=bytes_sha(out / 'generations.jsonl'),
                   noob_sha256=bytes_sha(out / 'noob.jsonl'), qrels_sha256=bytes_sha(labels / 'qrels.tsv'),
                   clauses_sha256=bytes_sha(clauses_path), corpus_size=n_clauses, queries=len(queries),
                   bootstrap=dict(resamples=BOOTSTRAP_RESAMPLES, seed=BOOTSTRAP_SEED), note=INTERNSHIP_FREE)
@@ -1025,8 +1067,11 @@ def build_parser():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
     analyze = sub.add_parser('s8-analyze', help='Pre-registered S8 analysis (locked until the qrels freeze)')
-    analyze.add_argument('--corpus-size', type=int, help='expected number of clauses in data/clauses.json')
-    analyze.add_argument('--expect-runs-sha', help='expected sha256 of runs.jsonl (from the s8-pool log)')
+    analyze.add_argument('--corpus-size', type=int, required=True,
+                         help='expected number of clauses in data/clauses.json (required)')
+    analyze.add_argument('--expect-runs-sha', required=True,
+                         help='expected sha256 of runs.jsonl from the s8-pool log (required): 64 hex or '
+                              '<first 8>…<last 4>')
     sub.add_parser('s8-qrels-manifest', help='Write-once qrels freeze retrieval_eval/s8_qrels_manifest.json')
     return parser
 

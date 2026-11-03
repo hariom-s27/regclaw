@@ -148,6 +148,8 @@ def build_world(base, spec, *, codex_b=True, b_tweak=None, b_drop=(), b_bad=(), 
             w.grades[iid], w.span[iid] = tuple(g), span
     w.by_id = {r['item_id']: r for r in w.rows}
     write_plain(w.sheet, sheet_csv(w.rows).encode('utf-8'))
+    write_plain(w.sheet.parent / lb.SHEET_META, json.dumps(dict(items=len(w.rows), columns=SHEET_COLUMNS),
+                                                           indent=2).encode('utf-8') + b'\n')  # the s8-sheet record
     for qid in spec:
         write_plain(w.per_query / f's8_sheet_{qid}.csv', sheet_csv([r for r in w.rows if r['qid'] == qid]).encode('utf-8'))
     write_plain(run / 'sheet' / 'item_map.jsonl', jsonl_text(
@@ -209,6 +211,7 @@ def audit_setup(w, n, pick, *, unsure=(), cli_freeze=False):
 
 def merge(w, out=None, **kw):
     kw.setdefault('bootstrap', 200)
+    kw.setdefault('expected_items', len(w.rows))  # a fake sheet (the real one: lb.SHEET_ITEMS = 1,482)
     return lb.run_merge(sheet=w.sheet, a_files=lb.judge_files(w.out['A']), b_files=lb.judge_files(w.out['B']),
                         c_files=lb.judge_files(w.out['C']), out=out or w.labels, **kw)
 
@@ -297,6 +300,7 @@ def w1(tmp_path_factory):
     cap = Cap()
     with sealed_guard(), unique_stamps(), pytest.MonkeyPatch.context() as mp:
         mp.setattr('sys.stdout', buffer)
+        mp.setattr(lb, 'SHEET_ITEMS', sum(map(len, W1_SPEC.values())))  # the CLI uses SHEET_ITEMS (1,482 for real)
         w = build_world(tmp_path_factory.mktemp('w1'), W1_SPEC, b_tweak=w1_b_tweak)
         args = lambda j: ['--judge', j, '--root', str(w.kits[j]), '--per-query', str(w.per_query),
                           '--labels-dir', str(w.labels)]
@@ -468,6 +472,7 @@ def test_case8_judge_file_changed_after_freeze_is_refused_by_name(tmp_path, w1):
     target.write_bytes(target.read_bytes().replace(b'RATIONALE-B', b'RATIONALE-b', 1))  # one byte, as an editor would
     with pytest.raises(PermissionError, match=r'judge B: labels_s8_sheet_Q2.csv differs from judge_B_freeze.json'):
         lb.run_merge(sheet=w1.sheet, a_files=lb.judge_files(w1.out['A']), b_files=lb.judge_files(b_copy),
+                     expected_items=len(w1.rows),
                      c_files=lb.judge_files(w1.out['C']), out=tmp_path / 'labels', freeze_dir=w1.labels, bootstrap=50)
     assert not (tmp_path / 'labels').exists()
 
@@ -512,9 +517,14 @@ def test_case10_referee_then_qrels(w1):
                                       dispute_unsure_lower=0, auditor_disagrees_kept=1, auditor_override_evidence=1)
     assert meta['excluded_by_judge'] == {'A': 0, 'B': 0, 'C': 0} and meta['referee_items'] == 5
     final = expected_w1(w1)
-    for j, n in zip('ABC', range(3)):  # per-judge correctness, derived on the 5 referee items
-        right = sum((w1.grades[i][n] >= 2) == (final[i] >= 2) for i in w1.decisions)
-        assert meta['judge_right'][j] == dict(right=right, judged=5)
+    decided = (SPLIT_REF, SPLIT_GAP, w1.d_over)  # note 4 section 3: dispute_referee + auditor_override_evidence
+    for j, n in zip('ABC', range(3)):  # per-judge correctness, derived on the items the referee decided
+        right = sum((w1.grades[i][n] >= 2) == (final[i] >= 2) for i in decided)
+        assert meta['judge_right'][j] == dict(right=right, judged=3)
+        kept = meta['judge_right_by_category']['auditor_disagrees_kept'][j]
+        assert kept == dict(right=int((w1.grades[w1.d_keep][n] >= 2) == (final[w1.d_keep] >= 2)), judged=1)
+    with_majority = sum((sorted(w1.grades[i])[1] >= 2) == (final[i] >= 2) for i in (SPLIT_REF, SPLIT_GAP))
+    assert (meta['referee_with_majority'], meta['referee_against_majority']) == (with_majority, 2 - with_majority)
     labels = (w1.labels / 'labels_referee.csv').read_bytes()
     assert labels.startswith(b'\xef\xbb\xbf') and labels.count(b'\r\n') == 6  # header + 5 rows, resumable file
 
@@ -574,9 +584,13 @@ def test_case11_manifest_analysis_gate_and_lock(tmp_path, monkeypatch):
     record = read_json(manifest)
     assert record['merge_mode'] == 'three_judge' and set(record['files']) >= {
         'qrels', 'qrels_meta', 'audit_check', 'agreement', 'audit_freeze', 'judge_A_freeze', 'judge_B_freeze',
-        'judge_C_freeze', 'guideline', 'partD_freeze'}
+        'judge_C_freeze', 'guideline', 'partD_freeze', 'notes_freeze'}
+    runs_sha = bytes_sha(w.run / 'runs.jsonl')
+    required = dict(corpus_size=len(read_json(tmp_path / 'w2src' / 'clauses.json')),
+                    expect_runs_sha=f'{runs_sha[:8]}\u2026{runs_sha[-4:]}')  # the logged short form (Note 4 s5)
     folder, shas = an.run_analysis(w.run, queries=queries, clauses_path=tmp_path / 'w2src' / 'clauses.json',
-                                   manifest_path=manifest, now=NOW)
+                                   manifest_path=manifest, now=NOW, **required)
+    assert read_json(folder / 'inputs.json')['runs_sha256'] == runs_sha  # the full sha is recorded
     assert folder == w.run / 'analysis' and read_json(folder / 'inputs.json')['gate'] == 'verified'
     assert read_json(folder / 'agreement.json')['agreement']['excluded_by_judge'] == {'A': 0, 'B': 0, 'C': 0}
     qrels = w.labels / 'qrels.tsv'
@@ -584,14 +598,14 @@ def test_case11_manifest_analysis_gate_and_lock(tmp_path, monkeypatch):
     qrels.write_bytes(original[:-2] + (b'0' if original[-2:-1] != b'0' else b'1') + original[-1:])
     with pytest.raises(PermissionError) as e:
         an.run_analysis(w.run, queries=queries, clauses_path=tmp_path / 'w2src' / 'clauses.json',
-                        manifest_path=manifest, now=NOW + timedelta(hours=1))
+                        manifest_path=manifest, now=NOW + timedelta(hours=1), **required)
     assert str(e.value).startswith('Part E is locked until the qrels freeze.') and 'qrels.tsv differs' in str(e.value)
     # case 12: the manifest is write-once; a re-run of the analysis writes a new folder, never over the old one
     with pytest.raises(FileExistsError, match='already frozen'):
         an.main(['s8-qrels-manifest'])
     qrels.write_bytes(original)
     again, shas2 = an.run_analysis(w.run, queries=queries, clauses_path=tmp_path / 'w2src' / 'clauses.json',
-                                   manifest_path=manifest, now=NOW + timedelta(hours=2))
+                                   manifest_path=manifest, now=NOW + timedelta(hours=2), **required)
     assert again == w.run / 'analysis' / 'run_20261023T110000Z'
     assert {n: bytes_sha(folder / n) for n in shas} == shas
 
@@ -673,8 +687,10 @@ def test_case13_14_exclusions_and_primary_kappa(tmp_path, capsys):
     merge(w, **audit_kw(w, w.labels / 'labels_referee.csv'))
     meta = read_json(w.labels / 'qrels_meta.json')
     assert meta['excluded_by_judge'] == {'A': 0, 'B': 2, 'C': 0} and meta['two_judge_rule_items_missing_row'] == 2
-    assert meta['judge_right'] == {'A': dict(right=1, judged=1), 'B': dict(right=0, judged=0),
-                                   'C': dict(right=1, judged=1)}  # B skipped on its excluded item
+    assert meta['judge_right'] == {j: dict(right=0, judged=0) for j in 'ABC'}  # kept: not a referee decision
+    assert meta['judge_right_by_category']['auditor_disagrees_kept'] == {
+        'A': dict(right=1, judged=1), 'B': dict(right=0, judged=0), 'C': dict(right=1, judged=1)}  # B excluded
+    assert meta['audit_disagrees_two_judge_rule'] == 1  # note 4 section 3: counted separately
     got = {r['clause_id']: (r['grade'], r['judge']) for r in qrels_io.read(w.labels / 'qrels.tsv')}
     for iid in (x_missing, x_invalid):
         assert got[w.by_id[iid]['clause_id']] == (w.grades[iid][0], 'AC_min')

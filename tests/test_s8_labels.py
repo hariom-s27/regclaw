@@ -21,7 +21,14 @@ def make_sheet(path, per_qid):
                 clause_id=f'doc:{qid}.{i}', title=f't{i}', text=f'text {qid} {i}',
                 common_rules='RULES' if i == 0 else ''))
     Path(path).write_text(sheet_csv(rows), encoding='utf-8', newline='')
+    write_sheet_meta(path, len(rows))
     return rows
+
+
+def write_sheet_meta(sheet_path, items):
+    """The s8-sheet record next to the sheet (s8_runs.run_sheet writes sheet/sheet_meta.json)."""
+    (Path(sheet_path).parent / m.SHEET_META).write_text(json.dumps(dict(items=items), indent=2) + '\n',
+                                                        encoding='utf-8')
 
 
 def label(item_id, grade, unsure='no', **kw):
@@ -165,6 +172,7 @@ def run(tmp, rows, ga, gb, **kw):
     """Two-judge protocol (note 3 section 6 fallback); three-judge runs are in test_s8_three_judges."""
     kw.setdefault('fallback_reason', 'TEST two-judge')
     kw.setdefault('_test_skip_judge_freeze', True)  # judge freezes: tests/test_s8_judge_check.py
+    kw.setdefault('expected_items', len(rows))  # a fake sheet (the real one: m.SHEET_ITEMS = 1,482)
     return m.run_merge(sheet=tmp / 'sheet.csv', a_files=write_judge(tmp / 'A', rows, ga),
                        b_files=write_judge(tmp / 'B', rows, gb), out=tmp / 'labels', bootstrap=300, **kw)
 

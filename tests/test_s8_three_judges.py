@@ -120,6 +120,7 @@ def files(tmp, rows, grades, judges='ABC'):
 
 def run3(tmp, rows, grades, judges='ABC', **kw):
     kw.setdefault('_test_skip_judge_freeze', True)  # judge freezes: tests/test_s8_judge_check.py
+    kw.setdefault('expected_items', len(rows))  # a fake sheet (the real one: m.SHEET_ITEMS = 1,482)
     return m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=300, **files(tmp, rows, grades, judges),
                        **kw)
 
@@ -173,17 +174,21 @@ def test_file_level_problems_still_refuse(three):
     q2 = tmp / 'C' / 'labels_s8_sheet_Q2.csv'
     write_labels(q2, [label(rows[20]['item_id'], 3), label(rows[20]['item_id'], 2)])
     with pytest.raises(ValueError, match='more than once'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True,
+                    expected_items=len(rows), **fs)
     write_labels(tmp / 'C' / 'labels_s8_sheet_Q1.csv', [label(r['item_id'], 3) for r in rows[1:20]])
     write_labels(q2, [label(rows[0]['item_id'], 3)])  # a Q1 item in the Q2 file
     with pytest.raises(ValueError, match='another query'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True,
+                    expected_items=len(rows), **fs)
     write_labels(q2, [label('S8-zzz', 3)])
     with pytest.raises(ValueError, match='unknown item id'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True,
+                    expected_items=len(rows), **fs)
     write_labels(q2, [label(rows[20]['item_id'], 3) | {'score': '1'}], [*m.LABEL_FIELDS, 'score'])
     with pytest.raises(ValueError, match='unknown columns'):
-        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True, **fs)
+        m.run_merge(sheet=tmp / 'sheet.csv', out=tmp / 'labels', bootstrap=50, _test_skip_judge_freeze=True,
+                    expected_items=len(rows), **fs)
 
 
 def test_two_judge_mode_needs_c_or_a_fallback_reason_for_stage2(three):
@@ -287,11 +292,24 @@ def test_stage3_categories_reason_codes_and_judge_right(three):
     assert meta['categories'] == dict(accepted_median=52, accepted_lower=1, dispute_referee=1, dispute_unsure_median=1,
                                       dispute_unsure_lower=1, auditor_disagrees_kept=3, auditor_override_evidence=1)
     assert meta['reason_codes'] == dict(clear_reading=5, guideline_gap=1, unclear_text=1)
-    assert meta['judge_right'] == {'A': dict(right=4, judged=6), 'B': dict(right=5, judged=7),
-                                   'C': dict(right=4, judged=7)}
+    # note 4 section 3: judge_right only where the referee sets the grade: S1 (dispute_referee, final 2 vs
+    # 1, 2, 1) and D3 (auditor_override_evidence, final 1 vs 3, 2, 3); kept / unsure items are per category only
+    assert meta['judge_right'] == {'A': dict(right=0, judged=2), 'B': dict(right=1, judged=2),
+                                   'C': dict(right=0, judged=2)}
     assert meta['judge_right_by_reason'] == {
-        'threshold_split': {'A': dict(right=1, judged=2), 'B': dict(right=2, judged=3), 'C': dict(right=1, judged=3)},
-        'audit_disagrees': {'A': dict(right=3, judged=4), 'B': dict(right=3, judged=4), 'C': dict(right=3, judged=4)}}
+        'threshold_split': {'A': dict(right=0, judged=1), 'B': dict(right=1, judged=1), 'C': dict(right=0, judged=1)},
+        'audit_disagrees': {'A': dict(right=0, judged=1), 'B': dict(right=0, judged=1), 'C': dict(right=0, judged=1)}}
+    assert meta['judge_right_by_category'] == {
+        'dispute_referee': {'A': dict(right=0, judged=1), 'B': dict(right=1, judged=1), 'C': dict(right=0, judged=1)},
+        'dispute_unsure_median': {'A': dict(right=1, judged=1), 'B': dict(right=1, judged=1),
+                                  'C': dict(right=0, judged=1)},  # S2: (2, 3, 0) -> 2
+        'dispute_unsure_lower': {'A': dict(right=0, judged=0), 'B': dict(right=0, judged=1),
+                                 'C': dict(right=1, judged=1)},  # M2: (-, 2, 1) -> 1
+        'auditor_disagrees_kept': {j: dict(right=3, judged=3) for j in 'ABC'},  # D1, D2, D4: right by construction
+        'auditor_override_evidence': {j: dict(right=0, judged=1) for j in 'ABC'}}
+    # S1: majority side of (1, 2, 1) is "not relevant"; the referee chose 2 -> against the majority
+    assert (meta['referee_with_majority'], meta['referee_against_majority']) == (0, 1)
+    assert meta['audit_disagrees_two_judge_rule'] == 0
     assert meta['override_flipped_side'] == 1 and meta['two_judge_rule_items_missing_row'] == 2
     got = {r['clause_id']: (r['grade'], r['judge']) for r in qrels_io.read(tmp / 'labels' / 'qrels.tsv')}
     cid = {r['item_id']: r['clause_id'] for r in rows}
@@ -303,6 +321,105 @@ def test_stage3_categories_reason_codes_and_judge_right(three):
     assert got[cid[D3]] == (1, 'referee')
     assert got[cid[rows[0]['item_id']]] == (3, 'ABC_median') and got[cid[rows[9]['item_id']]] == (0, 'ABC_median')
     assert meta['source'] == {'ABC_median': 56, 'AB_min': 1, 'BC_min': 1, 'referee': 2}  # 52 + S2 + D1, D2, D4
+
+
+def test_split_flip_on_a_two_judge_rule_item_uses_the_lower_of_the_two(three):
+    tmp, rows, grades = three
+    stage2(tmp, rows, grades)
+    labels = [ref(M2, 2) if r['item_id'] == M2 else r for r in good_referee(rows)]  # M2 (-, 2, 1): lower 1
+    stage2(tmp, rows, grades, referee_file=write_labels(tmp / 'ref.csv', labels, REF_FIELDS))
+    meta = json.loads((tmp / 'labels' / 'qrels_meta.json').read_text(encoding='utf-8'))
+    assert meta['categories']['dispute_referee'] == 2 and meta['categories']['dispute_unsure_lower'] == 0
+    assert (meta['referee_with_majority'], meta['referee_against_majority']) == (0, 2)  # S1 and M2: both against
+    assert meta['judge_right']['A'] == dict(right=0, judged=2)  # A has no valid row on M2
+
+
+def test_audit_unsure_with_quote_and_rule_keeps_the_consensus():
+    """Note 4 section 2: an override needs a found quote, a rule 1-16 AND unsure = no."""
+    d = dict(rule='three_judge', tag='ABC_median', grades=[3, 2, 3], fallback_grade=3, consensus=3)
+    base = dict(grade='0', override_quote='q', override_rule='5', reason_code='clear_reading')
+    assert m.final_grade(d, 'audit_disagrees', base | {'unsure': 'yes'}) == (3, 'ABC_median', 'auditor_disagrees_kept')
+    assert m.final_grade(d, 'audit_disagrees', base | {'unsure': 'no'}) == (0, 'referee', 'auditor_override_evidence')
+
+
+def test_stage1_refuses_a_duplicate_qid_clause_pair_naming_it(three):
+    tmp, rows, grades = three
+    rows[5]['clause_id'] = rows[2]['clause_id']
+    (tmp / 'sheet.csv').write_text(m.sheet_csv(rows), encoding='utf-8', newline='')
+    with pytest.raises(ValueError, match=rf"1 duplicate \(qid, clause_id\) pair\(s\): \(Q1, {rows[2]['clause_id']}\): "
+                                         rf"items {rows[2]['item_id']} and {rows[5]['item_id']}"):
+        run3(tmp, rows, grades)
+    assert not (tmp / 'labels').exists()
+
+
+def test_stage1_checks_the_s8_sheet_record(three):
+    tmp, rows, grades = three
+    (tmp / m.SHEET_META).write_text(json.dumps(dict(items=1482)), encoding='utf-8')
+    with pytest.raises(ValueError, match='holds 60 items; sheet_meta.json records 1482'):
+        run3(tmp, rows, grades)
+    (tmp / m.SHEET_META).unlink()
+    with pytest.raises(PermissionError, match='sheet_meta.json .* missing'):
+        run3(tmp, rows, grades)
+    assert not (tmp / 'labels').exists()
+    (tmp / m.SHEET_META).write_text(json.dumps(dict(items=60)), encoding='utf-8')
+    run3(tmp, rows, grades)
+    agr = json.loads((tmp / 'labels' / 'agreement_abc.json').read_text(encoding='utf-8'))
+    assert 'sheet_meta_sha256' not in agr['inputs']  # stage-1 bytes unchanged; recorded in qrels_meta (stage 3)
+
+
+def _change_one_clause_text(tmp, rows):
+    """Same items and count, one byte of clause text different: the sheet sha changes."""
+    changed = [dict(r) for r in rows]
+    changed[7]['text'] += '.'
+    (tmp / 'sheet.csv').write_text(m.sheet_csv(changed), encoding='utf-8', newline='')
+
+
+@pytest.mark.parametrize('stage', [1, 2, 3])
+def test_every_stage_refuses_an_item_count_other_than_1482(three, stage):
+    tmp, rows, grades = three
+    if stage == 2:
+        run3(tmp, rows, grades)  # stage 1 done; stage 2 is refused
+    if stage == 3:
+        stage2(tmp, rows, grades)  # stages 1-2 done; stage 3 is refused
+    kw = dict(referee_file=write_labels(tmp / 'ref.csv', good_referee(rows), REF_FIELDS)) if stage == 3 else {}
+    call = (lambda: run3(tmp, rows, grades, expected_items=None)) if stage == 1 else \
+        (lambda: stage2(tmp, rows, grades, expected_items=None, **kw))
+    assert m.SHEET_ITEMS == 1482
+    with pytest.raises(ValueError, match='sheet.csv holds 60 items; the S8 sheet has 1482'):
+        call()
+    assert not (tmp / 'labels' / ('agreement_abc.json' if stage == 1 else
+                                  'audit_check.json' if stage == 2 else 'qrels.tsv')).exists()
+
+
+def test_stage2_refuses_a_sheet_that_differs_from_the_stage1_record(three):
+    tmp, rows, grades = three
+    run3(tmp, rows, grades)  # stage 1 records inputs.sheet_sha256
+    _change_one_clause_text(tmp, rows)
+    with pytest.raises(PermissionError, match=r'differs from the one stage 1 recorded in agreement_abc.json'):
+        stage2(tmp, rows, grades)
+    assert not (tmp / 'labels' / 'audit_check.json').exists()
+
+
+def test_stage3_refuses_a_sheet_that_differs_from_the_stage1_record(three):
+    tmp, rows, grades = three
+    stage2(tmp, rows, grades)
+    referee = write_labels(tmp / 'ref.csv', good_referee(rows), REF_FIELDS)
+    _change_one_clause_text(tmp, rows)
+    with pytest.raises(PermissionError, match=r'inputs.sheet_sha256 mismatch\): stages 2 and 3 refused'):
+        stage2(tmp, rows, grades, referee_file=referee)
+    assert not (tmp / 'labels' / 'qrels.tsv').exists() and not (tmp / 'labels' / 'qrels_meta.json').exists()
+
+
+def test_stage3_records_the_checked_sheet_sha_in_qrels_meta(three):
+    tmp, rows, grades = three
+    run3(tmp, rows, grades)
+    stage2(tmp, rows, grades)
+    stage2(tmp, rows, grades, referee_file=write_labels(tmp / 'ref.csv', good_referee(rows), REF_FIELDS))
+    meta = json.loads((tmp / 'labels' / 'qrels_meta.json').read_text(encoding='utf-8'))
+    agr = json.loads((tmp / 'labels' / 'agreement_abc.json').read_text(encoding='utf-8'))
+    assert meta['sheet_check']['sheet_sha256'] == agr['inputs']['sheet_sha256'] == m.bytes_sha(tmp / 'sheet.csv')
+    assert meta['sheet_check']['items'] == 60 and meta['sheet_check']['stage1_record'] == 'matches agreement_abc.json'
+    assert meta['sheet_check']['sheet_meta_sha256'] == m.bytes_sha(tmp / m.SHEET_META)
 
 
 @pytest.mark.parametrize('item,change,match', [

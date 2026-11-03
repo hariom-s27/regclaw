@@ -1,0 +1,8 @@
+{
+  "created": "2026-11-04",
+  "purpose": "S8 notes freeze (Addendum 2 Note 4 section 6): LF-normalised sha256 of Addendum 2 Note 4 and Addendum 4 Note 1. The qrels manifest records the sha of this file. s8_partD_freeze.json and s8_partE_freeze.json are unchanged.",
+  "docs_lf_normalised_sha256": {
+    "retrieval_eval/S8_PREREGISTRATION_ADDENDUM_2_NOTE_4.md": "d41cf92ca32b2978422d86452acc74b100278f327790b34cc2db89047bde0e80",
+    "retrieval_eval/S8_PREREGISTRATION_ADDENDUM_4_NOTE_1.md": "9247fdba5f1abf6a7edff5e7b0bdb360b276eb1aad2fc5d244d9cf32149965f3"
+  }
+}
