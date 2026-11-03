@@ -8,8 +8,10 @@ fields go only into stage-3 files (qrels.tsv, qrels_meta.json). Two checks:
   b) e42d61d's s8_labels.py itself (git show) writes stages 1+2 into a folder, then the current code runs
      stages 1+2+3 on that folder (skipped only when the git object is not available, e.g. a depth-1 checkout).
 """
+import builtins
 from datetime import datetime, timezone
 import importlib.util
+import io
 import subprocess
 
 import pytest
@@ -38,6 +40,26 @@ GOLDEN = {  # sha256 of the files e42d61d's run_merge writes for world(mode) bel
         'referee_ids.txt': 'b6ef01c056c77d44c0e55eab40906df2029f9b2e46080fd219837ba68b0d98b3'}}
 
 
+def windows_text_open(real):
+    """Windows text mode on any OS: a text-mode write with newline=None turns '\n' into '\r\n' (os.linesep on
+    Windows). Reads, binary writes and newline='' writes are unchanged, as on Windows."""
+    def opened(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+        if 'b' not in mode and any(c in mode for c in 'wax+') and newline is None:
+            newline = '\r\n'
+        return real(file, mode, buffering, encoding, errors, newline, closefd, opener)
+    return opened
+
+
+@pytest.fixture(autouse=True, params=['native', 'windows_text_mode'])
+def line_endings(request, monkeypatch):
+    """Every test here runs twice: with this OS's text mode, and with Windows text mode simulated (the laptop:
+    core.autocrlf=true, CRLF text writes). Path.write_text / Path.open reach io.open; open() is builtins.open."""
+    if request.param == 'windows_text_mode':
+        monkeypatch.setattr(io, 'open', windows_text_open(io.open))
+        monkeypatch.setattr(builtins, 'open', windows_text_open(builtins.open))
+    return request.param
+
+
 def stage12_names(mode):
     return tuple(GOLDEN[mode])
 
@@ -56,9 +78,9 @@ def world(base, mode):
     audit = base / 'audit'
     audit.mkdir()
     ids = [r['item_id'] for r in rows[:40]]
-    for name in ('audit_ids.txt', 'audit_order.txt'):
-        (audit / name).write_text(''.join(i + '\n' for i in ids), encoding='utf-8')
-    (audit / 'audit_sheet.csv').write_text('x', encoding='utf-8')
+    for name in ('audit_ids.txt', 'audit_order.txt'):  # hashed: explicit LF bytes on every OS (the golden shas)
+        (audit / name).write_bytes(''.join(i + '\n' for i in ids).encode('utf-8'))
+    (audit / 'audit_sheet.csv').write_bytes(b'x')
     labels = write_labels(audit / 'labels_audit_fake.csv', audit_rows(rows, grades))
     freeze_audit(labels, audit, audit / 'audit_order.txt', now=FROZEN_AT, minimum=40)
     kw = dict(sheet=base / 'sheet' / 's8_sheet.csv', out=base / 'labels', bootstrap=200, audit_file=labels,
