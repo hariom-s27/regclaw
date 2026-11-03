@@ -27,8 +27,8 @@ def make_sheet(path, per_qid):
 
 def write_sheet_meta(sheet_path, items):
     """The s8-sheet record next to the sheet (s8_runs.run_sheet writes sheet/sheet_meta.json)."""
-    (Path(sheet_path).parent / m.SHEET_META).write_text(json.dumps(dict(items=items), indent=2) + '\n',
-                                                        encoding='utf-8')
+    (Path(sheet_path).parent / m.SHEET_META).write_bytes(  # hashed (qrels_meta): LF bytes on every OS
+        (json.dumps(dict(items=items), indent=2) + '\n').encode('utf-8'))
 
 
 def label(item_id, grade, unsure='no', **kw):
