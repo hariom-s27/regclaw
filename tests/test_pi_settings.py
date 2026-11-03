@@ -37,6 +37,7 @@ def test_repo_settings_are_standard_anthropic_and_have_no_judge(pc):
     assert s.index_model.startswith('anthropic/') and s.summary_model.startswith('anthropic/')
     assert s.judge_model is None and s.judge_repeats == 3
     assert s.embedding_model == 'text-embedding-3-small'
+    assert s.allow_unpinned_pageindex is False      # D1: unpinned PageIndex refused by default
 
 
 def test_unknown_index_mode_is_refused(pc):

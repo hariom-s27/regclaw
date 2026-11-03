@@ -75,10 +75,27 @@ def build_tree(pdf_path: str, s: Settings) -> dict:
         _llm_backend.reset(token)
 
 
+def pageindex_commit_or_refuse(allow_unpinned: bool) -> str:
+    """Installed PageIndex commit if it is the pin; otherwise refuse, or (only when
+    explicitly allowed) return "unpinned: <commit>" for the manifest."""
+    commit = installed_pageindex_commit()
+    if commit == PAGEINDEX_PIN_SHA:
+        return commit
+    if not allow_unpinned:
+        raise RuntimeError(f"pageindex commit {commit} is not the pin {PAGEINDEX_PIN_SHA}. Install "
+                           "pageindex/requirements_partII.txt, or pass --allow-unpinned-pageindex "
+                           "(settings: allow_unpinned_pageindex: true) to record an unpinned build.")
+    print(f"[warn] UNPINNED pageindex commit {commit} (pin {PAGEINDEX_PIN_SHA[:7]}); "
+          "recorded in the manifest", file=sys.stderr)
+    return f"unpinned: {commit}"
+
+
 def ingest(pdf: str, family: str, version: str, title: str | None = None,
            effective_date: date | None = None, force: bool = False,
-           s: Settings | None = None) -> DocRecord:
+           s: Settings | None = None, allow_unpinned: bool | None = None) -> DocRecord:
+    """allow_unpinned=None -> settings key allow_unpinned_pageindex (default False)."""
     s = s or load_settings()
+    allow_unpinned = s.allow_unpinned_pageindex if allow_unpinned is None else allow_unpinned
     store = Path(s.store_dir)
     (store / "pdfs").mkdir(parents=True, exist_ok=True)
     (store / "trees").mkdir(parents=True, exist_ok=True)
@@ -92,6 +109,10 @@ def ingest(pdf: str, family: str, version: str, title: str | None = None,
     if hit and Path(hit.tree_path).exists() and not force:
         print(f"[cache] {pdf} already indexed as {hit.doc_id} (sha256 {sha[:12]}…)", file=sys.stderr)
         return hit
+
+    # 1b) PageIndex pin (R22 D1): a tree built by another commit is refused unless allowed
+    #     explicitly; then the manifest records "unpinned: <commit>". Checked before any work.
+    commit = pageindex_commit_or_refuse(allow_unpinned)
 
     # 2) same doc_id but different bytes -> the file was modified: rebuild + replace record
     if doc_id in m.documents and m.documents[doc_id].sha256 != sha:
@@ -109,10 +130,7 @@ def ingest(pdf: str, family: str, version: str, title: str | None = None,
     if not pdf_copy.exists():
         shutil.copy2(pdf, pdf_copy)
 
-    # 5) build + persist (record which PageIndex commit built it; warn if not the pin)
-    commit = installed_pageindex_commit()
-    if commit != PAGEINDEX_PIN_SHA:
-        print(f"[warn] pageindex commit {commit} != pinned {PAGEINDEX_PIN_SHA[:7]}", file=sys.stderr)
+    # 5) build + persist
     result = build_tree(str(pdf_copy), s)
     tree_path = store / "trees" / f"{key}.json"
     tree_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -144,7 +162,7 @@ def _walk(nodes):
         yield from _walk(n.get("nodes"))
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("pdf")
     ap.add_argument("--family", required=True)
@@ -152,6 +170,14 @@ if __name__ == "__main__":
     ap.add_argument("--title")
     ap.add_argument("--effective-date", type=date.fromisoformat)
     ap.add_argument("--force", action="store_true", help="rebuild even if cached")
-    a = ap.parse_args()
-    r = ingest(a.pdf, a.family, a.version, a.title, a.effective_date, a.force)
+    ap.add_argument("--allow-unpinned-pageindex", action="store_true", default=None,
+                    help="build with a PageIndex commit other than the pin; recorded as 'unpinned: <commit>'")
+    a = ap.parse_args(argv)
+    r = ingest(a.pdf, a.family, a.version, a.title, a.effective_date, a.force,
+               allow_unpinned=a.allow_unpinned_pageindex)
     print(r.model_dump_json(indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

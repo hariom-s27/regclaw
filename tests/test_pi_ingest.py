@@ -120,10 +120,57 @@ def test_ingest_records_mode_models_route_and_commit_without_secret(pi, fake_pag
     assert json.loads(manifest)['documents']['gtp@2019']['index_mode'] == 'standard'
 
 
-def test_commit_mismatch_warns(pi, fake_pageindex, tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: 'unknown (not installed)')
+def _pdf(tmp_path, data=b'%PDF-1.4 other bytes'):
     pdf = tmp_path / 'g.pdf'
-    pdf.write_bytes(b'%PDF-1.4 other bytes')
-    rec = pi.ingest.ingest(str(pdf), 'gtp', '2019', s=pi.common.Settings(store_dir=tmp_path / 'store'))
-    assert rec.index_route == 'anthropic' and rec.pageindex_commit.startswith('unknown')
-    assert 'pinned 50a71b6' in capsys.readouterr().err
+    pdf.write_bytes(data)
+    return str(pdf)
+
+
+OTHER = '646deeb650005885f44001471d15ab9eab1bbc13'
+
+
+@pytest.mark.parametrize('installed', [OTHER, 'unknown (not installed)'])
+def test_unpinned_pageindex_is_refused_by_default(pi, fake_pageindex, tmp_path, monkeypatch, installed):
+    monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: installed)
+    s = pi.common.Settings(store_dir=tmp_path / 'store')
+    assert s.allow_unpinned_pageindex is False
+    with pytest.raises(RuntimeError, match='--allow-unpinned-pageindex'):
+        pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', s=s)
+    assert fake_pageindex.calls == []                                   # refused before any build
+    assert not (tmp_path / 'store' / 'manifest.json').exists()
+    assert not list((tmp_path / 'store' / 'pdfs').iterdir())
+
+
+def test_flag_allows_unpinned_and_records_it(pi, fake_pageindex, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: OTHER)
+    rec = pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', allow_unpinned=True,
+                           s=pi.common.Settings(store_dir=tmp_path / 'store'))
+    assert rec.pageindex_commit == f'unpinned: {OTHER}' and rec.index_route == 'anthropic'
+    stored = json.loads((tmp_path / 'store' / 'manifest.json').read_text())
+    assert stored['documents']['gtp@2019']['pageindex_commit'] == f'unpinned: {OTHER}'
+    assert 'UNPINNED' in capsys.readouterr().err
+
+
+def test_settings_key_allows_unpinned_and_explicit_false_overrides_it(pi, fake_pageindex, tmp_path, monkeypatch):
+    monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: OTHER)
+    s = pi.common.Settings(store_dir=tmp_path / 'store', allow_unpinned_pageindex=True)
+    with pytest.raises(RuntimeError):
+        pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', s=s, allow_unpinned=False)
+    rec = pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', s=s)
+    assert rec.pageindex_commit == f'unpinned: {OTHER}'
+
+
+@pytest.mark.parametrize('argv,expected', [(['--allow-unpinned-pageindex'], True), ([], None)])
+def test_cli_flag_reaches_ingest(pi, monkeypatch, capsys, argv, expected):
+    seen = {}
+
+    def fake_ingest(*args, **kw):
+        seen.update(kw)
+        return pi.common.DocRecord(doc_id='g@1', family='g', title='t', version='1', sha256='0' * 64,
+                                   pdf_path='p', tree_path='t', page_count=1, index_mode='standard',
+                                   index_model='anthropic/x', pageindex_version='0.2.10',
+                                   built_at='2026-11-03T00:00:00Z')
+    monkeypatch.setattr(pi.ingest, 'ingest', fake_ingest)
+    assert pi.ingest.main(['x.pdf', '--family', 'g', '--version', '1', *argv]) == 0
+    assert seen == {'allow_unpinned': expected}      # None -> falls back to the settings key
+    assert '"doc_id": "g@1"' in capsys.readouterr().out

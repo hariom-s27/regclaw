@@ -52,6 +52,9 @@ class Settings(BaseModel):
     judge_model: Optional[str] = None
     judge_repeats: int = 3
     embedding_model: str = "text-embedding-3-small"
+    # R22 D1: ingest refuses a PageIndex commit other than PAGEINDEX_PIN_SHA unless this is
+    # true (or --allow-unpinned-pageindex); the manifest then records "unpinned: <commit>".
+    allow_unpinned_pageindex: bool = False
     # agent budgets
     agent_max_turns: int = 12
     max_pages_per_fetch: int = 12

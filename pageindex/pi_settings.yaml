@@ -19,6 +19,7 @@ if_add_node_id: "yes"
 if_add_node_summary: "yes"
 if_add_doc_description: "yes"
 if_add_node_text: "no"
+allow_unpinned_pageindex: false # true (or --allow-unpinned-pageindex) = build with a non-pinned PageIndex commit
 litellm_max_tokens: 16000       # anthropic/ route only; must be null on the Azure route (R22 P4)
 
 agent_max_turns: 12
