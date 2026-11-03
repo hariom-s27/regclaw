@@ -22,10 +22,17 @@ Stages (each needs the previous one):
                           decided by the two-judge rule excluded and counted (note 3 section 4); secondary
                           without the author's unsure items; PASS >= 0.60 on the primary else STOP);
                           on PASS: disputes.csv, referee_sheet.csv, referee_ids.txt
-  3. + referee labels  -> qrels.tsv + qrels_meta.json (note 2 sections 2-3, note 3 section 3):
+  3. + referee labels  -> qrels.tsv + qrels_meta.json (note 2 sections 2-3, note 3 section 3, note 4):
                           threshold_split -> referee grade (unsure=yes -> median of three / lower of two);
                           audit_disagrees -> consensus stands unless override_quote (found in the clause
-                          text) AND override_rule (1-16); every referee item needs a reason_code.
+                          text) AND override_rule (1-16) AND unsure=no (note 4 section 2); every referee item
+                          needs a reason_code (note 4 section 1). judge_right counts only dispute_referee and
+                          auditor_override_evidence items; split flips are counted against the majority side of
+                          the valid judges (note 4 section 3). qrels `date` = the audit-freeze date (note 4
+                          section 3).
+
+Before anything is written, stage 1 refuses a sheet with a duplicate (qid, clause_id) or whose item count differs
+from sheet_meta.json, the s8-sheet record next to it (Addendum 2 note 4 section 5).
 """
 import argparse
 from collections import Counter, defaultdict
@@ -60,6 +67,8 @@ REASON_CODES = ('clear_reading', 'guideline_gap', 'unclear_text')  # Addendum 2 
 GUIDELINE_RULES = range(1, 17)  # guideline v1.0.1 rules 1-16
 CATEGORIES = ('accepted_median', 'accepted_lower', 'dispute_referee', 'dispute_unsure_median',
               'dispute_unsure_lower', 'auditor_disagrees_kept', 'auditor_override_evidence')
+REFEREE_CATEGORIES = CATEGORIES[2:]  # the categories a referee item can end in
+REFEREE_DECIDES = ('dispute_referee', 'auditor_override_evidence')  # note 4 section 3: the referee sets the grade
 C_MISSING_MAX = 0.02  # note 3 section 6: > 2% of C's rows missing/invalid -> two-judge fallback
 AUDIT_PASS = 0.60
 BOOTSTRAP = 10_000
@@ -81,6 +90,31 @@ def read_sheet(path):
     if columns != SHEET_COLUMNS:
         raise ValueError(f'{Path(path).name}: sheet columns differ from SHEET_COLUMNS')
     return rows
+
+
+SHEET_META = 'sheet_meta.json'  # written by s8-sheet next to s8_sheet.csv (s8_runs.run_sheet)
+
+
+def check_sheet(sheet_path, sheet_rows):
+    """Addendum 2 note 4 section 5: one row per (qid, clause_id), and the item count of the s8-sheet record.
+    Returns the record's sha256 (for the inputs block). Raises before anything is written."""
+    first, dup = {}, []
+    for row in sheet_rows:
+        key = (row['qid'], row['clause_id'])
+        if key in first:
+            dup.append(f"({key[0]}, {key[1]}): items {first[key]} and {row['item_id']}")
+        else:
+            first[key] = row['item_id']
+    if dup:
+        raise ValueError(f'sheet holds {len(dup)} duplicate (qid, clause_id) pair(s): ' + '; '.join(dup))
+    meta_path = Path(sheet_path).parent / SHEET_META
+    if not meta_path.is_file():
+        raise PermissionError(f'{SHEET_META} (the s8-sheet record) missing next to {Path(sheet_path).name}')
+    meta = json.loads(meta_path.read_text(encoding='utf-8'))
+    if meta.get('items') != len(sheet_rows):
+        raise ValueError(f"{Path(sheet_path).name} holds {len(sheet_rows)} items; {SHEET_META} records "
+                         f"{meta.get('items')}")
+    return bytes_sha(meta_path)
 
 
 def validate_label(row, where, extra=()):
@@ -469,7 +503,7 @@ def final_grade(decision, reason, referee):
             return (decision['fallback_grade'], decision['tag'],
                     'dispute_unsure_median' if three else 'dispute_unsure_lower')
         return int(referee['grade']), 'referee', 'dispute_referee'
-    if reason == 'audit_disagrees':  # unsure -> default: the consensus stands, as unsure -> median on splits (C4)
+    if reason == 'audit_disagrees':  # Addendum 2 Note 4 section 2: unsure=yes -> the consensus stands
         if referee['unsure'] == 'no' and referee['override_quote'].strip() and referee['override_rule']:
             return int(referee['grade']), 'referee', 'auditor_override_evidence'
         return decision['consensus'], decision['tag'], 'auditor_disagrees_kept'
@@ -505,6 +539,7 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
         from retrieval_eval.s8_judge_check import check_judge_freezes
         excluded = check_judge_freezes(files, out if freeze_dir is None else freeze_dir)
     sheet_rows = read_sheet(sheet)
+    sheet_meta_sha = check_sheet(sheet, sheet_rows)
     sheet_by_id = {r['item_id']: r for r in sheet_rows}
     for j, ids in excluded.items():
         if set(ids) - set(sheet_by_id):
@@ -523,7 +558,7 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
     accepted = {i: d['consensus'] for i, d in decisions.items() if d['consensus'] is not None}
     threshold_disputes = [r['item_id'] for r in sheet_rows if decisions[r['item_id']]['consensus'] is None]
     two_rule = [i for i, d in decisions.items() if mode == 'three_judge' and d['rule'] == 'two_judge']
-    inputs = dict(sheet_sha256=bytes_sha(sheet), **{f'{j.lower()}_files': {Path(p).name: bytes_sha(p) for p in f}
+    inputs = dict(sheet_sha256=bytes_sha(sheet), sheet_meta_sha256=sheet_meta_sha, **{f'{j.lower()}_files': {Path(p).name: bytes_sha(p) for p in f}
                                                      for j, f in files.items()})
     common = dict(mode=mode, judges_in_force=list(in_force), judges_read=list(files), fallback_reason=fallback_reason,
                   accepted=len(accepted), threshold_disputes=len(threshold_disputes),
@@ -586,24 +621,35 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
     for item_id in referee_ids:  # any bad reason_code / rule / quote refuses the whole file
         validate_referee(referee[item_id], f'referee item {item_id}', sheet_by_id[item_id]['text'])
     reason_of = dict(reasons)
-    day = freeze['frozen_at'][:10] if not _test_skip_freeze else '1970-01-01'
+    day = freeze['frozen_at'][:10] if not _test_skip_freeze else '1970-01-01'  # note 4 section 3: audit-freeze date
     rows, source, categories = [], Counter(), Counter({c: 0 for c in CATEGORIES})
     right = {j: Counter() for j in in_force}
     by_reason = {r: {j: Counter() for j in in_force} for r in ('threshold_split', 'audit_disagrees')}
-    flipped = 0
+    by_category = {c: {j: Counter() for j in in_force} for c in REFEREE_CATEGORIES}
+    flipped, with_majority, against_majority, audit_two_rule = 0, 0, 0, 0
     for row in sheet_rows:
         item_id = row['item_id']
         reason = reason_of.get(item_id)
-        grade, judge, category = final_grade(decisions[item_id], reason, referee.get(item_id))
+        decision = decisions[item_id]
+        grade, judge, category = final_grade(decision, reason, referee.get(item_id))
         source[judge] += 1
         categories[category] += 1
-        if category == 'auditor_override_evidence' and is_rel(grade) != is_rel(decisions[item_id]['consensus']):
+        if category == 'auditor_override_evidence' and is_rel(grade) != is_rel(decision['consensus']):
             flipped += 1
+        if category == 'dispute_referee':  # note 4 section 3: vs the majority side (two-judge rule: the lower)
+            if is_rel(grade) == is_rel(decision['fallback_grade']):
+                with_majority += 1
+            else:
+                against_majority += 1
+        if reason == 'audit_disagrees' and decision['rule'] == 'two_judge':
+            audit_two_rule += 1
         if reason:  # per-judge correctness: the judge's binary side equals the final grade's side
+            decides = category in REFEREE_DECIDES  # note 4 section 3: only where the referee sets the grade
             for j in in_force:
                 if item_id in force[j]:
                     ok = is_rel(force[j][item_id]['grade']) == is_rel(grade)
-                    for counter in (right[j], by_reason[reason][j]):
+                    counters = [by_category[category][j]] + ([right[j], by_reason[reason][j]] if decides else [])
+                    for counter in counters:
                         counter['judged'] += 1
                         counter['right'] += ok
         rows.append(dict(qid=row['qid'], clause_id=row['clause_id'], grade=str(grade), judge=judge, date=day))
@@ -618,7 +664,14 @@ def run_merge(*, sheet, a_files, b_files, out, c_files=None, fallback_reason=Non
                 reason_codes={c: sum(referee[i]['reason_code'] == c for i in referee_ids) for c in REASON_CODES},
                 judge_right={j: _right_counts(c) for j, c in right.items()},
                 judge_right_by_reason={r: {j: _right_counts(c) for j, c in d.items()} for r, d in by_reason.items()},
-                judge_right_rule="the judge's binary side (grade >= 2) equals the final grade's side, on referee items",
+                judge_right_by_category={c: {j: _right_counts(x) for j, x in d.items()} for c, d in by_category.items()},
+                judge_right_rule=("the judge's binary side (grade >= 2) equals the final grade's side; judge_right and "
+                                  'judge_right_by_reason count only ' + ' + '.join(REFEREE_DECIDES)
+                                  + ' items (Addendum 2 note 4 section 3); judge_right_by_category: every referee item'),
+                referee_with_majority=with_majority, referee_against_majority=against_majority,
+                split_flip_rule=('dispute_referee items: the final side vs the majority side of the valid judges '
+                                 '(two-judge rule: the lower of the two) (Addendum 2 note 4 section 3)'),
+                audit_disagrees_two_judge_rule=audit_two_rule,
                 override_flipped_side=flipped,
                 referee_sha256=bytes_sha(referee_file), audit_labels_sha256=freeze['labels_sha256'], **inputs)
     states['qrels_meta.json'] = write_json(out / 'qrels_meta.json', meta)

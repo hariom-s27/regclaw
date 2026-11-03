@@ -287,11 +287,24 @@ def test_stage3_categories_reason_codes_and_judge_right(three):
     assert meta['categories'] == dict(accepted_median=52, accepted_lower=1, dispute_referee=1, dispute_unsure_median=1,
                                       dispute_unsure_lower=1, auditor_disagrees_kept=3, auditor_override_evidence=1)
     assert meta['reason_codes'] == dict(clear_reading=5, guideline_gap=1, unclear_text=1)
-    assert meta['judge_right'] == {'A': dict(right=4, judged=6), 'B': dict(right=5, judged=7),
-                                   'C': dict(right=4, judged=7)}
+    # note 4 section 3: judge_right only where the referee sets the grade: S1 (dispute_referee, final 2 vs
+    # 1, 2, 1) and D3 (auditor_override_evidence, final 1 vs 3, 2, 3); kept / unsure items are per category only
+    assert meta['judge_right'] == {'A': dict(right=0, judged=2), 'B': dict(right=1, judged=2),
+                                   'C': dict(right=0, judged=2)}
     assert meta['judge_right_by_reason'] == {
-        'threshold_split': {'A': dict(right=1, judged=2), 'B': dict(right=2, judged=3), 'C': dict(right=1, judged=3)},
-        'audit_disagrees': {'A': dict(right=3, judged=4), 'B': dict(right=3, judged=4), 'C': dict(right=3, judged=4)}}
+        'threshold_split': {'A': dict(right=0, judged=1), 'B': dict(right=1, judged=1), 'C': dict(right=0, judged=1)},
+        'audit_disagrees': {'A': dict(right=0, judged=1), 'B': dict(right=0, judged=1), 'C': dict(right=0, judged=1)}}
+    assert meta['judge_right_by_category'] == {
+        'dispute_referee': {'A': dict(right=0, judged=1), 'B': dict(right=1, judged=1), 'C': dict(right=0, judged=1)},
+        'dispute_unsure_median': {'A': dict(right=1, judged=1), 'B': dict(right=1, judged=1),
+                                  'C': dict(right=0, judged=1)},  # S2: (2, 3, 0) -> 2
+        'dispute_unsure_lower': {'A': dict(right=0, judged=0), 'B': dict(right=0, judged=1),
+                                 'C': dict(right=1, judged=1)},  # M2: (-, 2, 1) -> 1
+        'auditor_disagrees_kept': {j: dict(right=3, judged=3) for j in 'ABC'},  # D1, D2, D4: right by construction
+        'auditor_override_evidence': {j: dict(right=0, judged=1) for j in 'ABC'}}
+    # S1: majority side of (1, 2, 1) is "not relevant"; the referee chose 2 -> against the majority
+    assert (meta['referee_with_majority'], meta['referee_against_majority']) == (0, 1)
+    assert meta['audit_disagrees_two_judge_rule'] == 0
     assert meta['override_flipped_side'] == 1 and meta['two_judge_rule_items_missing_row'] == 2
     got = {r['clause_id']: (r['grade'], r['judge']) for r in qrels_io.read(tmp / 'labels' / 'qrels.tsv')}
     cid = {r['item_id']: r['clause_id'] for r in rows}
@@ -303,6 +316,50 @@ def test_stage3_categories_reason_codes_and_judge_right(three):
     assert got[cid[D3]] == (1, 'referee')
     assert got[cid[rows[0]['item_id']]] == (3, 'ABC_median') and got[cid[rows[9]['item_id']]] == (0, 'ABC_median')
     assert meta['source'] == {'ABC_median': 56, 'AB_min': 1, 'BC_min': 1, 'referee': 2}  # 52 + S2 + D1, D2, D4
+
+
+def test_split_flip_on_a_two_judge_rule_item_uses_the_lower_of_the_two(three):
+    tmp, rows, grades = three
+    stage2(tmp, rows, grades)
+    labels = [ref(M2, 2) if r['item_id'] == M2 else r for r in good_referee(rows)]  # M2 (-, 2, 1): lower 1
+    stage2(tmp, rows, grades, referee_file=write_labels(tmp / 'ref.csv', labels, REF_FIELDS))
+    meta = json.loads((tmp / 'labels' / 'qrels_meta.json').read_text(encoding='utf-8'))
+    assert meta['categories']['dispute_referee'] == 2 and meta['categories']['dispute_unsure_lower'] == 0
+    assert (meta['referee_with_majority'], meta['referee_against_majority']) == (0, 2)  # S1 and M2: both against
+    assert meta['judge_right']['A'] == dict(right=0, judged=2)  # A has no valid row on M2
+
+
+def test_audit_unsure_with_quote_and_rule_keeps_the_consensus():
+    """Note 4 section 2: an override needs a found quote, a rule 1-16 AND unsure = no."""
+    d = dict(rule='three_judge', tag='ABC_median', grades=[3, 2, 3], fallback_grade=3, consensus=3)
+    base = dict(grade='0', override_quote='q', override_rule='5', reason_code='clear_reading')
+    assert m.final_grade(d, 'audit_disagrees', base | {'unsure': 'yes'}) == (3, 'ABC_median', 'auditor_disagrees_kept')
+    assert m.final_grade(d, 'audit_disagrees', base | {'unsure': 'no'}) == (0, 'referee', 'auditor_override_evidence')
+
+
+def test_stage1_refuses_a_duplicate_qid_clause_pair_naming_it(three):
+    tmp, rows, grades = three
+    rows[5]['clause_id'] = rows[2]['clause_id']
+    (tmp / 'sheet.csv').write_text(m.sheet_csv(rows), encoding='utf-8', newline='')
+    with pytest.raises(ValueError, match=rf"1 duplicate \(qid, clause_id\) pair\(s\): \(Q1, {rows[2]['clause_id']}\): "
+                                         rf"items {rows[2]['item_id']} and {rows[5]['item_id']}"):
+        run3(tmp, rows, grades)
+    assert not (tmp / 'labels').exists()
+
+
+def test_stage1_checks_the_s8_sheet_record(three):
+    tmp, rows, grades = three
+    (tmp / m.SHEET_META).write_text(json.dumps(dict(items=1482)), encoding='utf-8')
+    with pytest.raises(ValueError, match='holds 60 items; sheet_meta.json records 1482'):
+        run3(tmp, rows, grades)
+    (tmp / m.SHEET_META).unlink()
+    with pytest.raises(PermissionError, match='sheet_meta.json .* missing'):
+        run3(tmp, rows, grades)
+    assert not (tmp / 'labels').exists()
+    (tmp / m.SHEET_META).write_text(json.dumps(dict(items=60)), encoding='utf-8')
+    run3(tmp, rows, grades)
+    agr = json.loads((tmp / 'labels' / 'agreement_abc.json').read_text(encoding='utf-8'))
+    assert agr['inputs']['sheet_meta_sha256'] == m.bytes_sha(tmp / m.SHEET_META)
 
 
 @pytest.mark.parametrize('item,change,match', [

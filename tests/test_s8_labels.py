@@ -21,7 +21,14 @@ def make_sheet(path, per_qid):
                 clause_id=f'doc:{qid}.{i}', title=f't{i}', text=f'text {qid} {i}',
                 common_rules='RULES' if i == 0 else ''))
     Path(path).write_text(sheet_csv(rows), encoding='utf-8', newline='')
+    write_sheet_meta(path, len(rows))
     return rows
+
+
+def write_sheet_meta(sheet_path, items):
+    """The s8-sheet record next to the sheet (s8_runs.run_sheet writes sheet/sheet_meta.json)."""
+    (Path(sheet_path).parent / m.SHEET_META).write_text(json.dumps(dict(items=items), indent=2) + '\n',
+                                                        encoding='utf-8')
 
 
 def label(item_id, grade, unsure='no', **kw):

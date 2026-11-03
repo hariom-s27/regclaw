@@ -148,6 +148,8 @@ def build_world(base, spec, *, codex_b=True, b_tweak=None, b_drop=(), b_bad=(), 
             w.grades[iid], w.span[iid] = tuple(g), span
     w.by_id = {r['item_id']: r for r in w.rows}
     write_plain(w.sheet, sheet_csv(w.rows).encode('utf-8'))
+    write_plain(w.sheet.parent / lb.SHEET_META, json.dumps(dict(items=len(w.rows), columns=SHEET_COLUMNS),
+                                                           indent=2).encode('utf-8') + b'\n')  # the s8-sheet record
     for qid in spec:
         write_plain(w.per_query / f's8_sheet_{qid}.csv', sheet_csv([r for r in w.rows if r['qid'] == qid]).encode('utf-8'))
     write_plain(run / 'sheet' / 'item_map.jsonl', jsonl_text(
@@ -512,9 +514,14 @@ def test_case10_referee_then_qrels(w1):
                                       dispute_unsure_lower=0, auditor_disagrees_kept=1, auditor_override_evidence=1)
     assert meta['excluded_by_judge'] == {'A': 0, 'B': 0, 'C': 0} and meta['referee_items'] == 5
     final = expected_w1(w1)
-    for j, n in zip('ABC', range(3)):  # per-judge correctness, derived on the 5 referee items
-        right = sum((w1.grades[i][n] >= 2) == (final[i] >= 2) for i in w1.decisions)
-        assert meta['judge_right'][j] == dict(right=right, judged=5)
+    decided = (SPLIT_REF, SPLIT_GAP, w1.d_over)  # note 4 section 3: dispute_referee + auditor_override_evidence
+    for j, n in zip('ABC', range(3)):  # per-judge correctness, derived on the items the referee decided
+        right = sum((w1.grades[i][n] >= 2) == (final[i] >= 2) for i in decided)
+        assert meta['judge_right'][j] == dict(right=right, judged=3)
+        kept = meta['judge_right_by_category']['auditor_disagrees_kept'][j]
+        assert kept == dict(right=int((w1.grades[w1.d_keep][n] >= 2) == (final[w1.d_keep] >= 2)), judged=1)
+    with_majority = sum((sorted(w1.grades[i])[1] >= 2) == (final[i] >= 2) for i in (SPLIT_REF, SPLIT_GAP))
+    assert (meta['referee_with_majority'], meta['referee_against_majority']) == (with_majority, 2 - with_majority)
     labels = (w1.labels / 'labels_referee.csv').read_bytes()
     assert labels.startswith(b'\xef\xbb\xbf') and labels.count(b'\r\n') == 6  # header + 5 rows, resumable file
 
@@ -673,8 +680,10 @@ def test_case13_14_exclusions_and_primary_kappa(tmp_path, capsys):
     merge(w, **audit_kw(w, w.labels / 'labels_referee.csv'))
     meta = read_json(w.labels / 'qrels_meta.json')
     assert meta['excluded_by_judge'] == {'A': 0, 'B': 2, 'C': 0} and meta['two_judge_rule_items_missing_row'] == 2
-    assert meta['judge_right'] == {'A': dict(right=1, judged=1), 'B': dict(right=0, judged=0),
-                                   'C': dict(right=1, judged=1)}  # B skipped on its excluded item
+    assert meta['judge_right'] == {j: dict(right=0, judged=0) for j in 'ABC'}  # kept: not a referee decision
+    assert meta['judge_right_by_category']['auditor_disagrees_kept'] == {
+        'A': dict(right=1, judged=1), 'B': dict(right=0, judged=0), 'C': dict(right=1, judged=1)}  # B excluded
+    assert meta['audit_disagrees_two_judge_rule'] == 1  # note 4 section 3: counted separately
     got = {r['clause_id']: (r['grade'], r['judge']) for r in qrels_io.read(w.labels / 'qrels.tsv')}
     for iid in (x_missing, x_invalid):
         assert got[w.by_id[iid]['clause_id']] == (w.grades[iid][0], 'AC_min')

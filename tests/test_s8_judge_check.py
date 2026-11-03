@@ -8,7 +8,7 @@ import pytest
 from retrieval_eval import s8_judge_check as jc
 from retrieval_eval import s8_labels as m
 from retrieval_eval.s8_runs import SHEET_COLUMNS, sheet_csv
-from tests.test_s8_labels import label, write_labels
+from tests.test_s8_labels import label, write_labels, write_sheet_meta
 
 QIDS = ('Q1', 'R1')
 NOW = datetime(2026, 10, 21, 9, 0, 0, tzinfo=timezone.utc)
@@ -40,6 +40,7 @@ def env(tmp_path):
         (root / 'eval' / f's8_sheet_{q}.csv').write_bytes(data)
         write_labels(root / 'output' / f'labels_s8_sheet_{q}.csv', [good(r['item_id']) for r in rs])
     (tmp_path / 'sheet.csv').write_bytes(sheet_csv([r for rs in rows.values() for r in rs]).encode('utf-8'))
+    write_sheet_meta(tmp_path / 'sheet.csv', sum(len(rs) for rs in rows.values()))  # the s8-sheet record
     return tmp_path, per_query, root, rows
 
 
