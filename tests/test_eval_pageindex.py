@@ -2,12 +2,13 @@
 import importlib
 import json
 import math
-import socket
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
 
 import pytest
+
+import _netguard
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET = 'test-key-not-real'
@@ -17,10 +18,8 @@ SECRET = 'test-key-not-real'
 def offline(monkeypatch):
     for key in ('AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_API_KEY'):
         monkeypatch.delenv(key, raising=False)
-
-    def deny(*args, **kwargs):
-        raise AssertionError('Network forbidden')
-    monkeypatch.setattr(socket.socket, 'connect', deny)
+    # Denies socket.socket.connect except socketpair's own loopback (asyncio on Windows); see tests/_netguard.py
+    _netguard.block_network(monkeypatch, 'Network forbidden')
 
 
 @pytest.fixture
