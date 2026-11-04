@@ -11,6 +11,7 @@ import jsonschema
 import pytest
 from pydantic import ValidationError
 
+import _netguard
 from standards.classifier import AnthropicLLM, FakeLLM, LLMResponse, make_request
 from standards.crosscheck import crosscheck
 from standards.data_loader import ENDPOINTS, load_data, validate
@@ -32,6 +33,13 @@ GOLD = {
 GOLD['E1'].update({'ISO 10993-13': 'recommended', 'ISO 10993-15': 'recommended'})
 GOLD['E3']['ISO 10993-13'] = 'recommended'
 GOLD['E4']['ISO 9394'] = 'mandatory'
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """Independent of how pytest is started: stub mode + no network, even without tasks.py."""
+    monkeypatch.setenv('REGCLAW_STUB', '1')
+    _netguard.block_network(monkeypatch, 'Network forbidden')
 
 
 def labels(result):
@@ -370,6 +378,18 @@ def test_tool_unavailable_llm_fallback(fixture):
     result = get_applicable_standards(EXAMPLES['E1'], FakeRetriever(), llm=llm, data=DATA)
     assert result['provenance']['llm_status'] == 'fallback'
     assert result['caveat'] == DATA['labels']['caveat']
+
+
+@pytest.mark.parametrize('provider, key', [('anthropic', 'ANTHROPIC_API_KEY'), ('azure_openai', 'AZURE_OPENAI_API_KEY')])
+def test_llm_none_never_builds_live_client(monkeypatch, provider, key):
+    """A real key in the OS environment must not make llm=None go live under the stub."""
+    monkeypatch.setenv('LLM_PROVIDER', provider)
+    monkeypatch.setenv(key, 'dummy-not-a-key')
+    built = []
+    monkeypatch.setattr('standards.tool.make_client', lambda role: built.append(role))  # tool catches raises
+    result = get_applicable_standards(EXAMPLES['E1'], FakeRetriever(), llm=None, data=DATA)
+    assert built == []
+    assert result['provenance']['llm_status'] == 'fallback'
 
 
 def test_fake_request_contract_and_provenance():
