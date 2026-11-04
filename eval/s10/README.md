@@ -19,6 +19,7 @@ Outputs in `--out`:
 - `summary.json`: metrics per setting with 95% CIs, plus provenance:
   - git sha + dirty flag
   - ruleset version + combined sha
+  - engine version + engine code sha (`engine.py`, `guard.py`, `overclaim.py`; per-file shas too)
   - matrix sha (actual and stored)
   - engine version, prompt sha
   - settings, effective effort, seed, n_boot, repeats
@@ -111,6 +112,13 @@ Coverage handling:
 Citations:
 - **Validity** reuses the guard: a cited id that was not retrieved is dropped and logged as `unretrieved_clause`.
 - **Precision and recall** are judged by a human in `citation_review.csv`.
+
+## Version locks
+The runner refuses to start if either lock fails:
+- **Rule data:** the 4 rule YAMLs must match `RULESET_FILES_SHA256` for `RULESET_VERSION`.
+- **Decision/wording code:** `engine.py`, `guard.py` and `overclaim.py` must match `ENGINE_FILES_SHA256` for `standards.ENGINE_VERSION`.
+
+Both live in `standards/ruleset.py` and are hashed after converting CRLF to LF. A change needs a version bump plus new shas.
 
 ## Known limits
 - `--llm fake` only. The live client and retriever are injected by code.

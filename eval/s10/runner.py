@@ -25,7 +25,8 @@ from standards.classifier import PROMPT_SHA256, FakeLLM
 from standards.data_loader import load_data
 from standards.demo import FakeRetriever
 from standards.engine import RANK, evaluate
-from standards.ruleset import MATRIX_FILE, RULESET_FILES_SHA256, RULESET_VERSION, check_ruleset, file_shas
+from standards.ruleset import (MATRIX_FILE, RULESET_FILES_SHA256, RULESET_VERSION, check_engine, check_ruleset,
+                               engine_file_shas, file_shas)
 from standards.tool import get_applicable_standards
 
 from . import metrics as M
@@ -131,6 +132,7 @@ def run_one(entry, setting, repeat, inner, retriever, data):
 def run(profiles, settings, repeats, client_factory, *, retriever=None, seed=0, data=None, out_dir):
     """Execute every (repeat, profile, setting) call in interleaved order; write runs.jsonl."""
     check_ruleset()
+    check_engine()
     data = data or load_data()
     retriever = retriever or FakeRetriever()
     clients = {s.name: client_factory(s) for s in settings}
@@ -199,7 +201,8 @@ def summarise(records, gold, *, settings, repeats, seed, n_boot, split, files, l
     provenance = dict(**git_info(), ruleset=sorted({r['ruleset'] for r in records}), ruleset_version=RULESET_VERSION,
                       ruleset_sha256=check_ruleset(), matrix_sha256=actual[MATRIX_FILE],
                       matrix_sha256_stored=RULESET_FILES_SHA256[MATRIX_FILE],
-                      engine_version=ENGINE_VERSION, prompt_sha256=PROMPT_SHA256,
+                      engine_version=ENGINE_VERSION, engine_sha256=check_engine(),
+                      engine_files_sha256=engine_file_shas(), prompt_sha256=PROMPT_SHA256,
                       settings=[asdict(s) for s in settings],
                       effort_effective={s.name: sorted({str(r['effort_effective']) for r in records if r['setting'] == s.name})
                                         for s in settings},

@@ -103,3 +103,53 @@ def test_iso2018_uses_fda_matrix_and_says_so():
 def test_unknown_framework_raises():
     with pytest.raises(ValueError, match='Unknown framework'):
         RS.ruleset_for('ISO_10993_1_2031')
+
+
+# ---- code lock: engine / guard / over-claim lint tied to ENGINE_VERSION
+from standards import ENGINE_VERSION  # noqa: E402
+
+CODE_DIR = RS.Path(RS.__file__).parent
+
+
+def _code_copy(tmp_path):
+    folder = tmp_path / 'code'
+    folder.mkdir()
+    for name in RS.ENGINE_FILES_SHA256:
+        shutil.copy(CODE_DIR / name, folder / name)
+    return folder
+
+
+def test_engine_shas_match_current_code_and_version():
+    assert set(RS.ENGINE_FILES_SHA256) == {'engine.py', 'guard.py', 'overclaim.py'}
+    assert RS.ENGINE_FILES_VERSION == ENGINE_VERSION == 'S10.v1'
+    assert RS.check_engine() == RS.ENGINE_SHA256
+
+
+@pytest.mark.parametrize('name', sorted(RS.ENGINE_FILES_SHA256))
+def test_one_changed_code_byte_fails_without_engine_version_bump(tmp_path, name):
+    folder = _code_copy(tmp_path)
+    raw = bytearray((folder / name).read_bytes())
+    i = raw.index(b'"""') + 3                          # first docstring character
+    raw[i:i + 1] = b'X' if raw[i:i + 1] != b'X' else b'Y'
+    (folder / name).write_bytes(bytes(raw))
+    with pytest.raises(RS.EngineChanged, match=name.replace('.', r'\.')):
+        RS.check_engine(folder)
+
+
+def test_engine_version_bump_without_new_shas_fails():
+    with pytest.raises(RS.EngineChanged, match='ENGINE_FILES_VERSION'):
+        RS.check_engine(version='S10.v2')
+
+
+def test_crlf_code_copy_still_matches(tmp_path):
+    folder = _code_copy(tmp_path)
+    for name in RS.ENGINE_FILES_SHA256:
+        p = folder / name
+        p.write_bytes(p.read_bytes().replace(b'\n', b'\r\n'))
+    assert RS.check_engine(folder) == RS.ENGINE_SHA256
+
+
+def test_output_provenance_carries_engine_version_and_sha():
+    result = get_applicable_standards(example_profiles()['E1'], FakeRetriever(), llm=FakeLLM(), data=DATA)
+    assert result['provenance']['engine_version'] == ENGINE_VERSION
+    assert result['provenance']['engine_sha256'] == RS.ENGINE_SHA256

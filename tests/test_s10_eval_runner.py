@@ -94,6 +94,8 @@ def test_end_to_end_fake_run(tmp_path):
         assert r['overclaim_hits'] == []
     summary = strict_json(out / 'summary.json')
     prov = summary['provenance']
+    assert prov['engine_version'] == 'S10.v1' and prov['engine_sha256'] == RS.ENGINE_SHA256
+    assert prov['engine_files_sha256'] == RS.ENGINE_FILES_SHA256
     for key in ('git_sha', 'git_dirty', 'ruleset', 'ruleset_version', 'ruleset_sha256', 'matrix_sha256', 'settings',
                 'seed', 'timestamp', 'repeats', 'n_boot', 'effort_effective', 'engine_version', 'prompt_sha256', 'files'):
         assert key in prov, key
@@ -197,6 +199,13 @@ def test_runner_refuses_when_rule_data_changed(tmp_path, monkeypatch):
     monkeypatch.setitem(RS.RULESET_FILES_SHA256, RS.MATRIX_FILE, '0' * 64)
     with pytest.raises(RS.RulesetChanged):
         run_cli(tmp_path)
+
+
+def test_runner_refuses_when_engine_code_changed(tmp_path, monkeypatch):
+    monkeypatch.setitem(RS.ENGINE_FILES_SHA256, 'guard.py', '0' * 64)
+    with pytest.raises(RS.EngineChanged):
+        run_cli(tmp_path)
+    assert not (tmp_path / 'out' / 'runs.jsonl').exists()
 
 
 def test_cli_rejects_live_and_bad_settings(tmp_path):
