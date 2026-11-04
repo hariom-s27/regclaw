@@ -1,0 +1,60 @@
+# OBVIOUSLY FAKE profiles for tests only (ids FAKE-1..3). Not real devices, not an eval set.
+format: s10-eval-profiles.v1
+split: dev
+profiles:
+- id: FAKE-1
+  stratum: S1
+  split: dev
+  contact_category: surface/intact_skin
+  duration: A
+  flags: [attachment_g_material]
+  comment: FAKE fixture - not a real device
+  profile:
+    device_name: FAKE-1 test patch (not a real device)
+    components:
+    - name: FAKE-1 patch
+      contact_nature: surface
+      contact_site: intact_skin
+      exposure: {pattern: single, hours_per_use: 2}
+      materials: [{name: FAKE polymer, material_class: polymer}]
+      sterilization: non_sterile
+- id: FAKE-2
+  stratum: S5
+  split: dev
+  contact_category: implant/tissue_bone
+  duration: C
+  flags: [ethylene_oxide, absorbable]
+  comment: FAKE fixture - not a real device
+  profile:
+    device_name: FAKE-2 test implant (not a real device)
+    components:
+    - name: FAKE-2 implant
+      contact_nature: implant
+      contact_site: tissue_bone
+      exposure: {pattern: continuous, hours_per_use: 8760}
+      materials:
+      - {name: FAKE alloy, material_class: metal_alloy}
+      - {name: FAKE absorbable polymer, material_class: polymer, absorbable_or_degradable: true}
+      sterilization: ethylene_oxide
+- id: FAKE-3
+  stratum: trap
+  split: dev
+  contact_category: externally_communicating/circulating_blood
+  duration: A
+  flags: [repeat_use, multi_component, nano, attachment_g_material]
+  comment: FAKE fixture - not a real device
+  profile:
+    device_name: FAKE-3 test line (not a real device)
+    components:
+    - name: FAKE-3 line
+      contact_nature: externally_communicating
+      contact_site: circulating_blood
+      exposure: {pattern: intermittent_repeat, hours_per_use: 2, uses_per_patient: 10}
+      materials: [{name: FAKE nano-coated polymer, material_class: polymer, submicron_or_nano: true}]
+      sterilization: gamma
+    - name: FAKE-3 hub
+      contact_nature: surface
+      contact_site: intact_skin
+      exposure: {pattern: single, hours_per_use: 1}
+      materials: [{name: FAKE hub polymer, material_class: polymer}]
+      sterilization: gamma
