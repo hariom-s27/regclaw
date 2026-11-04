@@ -1,12 +1,11 @@
 """Validate the entire response, enforce the rule floor, and constrain citations."""
 import json
 import logging
-import re
-import unicodedata
 import jsonschema
 
 from .classifier import LLMResponse, OUTPUT_SCHEMA
 from .engine import RANK
+from .overclaim import find_overclaims
 
 log = logging.getLogger(__name__)
 
@@ -65,8 +64,8 @@ def guard(rules, response, data, candidates, device_specific_standards=()):
         reason = item['reason']
         if label != item['label']:
             reason = template_reason(label, data)
-        cleaned = ' '.join(unicodedata.normalize('NFKC', reason).casefold().split())
-        if not reason.strip() or any(re.search(r'(?<!\w)' + re.escape(phrase) + r'(?!\w)', cleaned) for phrase in banned):
+        # Over-claim regexes live in standards/overclaim.py; YAML banned_phrases are merged in.
+        if not reason.strip() or find_overclaims(reason, banned):
             events.append(dict(type='banned_wording', part=part))
             reason = template_reason(label, data)
         ids = citations(item['clause_ids'], part)
@@ -82,6 +81,11 @@ def guard(rules, response, data, candidates, device_specific_standards=()):
                 events.append(dict(type='disagreement', part=part, rule_label=base['label'], llm_label='omitted'))
     notes = [dict(text=text, clause_ids=[]) for text in rules['notes'] + rules['assumptions']]
     for note in payload['notes'] if valid else []:
+        hits = find_overclaims(note['text'], banned)
+        if hits:
+            # Drop the whole note; log pattern names only, never the model's text.
+            events.append(dict(type='banned_wording_note', patterns=hits))
+            continue
         notes.append(dict(text=note['text'], clause_ids=citations(note['clause_ids'], 'note')))
     order = list(dict.fromkeys(device_specific_standards))
     order += sorted(set(accepted) - set(order))

@@ -1,0 +1,40 @@
+# OBVIOUSLY FAKE gold for tests only. Labels are invented; source pointers are fake ids, no clause text.
+format: s10-eval-gold.v1
+split: dev
+labels:
+- profile_id: FAKE-1
+  item: 'ISO 10993-5'
+  label: mandatory
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.1'}
+- profile_id: FAKE-1
+  item: 'ISO 10993-4'
+  label: not_applicable
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.2'}
+- profile_id: FAKE-1
+  item: 'ISO 10993-11'
+  label: recommended
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.3'}
+- profile_id: FAKE-2
+  item: 'ISO 10993-4'
+  label: mandatory
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.4'}
+- profile_id: FAKE-2
+  item: 'ISO 10993-7'
+  label: mandatory
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.5'}
+- profile_id: FAKE-2
+  item: 'ISO 10993-6'
+  label: mandatory
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.6'}
+- profile_id: FAKE-3
+  item: 'ISO 10993-3'
+  label: mandatory
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.7'}
+- profile_id: FAKE-3
+  item: 'ISO 10993-6'
+  label: not_applicable
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.8'}
+- profile_id: FAKE-3
+  item: 'ISO 10993-13'
+  label: recommended
+  source: {doc: fda-iso10993-1, clause_id: 'fda-iso10993-1:FAKE.9'}
