@@ -230,6 +230,15 @@ It verifies contracts and guard behavior; model quality and service latency need
 [CI](.github/workflows/ci.yml) selects Python 3.11 and the same runner; remote status is TBD until pushed.
 Run live graph checks with `python tasks.py graph --load --from-clauses --checks`; tracing tests stay offline.
 
+## Published evaluation data
+
+This repository is public, and some evaluation data is published on purpose for reproducibility.
+The [goldset/](goldset/) folder holds the obligation gold labels round 1 from two annotators, and ID lists incl. the entity holdout split.
+[goldset/freeze_manifest.json](goldset/freeze_manifest.json) defines which items are holdout.
+The frozen final holdout runs (goldset/freeze_manifest.json) have not been run yet.
+Contamination note: these files have been on GitHub since 2026-10-18; models trained on public GitHub data after that date may have seen them.
+Later answer keys (S8 qrels, S10 gold, S10 holdout) stay in the ignored `data/` folder; only sha manifests are committed.
+
 ## Corpus and licensing
 
 There are no PDFs in this repo.

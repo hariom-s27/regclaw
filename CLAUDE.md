@@ -5,7 +5,7 @@
 - **Part II (PageIndex):** vectorless tree retrieval over the ICMR GTP 2019 guideline → Sonnet navigation agent + Haiku citation check → Ragas evaluation.
 - **Observability:** Langfuse v4 tracing + run summaries.
 
-Python 3.11 · Windows (PowerShell) laptop · repo root = `D:\sem_iitk\sem9\meril` · private GitHub repo `regclaw`.
+Python 3.11 · Windows (PowerShell) laptop · repo root = `D:\sem_iitk\sem9\meril` · public GitHub repo `regclaw`.
 
 ## Rules for every task
 1. **Follow the data contracts below exactly.** Never rename labels, properties, relationship types, tables, columns, JSON fields or doc codes.
