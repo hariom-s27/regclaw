@@ -1,4 +1,6 @@
 """Holdout seal (agreed item 5): refused without --final-holdout or with a missing/mismatched manifest."""
+import builtins
+import io
 import json
 from pathlib import Path
 
@@ -18,6 +20,31 @@ def offline(monkeypatch):
     _netguard.block_network(monkeypatch, 'Network forbidden')
 
 
+def windows_text_open(real):
+    """Windows text mode on any OS: a text-mode write with newline=None turns '\n' into '\r\n' (os.linesep on
+    Windows). Reads, binary writes and newline='' writes are unchanged, as on Windows."""
+    def opened(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+        if 'b' not in mode and any(c in mode for c in 'wax+') and newline is None:
+            newline = '\r\n'
+        return real(file, mode, buffering, encoding, errors, newline, closefd, opener)
+    return opened
+
+
+@pytest.fixture(autouse=True, params=['native', 'windows_text_mode'])
+def line_endings(request, monkeypatch):
+    """Every test here runs twice: with this OS's text mode, and with Windows text mode simulated (the laptop:
+    core.autocrlf=true, CRLF text writes). Path.write_text / Path.open reach io.open; open() is builtins.open."""
+    if request.param == 'windows_text_mode':
+        monkeypatch.setattr(io, 'open', windows_text_open(io.open))
+        monkeypatch.setattr(builtins, 'open', windows_text_open(builtins.open))
+    return request.param
+
+
+def to_crlf(raw: bytes) -> bytes:
+    """CRLF copy built from LF-normalised bytes: correct whether the input is already CRLF (Windows) or LF."""
+    return raw.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+
+
 def make_split(tmp_path, split='holdout', seal=True):
     """Fake holdout files built in tmp_path from the FAKE fixtures (never real data)."""
     prof = yaml.safe_load((FIX / 'fake_profiles.yaml').read_text(encoding='utf-8'))
@@ -28,8 +55,9 @@ def make_split(tmp_path, split='holdout', seal=True):
     folder = tmp_path / split
     folder.mkdir()
     p, g = folder / f'{split}_profiles.yaml', folder / f'{split}_gold.yaml'
-    p.write_text(yaml.safe_dump(prof, sort_keys=False), encoding='utf-8')
-    g.write_text(yaml.safe_dump(gold, sort_keys=False), encoding='utf-8')
+    # hashed by the seal: explicit LF bytes on every OS
+    p.write_bytes(yaml.safe_dump(prof, sort_keys=False).encode('utf-8'))
+    g.write_bytes(yaml.safe_dump(gold, sort_keys=False).encode('utf-8'))
     if seal:
         SG.seal_holdout([p, g], now='2026-11-04T00:00:00+00:00')
     return p, g
@@ -87,7 +115,9 @@ def test_holdout_refused_on_bad_manifest_format(tmp_path):
 def test_crlf_copy_of_sealed_file_still_verifies(tmp_path):
     p, g = make_split(tmp_path)
     for f in (p, g):
-        f.write_bytes(f.read_bytes().replace(b'\n', b'\r\n'))
+        crlf = to_crlf(f.read_bytes())
+        assert b'\r\n' in crlf and b'\r\r\n' not in crlf
+        f.write_bytes(crlf)
     assert SG.load_eval_files(p, g, final_holdout=True)[0] == 'holdout'
 
 

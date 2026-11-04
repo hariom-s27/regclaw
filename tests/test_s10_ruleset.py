@@ -52,12 +52,33 @@ def test_matrix_value_byte_flip_fails(tmp_path):
         RS.check_ruleset(folder)
 
 
-def test_crlf_checkout_still_matches(tmp_path):
+def to_crlf(raw: bytes) -> bytes:
+    """CRLF copy built from LF-normalised bytes: correct whether the input is already CRLF (Windows) or LF."""
+    return raw.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+
+
+def simulate_checkout(folder, names, checkout):
+    """checkout='crlf': the tmp copy looks like a Windows core.autocrlf=true working copy before the test acts."""
+    if checkout == 'crlf':
+        for name in names:
+            p = folder / name
+            p.write_bytes(to_crlf(p.read_bytes()))
+
+
+def write_crlf_copy(folder, names):
+    for name in names:
+        p = folder / name
+        crlf = to_crlf(p.read_bytes())
+        assert b'\r\n' in crlf and b'\r\r\n' not in crlf
+        p.write_bytes(crlf)
+
+
+@pytest.mark.parametrize('checkout', ['lf', 'crlf'])
+def test_crlf_checkout_still_matches(tmp_path, checkout):
     folder = tmp_path / 'data'
     shutil.copytree(RS.Path(RS.__file__).with_name('data'), folder)
-    for name in RS.RULESET_FILES_SHA256:
-        p = folder / name
-        p.write_bytes(p.read_bytes().replace(b'\n', b'\r\n'))
+    simulate_checkout(folder, RS.RULESET_FILES_SHA256, checkout)
+    write_crlf_copy(folder, RS.RULESET_FILES_SHA256)
     assert RS.check_ruleset(folder) == RS.RULESET_SHA256
 
 
@@ -69,8 +90,12 @@ def test_every_fda_output_carries_ruleset_and_exact_disclaimer(key):
     assert result['ruleset_version'] == RS.RULESET_VERSION and result['ruleset_sha256'] == RS.RULESET_SHA256
 
 
-def test_fallback_output_also_carries_ruleset():
+def test_fallback_output_also_carries_ruleset(monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'dummy-not-a-key')       # a key in the OS env must not go live
+    built = []
+    monkeypatch.setattr('standards.tool.make_client', lambda role: built.append(role))
     result = get_applicable_standards(example_profiles()['E1'], FakeRetriever(), llm=None, data=DATA)
+    assert built == []
     assert result['provenance']['llm_status'] == 'fallback'
     assert result['ruleset'].startswith('FDA-2023-AttA') and result['disclaimer'] == FDA_DISCLAIMER
 
@@ -141,11 +166,11 @@ def test_engine_version_bump_without_new_shas_fails():
         RS.check_engine(version='S10.v2')
 
 
-def test_crlf_code_copy_still_matches(tmp_path):
+@pytest.mark.parametrize('checkout', ['lf', 'crlf'])
+def test_crlf_code_copy_still_matches(tmp_path, checkout):
     folder = _code_copy(tmp_path)
-    for name in RS.ENGINE_FILES_SHA256:
-        p = folder / name
-        p.write_bytes(p.read_bytes().replace(b'\n', b'\r\n'))
+    simulate_checkout(folder, RS.ENGINE_FILES_SHA256, checkout)
+    write_crlf_copy(folder, RS.ENGINE_FILES_SHA256)
     assert RS.check_engine(folder) == RS.ENGINE_SHA256
 
 
