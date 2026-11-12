@@ -109,3 +109,15 @@ SELF-AUDIT REPORT — give it at every STOP, before anything else; every heading
 9. Risks for later steps, with a suggested check.
 10. Next: what I need from Shyam.
 At the end of the whole task, also give the rule-9 step log.
+
+## Standing rules (from 13 Nov 2026; these win over older wording above)
+- Work only inside this repo folder. Never create, edit or delete anything outside it.
+- Never open .env or print keys. Never open, print, copy or hash sealed files or holdout sets named in the prompt.
+- If a guard, hook or permission blocks you: STOP and report. Never try another way around it.
+- Never commit or push. At every STOP print one single-line command: git commit -m "subject" -m "body". No AI trailer, no "Co-Authored-By", no "Generated with", no mention of any AI assistant in commits, PR text, code comments, docs or reports.
+- Never delete files with rm -rf or Remove-Item -Recurse; deletions are a human step after an exact list and an explicit yes.
+- Do only what the prompt's approved decision table says; anything else is a question, not an action.
+- Commit code first, then run evaluations, then commit outputs/docs (never evaluate uncommitted code).
+- Each step writes logs/S##_report.md: a PLAIN SUMMARY (5 lines), then the 12-heading SELF-AUDIT from the prompt. Never overwrite an older report.
+- Every number you report comes from a file or command output; name the source.
+- Use .venv\Scripts\python on Windows; tests run in fake mode (tests/conftest.py).
