@@ -1,0 +1,3 @@
+retrieval_eval/*.json text eol=lf
+retrieval_eval/*.md text eol=lf
+retrieval_eval/*.yaml text eol=lf
