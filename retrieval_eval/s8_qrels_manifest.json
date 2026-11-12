@@ -1,0 +1,87 @@
+{
+  "audit_flag": "PASS",
+  "fallback_reason": null,
+  "files": {
+    "agreement": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "labels/agreement_abc.json",
+      "sha256": "573feeeb6e8622d1bb31b4fb7e373513a33e7a793dd07bdf978fdbb252522bf4"
+    },
+    "audit_check": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "labels/audit_check.json",
+      "sha256": "6c63d6c8c841090dc725161d7fa6cd1c841808d961fa65c81892faf66207c074"
+    },
+    "audit_freeze": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "audit/audit_freeze.json",
+      "sha256": "1bafd141b5e115675e2428895f16957b72a92cb16c1409c2e6ac4b11ddcb200c"
+    },
+    "guideline": {
+      "base": "repo",
+      "hashing": "lf_normalised",
+      "path": "retrieval_eval/S8_RELEVANCE_GUIDELINE_v1.0.1.md",
+      "sha256": "437aff0fb9637a34bff22c560be184d4ac14c34c8cf9609fa103f232ff8389f6"
+    },
+    "judge_A_freeze": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "labels/judge_A_freeze.json",
+      "sha256": "c3bf65f8fa62e87beabe95ad376258960f3847f117a8307967e24d1972e172d9"
+    },
+    "judge_B_freeze": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "labels/judge_B_freeze.json",
+      "sha256": "e5085296c447228e704a09c2ed334a581ad38d55b1519a461347b72a267e175d"
+    },
+    "judge_C_freeze": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "labels/judge_C_freeze.json",
+      "sha256": "ae369572018bf71f6a4cdce536fcc4db357f86be4cf9b26d5d6cb920d0133cbb"
+    },
+    "notes_freeze": {
+      "base": "repo",
+      "hashing": "lf_normalised",
+      "path": "retrieval_eval/s8_notes_freeze.json",
+      "sha256": "8ed0f489001e4b5e53459788c98e097046d19a2517a071afb1d6dd78960784b3"
+    },
+    "partD_freeze": {
+      "base": "repo",
+      "hashing": "lf_normalised",
+      "path": "retrieval_eval/s8_partD_freeze.json",
+      "sha256": "504637d41ac10e2566787636aba16677aa40ee1609d2cb3fe8e1652130d856af"
+    },
+    "qrels": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "labels/qrels.tsv",
+      "sha256": "6bc66d768de07e50d67f1524df22f3212066fa9595bb18f6322c696fbc4a064e"
+    },
+    "qrels_meta": {
+      "base": "run",
+      "hashing": "raw_bytes",
+      "path": "labels/qrels_meta.json",
+      "sha256": "3b8bb01320c137707c93c18f761e6f08c425162707d6a53013fbf22f91e8c694"
+    }
+  },
+  "frozen_at": "2026-11-12T18:47:01+00:00",
+  "guideline_in_force": "v1.0.1",
+  "judges_in_force": [
+    "A",
+    "B",
+    "C"
+  ],
+  "judges_read": [
+    "A",
+    "B",
+    "C"
+  ],
+  "label": "provisional (GPT): stage 1 = Azure gpt-5-mini",
+  "merge_mode": "three_judge",
+  "purpose": "S8 qrels freeze (Addendum 2 section 4 step 7; Addendum 4 section 12). s8-analyze refuses unless every sha below matches."
+}
