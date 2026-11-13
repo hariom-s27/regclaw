@@ -1,0 +1,51 @@
+{
+  "counts": {
+    "dev": {
+      "S1": 1,
+      "S2": 1,
+      "S3": 1,
+      "S4": 1,
+      "S5": 1,
+      "S6": 1,
+      "S7": 1,
+      "S8": 1,
+      "trap": 2
+    },
+    "holdout": {
+      "S1": 2,
+      "S2": 2,
+      "S3": 2,
+      "S4": 2,
+      "S5": 2,
+      "S6": 2,
+      "S7": 2,
+      "S8": 2,
+      "trap": 4
+    }
+  },
+  "date": "2026-11-13",
+  "files": {
+    "dev_profiles.yaml": {
+      "rows": 10,
+      "sealed": false,
+      "sha256_lf": "e03a043f717b0a0d0458e3c77a30841df840fcc5230d523a1cc993a61979e24f",
+      "split": "dev"
+    },
+    "holdout_profiles.yaml": {
+      "rows": 20,
+      "sealed": true,
+      "sha256_lf": "18053020afcf33c5eea08e18852292d74c8c4f0263e5800d28e1d3b420063a36",
+      "split": "holdout"
+    },
+    "profiles_draft.yaml": {
+      "rows": 30,
+      "sealed": true,
+      "sha256_lf": "791058c326f2ccc53020f4746df90bbce2e799b7ac23464c2ddc9ea35730f743",
+      "split": "draft (dev + holdout rows)"
+    }
+  },
+  "format": "s10-profiles-manifest.v1",
+  "python": "3.11.17",
+  "seal_manifest": "holdout_manifest.json",
+  "seed": "S10-split-v1"
+}
