@@ -59,7 +59,7 @@ def make_split(tmp_path, split='holdout', seal=True):
     p.write_bytes(yaml.safe_dump(prof, sort_keys=False).encode('utf-8'))
     g.write_bytes(yaml.safe_dump(gold, sort_keys=False).encode('utf-8'))
     if seal:
-        SG.seal_holdout([p, g], now='2026-11-04T00:00:00+00:00')
+        SG.seal_holdout([p, g], p.parent / SG.MANIFEST_NAME, now='2026-11-04T00:00:00+00:00')
     return p, g
 
 
@@ -155,4 +155,63 @@ def test_cli_scores_holdout_with_flag(tmp_path):
     out = tmp_path / 'out'
     assert main(['--profiles', str(p), '--gold', str(g), '--out', str(out), '--repeats', '1', '--n-boot', '20',
                  '--final-holdout']) == 0
+    assert json.loads((out / 'summary.json').read_text())['provenance']['split'] == 'holdout'
+
+
+# ---- S10-27: write-once manifests, explicit path, several manifests ----
+NOW = '2026-11-13T00:00:00+00:00'
+
+
+def two_manifests(tmp_path):
+    """Profiles sealed first, gold sealed later into a second manifest (no file hashed twice)."""
+    p, g = make_split(tmp_path, seal=False)
+    m1 = SG.seal_holdout([p], p.parent / 'profiles_manifest.json', now=NOW)
+    m2 = SG.seal_holdout([g], p.parent / 'gold_manifest.json', now=NOW)
+    return p, g, m1, m2
+
+
+def test_seal_refuses_to_overwrite_a_manifest(tmp_path):
+    p, g = make_split(tmp_path)
+    manifest = p.parent / SG.MANIFEST_NAME
+    before = manifest.read_bytes()
+    with pytest.raises(SG.HoldoutRefused, match='write-once'):
+        SG.seal_holdout([p, g], manifest, now=NOW)
+    assert manifest.read_bytes() == before
+
+
+def test_seal_needs_an_explicit_manifest_path(tmp_path):
+    p, g = make_split(tmp_path, seal=False)
+    with pytest.raises(TypeError):
+        SG.seal_holdout([p, g])
+    assert not (p.parent / SG.MANIFEST_NAME).exists()
+
+
+def test_gold_sealed_later_in_a_second_manifest(tmp_path):
+    p, g, m1, m2 = two_manifests(tmp_path)
+    assert json.loads(m1.read_text())['files'].keys() == {p.name}
+    split, _, gold = SG.load_eval_files(p, g, final_holdout=True, manifest_path=[m1, m2])
+    assert split == 'holdout' and len(gold) == 9
+    with pytest.raises(SG.HoldoutRefused, match='not listed'):
+        SG.load_eval_files(p, g, final_holdout=True, manifest_path=[m1])
+    with pytest.raises(SG.HoldoutRefused, match='manifest missing'):
+        SG.load_eval_files(p, g, final_holdout=True, manifest_path=[m1, p.parent / 'absent.json'])
+
+
+def test_file_listed_in_two_manifests_is_refused(tmp_path):
+    p, g, m1, m2 = two_manifests(tmp_path)
+    m3 = SG.seal_holdout([p, g], p.parent / 'both_manifest.json', now=NOW)
+    with pytest.raises(SG.HoldoutRefused, match='more than one'):
+        SG.load_eval_files(p, g, final_holdout=True, manifest_path=[m1, m3])
+
+
+@pytest.mark.parametrize('flag', ['--holdout-manifest', '--manifest'])
+def test_cli_takes_repeatable_holdout_manifest(tmp_path, flag):
+    p, g, m1, m2 = two_manifests(tmp_path)
+    out = tmp_path / 'out'
+    args = ['--profiles', str(p), '--gold', str(g), '--out', str(out), '--repeats', '1', '--n-boot', '20',
+            '--final-holdout']
+    with pytest.raises(SG.HoldoutRefused):
+        main(args + [flag, str(m1)])                      # gold not listed in the only manifest given
+    assert not out.exists()
+    assert main(args + [flag, str(m1), flag, str(m2)]) == 0
     assert json.loads((out / 'summary.json').read_text())['provenance']['split'] == 'holdout'

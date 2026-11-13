@@ -2,11 +2,17 @@
 
     python -m eval.s10.runner --profiles P.yaml [--gold G.yaml] --out DIR \
         [--repeats 5] [--setting NAME[:effort=LEVEL]]... [--seed 0] [--n-boot 2000] \
-        [--final-holdout [--manifest M.json]] [--llm fake]
+        [--tags TAGS.json] [--final-holdout [--holdout-manifest M.json]...] [--llm fake]
 
 Writes DIR/runs.jsonl (one line per tool call), DIR/summary.json (metrics + provenance)
 and DIR/citation_review.csv (blank human-judgement sheet). Only `--llm fake` exists here:
-the live run plugs a client factory into run() later. Order is interleaved across settings.
+the live run plugs a client factory (e.g. azure_client_factory) into run() later.
+Order is interleaved across settings.
+
+Each run gets llm_detail in {ok, truncated, refusal, parse_error, error, unavailable}, derived
+from the wrapped client's last response; guard.py and its llm_status (ok/fallback) are unchanged.
+summary.json reports metrics twice: primary = all runs as the tool returned them,
+secondary = only runs with llm_detail == ok. With --tags every cell metric is also split by tag.
 """
 import argparse
 import copy
@@ -31,10 +37,17 @@ from standards.tool import get_applicable_standards
 
 from . import metrics as M
 from .split_guard import file_sha, load_eval_files
+from .tagger import TAGS, load_tags
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 SUMMARY_FORMAT = 's10-eval-summary.v1'
+LLM_DETAILS = ('ok', 'truncated', 'refusal', 'parse_error', 'error', 'unavailable')
+PRIMARY_SCOPE = 'primary: all runs as the tool returned them'
+SECONDARY_SCOPE = 'secondary: only runs with llm_detail == ok'
+# Azure S10 provenance fields copied into each run record (S10-09 v2 c).
+LLM_PROVENANCE_KEYS = ('provider', 'reasoning_effort', 'max_completion_tokens', 'finish_reason', 'output_tokens',
+                       'reasoning_tokens', 'cached_input_tokens', 'latency_s', 'attempts', 'http_attempts', 'http_log')
 REVIEW_COLUMNS = ['profile_id', 'setting', 'repeat', 'item', 'label', 'cited_clause_ids',
                   'judgement_supported_partial_not', 'notes']
 
@@ -60,7 +73,7 @@ class SettingLLM:
 
     def __init__(self, inner, setting):
         self.inner, self.setting = inner, setting
-        self.last_request = self.last_response = None
+        self.last_request = self.last_response = self.last_error = None
 
     def __getattr__(self, name):          # model / provider / effort of the wrapped client
         return getattr(self.inner, name)
@@ -70,12 +83,56 @@ class SettingLLM:
         if self.setting.effort is not None:
             request.setdefault('output_config', {})['effort'] = self.setting.effort
         self.last_request = request
-        self.last_response = self.inner.classify(request)
+        self.last_response = self.last_error = None
+        try:
+            self.last_response = self.inner.classify(request)
+        except Exception as exc:
+            self.last_error = type(exc).__name__     # type only; the tool swallows the exception
+            raise
         return self.last_response
 
     @property
     def effort_effective(self):
+        """Effort actually sent. Azure ignores the request field and sends the client's own effort
+        (recorded in the response provenance, S10-25); other clients use the request field."""
+        sent = (getattr(self.last_response, 'provenance', None) or {})
+        if sent.get('provider') == 'azure_openai' and sent.get('reasoning_effort'):
+            return sent['reasoning_effort']
+        if getattr(self.inner, 'provider', None) == 'azure_openai':
+            return self.inner.effort
         return (self.last_request or {}).get('output_config', {}).get('effort')
+
+    @property
+    def http_attempts(self):
+        """HTTP requests sent for the last call (transport retries + truncation re-run), or None
+        when the client does not count them. Read from the client so failed calls count too."""
+        log = getattr(self.inner, 'last_http_log', None)
+        return None if log is None or self.last_request is None else len(log)
+
+
+def llm_detail(response, error, llm_status):
+    """One of LLM_DETAILS for a single run, from the wrapped client's last response/exception."""
+    if error:
+        return 'error'
+    if response is None:
+        return 'unavailable'
+    stop, finish = getattr(response, 'stop_reason', None), getattr(response, 'finish_reason', None)
+    if stop == 'max_tokens' or finish == 'length':
+        return 'truncated'
+    if stop == 'refusal' or finish == 'content_filter':
+        return 'refusal'
+    if stop in (None, 'unavailable'):
+        return 'unavailable'
+    if stop == 'end_turn':
+        return 'ok' if llm_status == 'ok' else 'parse_error'     # empty or schema-invalid data
+    return 'error'
+
+
+def azure_client_factory(setting):
+    """Live factory for S10c (never called in tests): one Azure client per setting, built with
+    that setting's effort so the effort sent equals the setting (S10-25)."""
+    from llm.azure_openai import AzureOpenAIAdapter
+    return AzureOpenAIAdapter('S10', effort=setting.effort)
 
 
 def plan_order(profile_ids, settings, repeats, seed):
@@ -112,9 +169,13 @@ def run_one(entry, setting, repeat, inner, retriever, data):
     final = {p['part']: p['label'] for p in result['standards']}
     events = result['provenance']['disagreements']
     count = lambda kind: sum(e['type'] == kind for e in events)  # noqa: E731
+    sent = getattr(llm.last_response, 'provenance', None) or {}
     return dict(setting=setting.name, effort_effective=llm.effort_effective, repeat=repeat,
                 profile_id=entry['id'], split=entry['split'], stratum=entry['stratum'],
                 llm_status=result['provenance']['llm_status'], model=result['provenance']['model'],
+                llm_detail=llm_detail(llm.last_response, llm.last_error, result['provenance']['llm_status']),
+                llm_error=llm.last_error, http_attempts=llm.http_attempts,
+                llm_provenance={k: sent[k] for k in LLM_PROVENANCE_KEYS if k in sent},
                 final=final, rule=rule, llm=_llm_labels(llm.last_response, result['provenance']['llm_status'], rule),
                 # Diagnostic only (not scored): engine labels per ENDPOINT, merged over components.
                 rule_endpoints={ep: lab for p in rules['parts'] for ep, lab in p['endpoints'].items()},
@@ -136,6 +197,12 @@ def run(profiles, settings, repeats, client_factory, *, retriever=None, seed=0, 
     data = data or load_data()
     retriever = retriever or FakeRetriever()
     clients = {s.name: client_factory(s) for s in settings}
+    for s in settings:      # S10-25: an Azure client sends its own effort, so it must equal the setting's
+        client = clients[s.name]
+        if (s.effort is not None and getattr(client, 'provider', None) == 'azure_openai'
+                and getattr(client, 'effort', None) != s.effort):
+            raise ValueError(f'setting {s.name!r} asks for effort {s.effort!r} but its client sends '
+                             f'{getattr(client, "effort", None)!r}; build one client per setting')
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     records = []
@@ -144,6 +211,9 @@ def run(profiles, settings, repeats, client_factory, *, retriever=None, seed=0, 
             record = dict(call_index=i, **run_one(profiles[pid], s, r, clients[s.name], retriever, data))
             fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + '\n')
             records.append(record)
+    misses = len(getattr(retriever, 'misses', ()))
+    if misses:      # the tool swallows retriever errors; a frozen-candidate miss must never be scored
+        raise RuntimeError(f'{misses} retrieval call(s) had no frozen candidates; no summary written')
     return records
 
 
@@ -168,22 +238,50 @@ def cells_for(records, gold):
     return scored, every, dict(gold_items_missing_in_output=missing, output_items_without_gold=unscored)
 
 
-def score_setting(records, gold, *, n_boot, seed):
+def _gold_block(scored, *, n_boot, seed, rows=True):
+    table = M.disagreement_table(scored)
+    return dict(metrics=M.bootstrap_metrics(scored, n_boot=n_boot, seed=seed), upgrades=M.upgrade_pr(scored),
+                disagreements=table if rows else dict(table=table['table']),
+                profiles_with_under_call=M.profiles_with_under_call(scored))
+
+
+def cell_metrics(records, gold, *, n_boot, seed, tags=None):
+    """Every cell-level metric for a set of runs; with `tags`, the same metrics per tag."""
+    scored, every, coverage = cells_for(records, gold or {})
+    out = dict(blocked_downgrades=M.blocked_downgrades(every), stability=M.stability(every))
+    if gold:
+        out['coverage'] = dict(n_cells=len(scored), **coverage)
+        out.update(_gold_block(scored, n_boot=n_boot, seed=seed))
+    if tags is not None:
+        tag_of = lambda c: tags.get((c['profile_id'], c['item']))  # noqa: E731
+        out['by_tag'] = {}
+        for tag in TAGS:
+            e, sc = [c for c in every if tag_of(c) == tag], [c for c in scored if tag_of(c) == tag]
+            sub = dict(n_output_cells=len(e), blocked_downgrades=M.blocked_downgrades(e), stability=M.stability(e))
+            if gold:
+                sub['n_cells'] = len(sc)
+                sub.update(_gold_block(sc, n_boot=n_boot, seed=seed, rows=False))
+            out['by_tag'][tag] = sub
+        out['untagged_output_cells'] = sum(tag_of(c) is None for c in every)   # output parts without gold or tag
+    return out
+
+
+def score_setting(records, gold, *, n_boot, seed, tags=None):
     out = dict(n_runs=len(records), n_profiles=len({r['profile_id'] for r in records}),
                effort_effective=sorted({str(r['effort_effective']) for r in records}),
                llm_status={s: sum(r['llm_status'] == s for r in records) for s in ('ok', 'fallback')},
+               llm_detail={d: sum(r['llm_detail'] == d for r in records) for d in LLM_DETAILS},
+               http_attempts=sum(r['http_attempts'] or 0 for r in records),
                overclaim_hits=sum(len(r['overclaim_hits']) for r in records),
                wording_events={k: sum(r['wording_events'][k] for r in records) for k in ('banned_wording', 'banned_wording_note')},
                citation_validity={k: sum(r['citation_events'][k] for r in records) for k in ('kept', 'unretrieved_clause')})
-    every = cells_for(records, gold or {})[1]
-    out['blocked_downgrades'] = M.blocked_downgrades(every)
-    out['stability'] = M.stability(every)
-    if gold:
-        scored, _, coverage = cells_for(records, gold)
-        out['coverage'] = dict(n_cells=len(scored), **coverage)
-        out['metrics'] = M.bootstrap_metrics(scored, n_boot=n_boot, seed=seed)
-        out['upgrades'] = M.upgrade_pr(scored)
-        out['disagreements'] = M.disagreement_table(scored)
+    # Primary: all runs as the tool returned them (a failed LLM call falls back to the rule floor).
+    out['metrics_scope'] = PRIMARY_SCOPE
+    out.update(cell_metrics(records, gold, n_boot=n_boot, seed=seed, tags=tags))
+    ok = [r for r in records if r['llm_detail'] == 'ok']
+    out['secondary_ok_only'] = dict(metrics_scope=SECONDARY_SCOPE, n_runs=len(ok),
+                                    n_profiles=len({r['profile_id'] for r in ok}),
+                                    **cell_metrics(ok, gold, n_boot=n_boot, seed=seed, tags=tags))
     return out
 
 
@@ -196,7 +294,8 @@ def git_info():
         return dict(git_sha='unknown', git_dirty=None)
 
 
-def summarise(records, gold, *, settings, repeats, seed, n_boot, split, files, llm_name, retriever_name, now=None):
+def summarise(records, gold, *, settings, repeats, seed, n_boot, split, files, llm_name, retriever_name, now=None,
+              tags=None):
     actual = file_shas()
     provenance = dict(**git_info(), ruleset=sorted({r['ruleset'] for r in records}), ruleset_version=RULESET_VERSION,
                       ruleset_sha256=check_ruleset(), matrix_sha256=actual[MATRIX_FILE],
@@ -210,9 +309,15 @@ def summarise(records, gold, *, settings, repeats, seed, n_boot, split, files, l
                       files={Path(f).name: file_sha(f) for f in files},
                       order='interleaved: repeat > seeded profile shuffle > rotated settings',
                       timestamp=now or datetime.now(timezone.utc).isoformat())
-    by_setting = {s.name: score_setting([r for r in records if r['setting'] == s.name], gold, n_boot=n_boot, seed=seed)
+    provenance['tag_split'] = ('by matrix_settled / always_rule / judgement' if tags is not None
+                               else 'none (no --tags file given)')
+    by_setting = {s.name: score_setting([r for r in records if r['setting'] == s.name], gold, n_boot=n_boot, seed=seed,
+                                        tags=tags)
                   for s in settings}
     return dict(format=SUMMARY_FORMAT, provenance=provenance, settings=by_setting,
+                metric_scopes=dict(primary=PRIMARY_SCOPE, secondary_ok_only=SECONDARY_SCOPE),
+                intervals=dict(bootstrap=M.BOOTSTRAP_CI_LABEL + ': percentile bootstrap over profiles',
+                               profiles_with_under_call='exact Clopper-Pearson 95% interval'),
                 unit='ISO part (endpoint labels in runs.jsonl are diagnostic only)')
 
 
@@ -249,7 +354,9 @@ def main(argv=None, *, client_factory=None, retriever=None, now=None):
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--n-boot', type=int, default=2000)
     ap.add_argument('--final-holdout', action='store_true')
-    ap.add_argument('--manifest')
+    ap.add_argument('--holdout-manifest', '--manifest', dest='manifests', action='append',
+                    help='holdout sha manifest; repeatable (each holdout file must be in exactly one)')
+    ap.add_argument('--tags', help='s10-cell-tags.v1 file; without it no metric is split by tag')
     ap.add_argument('--llm', choices=['fake'], default='fake',
                     help='only the offline FakeLLM exists here; the live run injects client_factory')
     args = ap.parse_args(argv)
@@ -259,12 +366,13 @@ def main(argv=None, *, client_factory=None, retriever=None, now=None):
     if args.repeats < 1:
         ap.error('--repeats must be >= 1')
     split, profiles, gold = load_eval_files(args.profiles, args.gold, final_holdout=args.final_holdout,
-                                            manifest_path=args.manifest)
+                                            manifest_path=args.manifests)
+    tags = load_tags(args.tags, required=list(gold or {})) if args.tags else None
     client_factory = client_factory or (lambda setting: FakeLLM())
     retriever = retriever or FakeRetriever()
     records = run(profiles, settings, args.repeats, client_factory, retriever=retriever, seed=args.seed, out_dir=args.out)
     summary = summarise(records, gold, settings=settings, repeats=args.repeats, seed=args.seed, n_boot=args.n_boot,
-                        split=split, files=[f for f in (args.profiles, args.gold) if f],
+                        tags=tags, split=split, files=[f for f in (args.profiles, args.gold, args.tags) if f],
                         llm_name=records[0]['model'] if records else None,
                         retriever_name=type(retriever).__name__, now=now)
     out = Path(args.out)

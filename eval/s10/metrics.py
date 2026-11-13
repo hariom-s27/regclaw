@@ -14,6 +14,7 @@ from collections import defaultdict
 LABELS = ('not_applicable', 'recommended', 'mandatory')
 RANK = {label: i for i, label in enumerate(LABELS)}
 NAN = float('nan')
+BOOTSTRAP_CI_LABEL = 'approximate (few profiles)'
 
 
 def _ratio(num, den):
@@ -163,6 +164,42 @@ def stability(cells, pred='final'):
                 flipping_cells=flipping, repeats=sorted(repeats))
 
 
+def _binom_cdf(k, n, p):
+    return sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k + 1))
+
+
+def clopper_pearson(k, n, alpha=0.05):
+    """Exact (Clopper-Pearson) two-sided interval for k successes in n trials. Standard library
+    only: bisection on the binomial tail (lower: P(X >= k) = alpha/2, upper: P(X <= k) = alpha/2)."""
+    if n < 1 or not 0 <= k <= n:
+        raise ValueError('clopper_pearson needs n >= 1 and 0 <= k <= n')
+
+    def solve(fn):                       # fn is increasing in p; find fn(p) == alpha / 2
+        lo, hi = 0.0, 1.0
+        for _ in range(200):
+            mid = (lo + hi) / 2
+            if fn(mid) < alpha / 2:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2
+
+    lower = 0.0 if k == 0 else solve(lambda p: 1 - _binom_cdf(k - 1, n, p))
+    upper = 1.0 if k == n else 1 - solve(lambda q: _binom_cdf(k, n, 1 - q))
+    return lower, upper
+
+
+def profiles_with_under_call(cells, pred='final', alpha=0.05):
+    """Profiles with >= 1 under-called cell (gold mandatory, prediction below mandatory, in any
+    repeat) over all scored profiles, with an exact Clopper-Pearson interval."""
+    profiles = {c['profile_id'] for c in cells}
+    hit = {c['profile_id'] for c in cells if c['gold'] == 'mandatory' and RANK[c[pred]] < RANK['mandatory']}
+    n, count = len(profiles), len(hit)
+    lo, hi = clopper_pearson(count, n, alpha) if n else (NAN, NAN)
+    return dict(count=count, n=n, rate=_ratio(count, n), lo=lo, hi=hi, alpha=alpha,
+                method='exact Clopper-Pearson interval', unit='profile')
+
+
 def _quantile(sorted_values, q):
     """Linear interpolation between order statistics (numpy's default 'linear')."""
     pos = (len(sorted_values) - 1) * q
@@ -249,4 +286,4 @@ def bootstrap_metrics(cells, *, n_boot=2000, seed=0, alpha=0.05):
             out[name][k] = dict(point=point[name][k], lo=lo, hi=hi,
                                 n_undefined=len(draws[name][k]) - len(values))
     return dict(metrics=out, n_boot=n_boot, seed=seed, alpha=alpha, n_profiles=len(ids),
-                resampling_unit='profile')
+                resampling_unit='profile', ci_label=BOOTSTRAP_CI_LABEL)
