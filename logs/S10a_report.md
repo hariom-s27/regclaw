@@ -1,6 +1,24 @@
 # S10a report — prep for the S10 evaluation (status, code on fakes, profiles, seal)
 
-Resume file: each Part appends its result and SELF-AUDIT here. Parts done so far: **A**, **B**.
+Resume file: each Part appends its result and SELF-AUDIT here. Parts done so far: **A**, **B**, **C1**, **C2**, **D**.
+
+Branch note: PR #17 merged after Part B (CI #91-#93 green); C2 and D continue on s10/profiles.
+
+## PLAIN SUMMARY
+1. S10a got everything ready to test the "which ISO 10993 parts apply" tool fairly, without spending money on any model call.
+2. New code (output budget, run details, exact intervals, frozen search results, cell tags, one-time seal) was built and tested on fake data only.
+3. 30 test device profiles were written, checked twice by Hariom, checked for copying, split 10 dev / 20 holdout, and the holdout was sealed.
+4. No paid or network call was made, and no locked file (engine, guard, rules, prompt, corpus) was changed.
+5. Next (S10b): write the gold answers, seal them in a second manifest, then run the evaluation.
+
+## Results A–C2 (sources in each Part below)
+| Part | Verdict | Key numbers | Commit / PR |
+|---|---|---|---|
+| A — status + evidence | PASS (Hariom) | baseline 1027 passed / 1 skipped · mcp 20 · obs 1; 4 S10 record files | none (read-only) |
+| B — code on fakes | merged | 1173 passed / 1 skipped · mcp 20 · obs 1; locked-file diff empty | 8111afd, PR #17 (merge 775df42) |
+| C1 — draft profiles | profiles OK | 30 rows validated; 3 per stratum S1–S8 + 6 traps; 21/24 matrix rows; 2 review rounds | git-ignored files only |
+| C2 — checks, split, seal | PASS (Hariom) | checks a/b/c 30/0; dev 10 / holdout 20; 1215 passed / 1 skipped | 511c683 |
+| D — final report | this section + Part D below | full suite in Part D | (this commit) |
 
 ---
 
@@ -321,3 +339,199 @@ New (untracked): `eval/s10/frozen_candidates.py`, `eval/s10/tagger.py`, `tests/f
 - S10c: sum `attempts[].usage` for cost; count paid calls from `http_attempts`; pass `cache_dir`; set the cap env to 64000.
 - S10c: a truncated run after the re-run is scored at the rule floor in primary and dropped from secondary; check `llm_detail` counts before reading metrics.
 - Need: review of this Part, the commit, and "OK plan" for Part C1 after I write that plan.
+
+---
+
+## PART C1 - draft profiles · 2026-11-13 (branch `s10/profiles`)
+
+Naming note: from this Part on, new text names the reviewer and author of record as Hariom.
+
+### Answers received before C1 (Hariom)
+- Strata sheet stays unsealed, with only stratum/trap descriptions and the id -> stratum map.
+- 2 profiles carry `fda-knee` (one S5, one S6 on the implant category). 1 paediatric profile inside a stratum plus the neonate trap; all other profiles have an empty or adult population.
+- Stratum purity: ethylene oxide only in S6; absorbable / in-situ polymerising / nano only in S7; repeat use or multi-component only in S8 (the two-component trap excepted).
+- Id shuffle seed `S10-ids-v1` approved.
+
+### Files written (both git-ignored, `.gitignore:12`)
+- `data/gold/s10/profiles_draft.yaml`: 30 rows, format `s10-eval-profiles.v1`, every row `split: dev` as a placeholder.
+- `data/gold/s10/strata_sheet.md`: descriptions and the id -> stratum map only.
+
+### Id assignment
+Slots in the fixed order S1-1, S1-2, S1-3, ... S8-3, trap-1 ... trap-6; ids 1..30 shuffled with `random.Random('S10-ids-v1')`; slot i gets the i-th shuffled id. Rows are stored in id order.
+
+### Validation output (source: inline script calling `eval.s10.formats.validate_profile_set`)
+```
+validation: OK, 30 rows validated
+rows: 30
+per stratum: {'S1': 3, 'S2': 3, 'S3': 3, 'S4': 3, 'S5': 3, 'S6': 3, 'S7': 3, 'S8': 3, 'trap': 6}
+ids P-001..P-030 unique: True
+rows with fda-knee: 2
+banned-word hits in device_name/comment: 0
+distinct (contact_category, duration) pairs: 21 of 24 matrix rows
+```
+The validation passed on the first run; no row needed a fix. The three matrix rows not covered are implant/tissue-bone at prolonged duration and implant/blood at limited and prolonged duration.
+
+## SELF-AUDIT - Part C1
+
+**1. Asked vs done**
+- C1.1 strata sheet: done (`data/gold/s10/strata_sheet.md`).
+- C1.2 draft with 30 shuffled ids, stratum, contact_category, duration, flags, comment, full DeviceProfile.v1: done.
+- C1.3 validate every row, report counts, no content printed: done (output above).
+- Additions (purity, coverage count, seed recorded, "Hariom"): done.
+- Review loop ("profiles OK" or notes): waiting.
+
+**2. Decisions I made myself**
+- Which device type fills each slot, and its materials, exposure hours, sterilisation, markets and population. Hariom reviews and edits every row.
+- The paediatric profile sits in S2. Rejected S5, to keep the long-term implant rows on adult populations.
+- The nickel-titanium material sits in an S4 profile.
+- The two-component trap gives its non-contact component a non-polymer material class, so the derived skin-material flag is not set by a component that has no contact.
+- The in-situ polymerising profile carries the format's `absorbable` flag, because the format has one flag for both properties (`eval/s10/formats.py:67-68`).
+- The banned-word list in my pre-check also matches the British spellings (sensitis-, haemocompat-).
+
+**3. Deviations**
+- No deviations from the OK'd plan.
+
+**4. How I implemented it**
+- `New-Item -ItemType Directory data\gold\s10`; one inline script for the seeded id shuffle (printed id -> slot only); both files written by hand; one inline validation script (output above); `git status --porcelain`.
+
+**5. Checks with real output**
+- 30 rows valid; 3 per stratum, 6 traps; 2 `fda-knee` rows; 0 banned-word hits; 21 of 24 matrix rows covered. `git status --porcelain` shows only `logs/S10a_report.md` modified.
+
+**6. Frozen items**
+- No code or rule file touched in this Part. `git status` shows no change under `standards/`.
+
+**7. Holdouts and sealed files**
+- No sealed file opened, printed, copied or hashed. The draft is not sealed yet; it is sealed in C2.
+
+**8. Safety**
+- No commit, no push, `.env` not opened, no keys, nothing written outside the repo, no profile content printed in chat or in this report, no AI attribution, no guard or hook block met.
+
+**9. Paid/external calls**
+- 0. The engine's `evaluate`, the tool, the classifier, the tagger and every LLM were not run on the profiles. Only the format validator ran (it uses the engine's duration rule, as allowed).
+
+**10. Not checked / assumed**
+- Clinical realism of each row (materials, sterilisation method, exposure hours) comes from general knowledge and is not checked against a source. Because ethylene oxide is reserved for S6, a few devices use another method than is most common for that device type.
+- Near-match of device names against the demo names, the test fixtures and the S9 smoke inputs is checked by code only in C2; I avoided them by hand here.
+- The exposure hours for long-term devices are nominal values chosen to land in the intended duration class.
+
+**11. Errors and retries**
+- None.
+
+**12. Risks for later steps + what I need from Hariom**
+- Edits to a row can change its derived duration or flags; I re-validate after every round of notes.
+- The paediatric profile, the neonate trap, the nano profile, the novel-material trap and the minimal trap will have no `matrix_settled` cell under the approved tagger order.
+- Need: "profiles OK", or notes to apply exactly.
+
+### C1 review round 1 (Hariom's notes, applied exactly) · 2026-11-13
+Hariom's own check of the draft found nothing mechanically wrong and gave three notes:
+- P-014: comment reworded as given; duration stays A.
+- P-015: comment reworded as given; no field change.
+- P-029: `sterilization` changed from steam to gamma.
+
+Re-validation output (source: the same inline script, plus one check per note):
+```
+validation: OK, 30 rows validated
+rows: 30
+per stratum: {'S1': 3, 'S2': 3, 'S3': 3, 'S4': 3, 'S5': 3, 'S6': 3, 'S7': 3, 'S8': 3, 'trap': 6}
+rows with fda-knee: 2
+banned-word hits in device_name/comment: 0
+distinct (contact_category, duration) pairs: 21 of 24 matrix rows
+note checks: P-014 comment applied: True | duration A
+             P-015 comment applied: True
+             P-029 sterilization: gamma
+             ethylene_oxide outside S6: 0
+             steam rows now: 3
+```
+SELF-AUDIT changes for this round: three edits to `data/gold/s10/profiles_draft.yaml`, nothing else touched; no deviation; no error; 0 paid calls; no sealed file touched; all other headings as in the C1 SELF-AUDIT above. Waiting for "profiles OK".
+
+### C1 review round 2 (P-015 duration check) and "profiles OK"
+Hariom asked for one check before the OK: P-015 declared duration and engine-derived duration must both be C.
+Output of the inline check (`eval.s10.formats.derived_duration` on the draft row): `P-015 declared: C | derived: C`.
+No edit was needed. Hariom's condition is met, so the draft has "profiles OK" (2026-11-13). Next: Part C2 plan, then STOP for "OK plan".
+
+## Part C2 — contamination checks, split, seal, manifest (2026-11-13)
+Plan OK'd by Hariom with answers Q1–Q4 and additions 1–5 (seal approved).
+
+**Code:** `eval/s10/profile_checks.py` (checks a/b/c, seeded split, write-once CLI, seal call) and `tests/test_s10a_profile_checks.py` (42 tests on FAKE rows only; source: `pytest tests/test_s10a_profile_checks.py -q` → `42 passed`).
+
+**Python version (the seeded split depends on it):** 3.11.17 (source: `.venv\Scripts\python.exe --version`; also stored in `profiles_v1.json`).
+
+**Dry run** (`python -m eval.s10.profile_checks data\gold\s10\profiles_draft.yaml --dry-run`, exit 0, nothing written):
+```
+validation: OK, 30 rows
+reference device names: 10
+check (a): pass 30 / fail 0
+check (b): pass 30 / fail 0
+check (c): pass 30 / fail 0
+info (not failures): component_names_in_prompt = 1, material_names_in_prompt = 0
+split        S1   S2   S3   S4   S5   S6   S7   S8 trap  total
+dev           1    1    1    1    1    1    1    1    2     10
+holdout       2    2    2    2    2    2    2    2    4     20
+```
+
+**Write + seal** (`... --write --seal data\gold\s10\holdout_manifest.json --manifest-out eval\s10\manifests\profiles_v1.json`, exit 0). Same check and count lines as the dry run, then:
+```
+seal manifest: data\gold\s10\holdout_manifest.json
+sha256 (LF) dev_profiles.yaml: e03a043f717b0a0d0458e3c77a30841df840fcc5230d523a1cc993a61979e24f
+sha256 (LF) holdout_profiles.yaml: 18053020afcf33c5eea08e18852292d74c8c4f0263e5800d28e1d3b420063a36
+sha256 (LF) profiles_draft.yaml: 791058c326f2ccc53020f4746df90bbce2e799b7ac23464c2ddc9ea35730f743
+python: 3.11.17 | seed: S10-split-v1 | date: 2026-11-13
+```
+Sealed (never to be opened, printed or re-hashed again): `data\gold\s10\holdout_profiles.yaml`, `data\gold\s10\profiles_draft.yaml`. Both are listed in `data\gold\s10\holdout_manifest.json` (write-once). S10b seals the gold into a second manifest.
+Committed manifest: `eval/s10/manifests/profiles_v1.json` (file names, LF sha256, rows, sealed yes/no, counts per split × stratum, seed, date, Python version; no profile content).
+
+**Tests** (source: background run output, exit 0):
+- `pytest tests -q -k "s10"` → `338 passed, 878 deselected`
+- `tasks.py test` → tests `1215 passed, 1 skipped` (= 1173 Part B baseline + 42 new) · mcp `20 passed` · obs `1 passed`
+- `git diff --stat main -- standards` → empty (no frozen file changed)
+- `git status --porcelain` → ` M logs/S10a_report.md`, `?? eval/s10/manifests/`, `?? eval/s10/profile_checks.py`, `?? tests/test_s10a_profile_checks.py`
+
+### SELF-AUDIT (Part C2)
+1. **Asked vs done:** (1) checks + test → done, 30/0 on a, b, c; (2) split with seed `S10-split-v1`, dev 10 / holdout 20, both validated with `validate_profile_set` → done; (3) seal [holdout, draft] in an explicit write-once manifest → done; (4) `profiles_v1.json` → done; S10 tests + full suite → see Tests.
+2. **Decisions I made myself:** near-match = equal, or difflib ratio ≥ 0.85, or whole-word containment only when the shorter name has two or more words (so the test literal "test" does not flag every name containing that word; a whole-name "Test" still fails); reference names = 4 demo + 2 smoke + test literals (`device_name=` in tests/*.py and fixture profile files) → 10 distinct; the CLI also refuses to write when the counts differ from the expected table; the dev sha is hashed once by the script, while the sealed shas are taken from the seal manifest it has just written (no second hash).
+3. **Deviations:** no deviations from the OK'd plan and its additions.
+4. **How I implemented it:** `normalise`, `reference_names`, `near_equal`, `check_rows`, `split_ids`, `split_docs`, `count_table`, `prepare`, `write_and_seal`, `main`; every output file is opened with mode `x` (never overwritten); `--write` refuses to start if any of the 4 outputs exists (exit 4); a failed check or wrong counts mean exit 2 with nothing written; an error after writing starts gives exit 3, no seal, no deletion, and only the error type is printed. Commands: as listed above.
+5. **Checks with real output:** the blocks above; tests: see Tests.
+6. **Frozen items:** none changed (`standards/` untouched; the classifier PROMPT is imported as a string and never called).
+7. **Holdouts and sealed files:** both files were hashed once by `seal_holdout` at seal time (allowed). They were not opened, printed or re-hashed afterwards, and `verify_holdout` was not run on them. No other sealed file was touched.
+8. **Safety:** no profile content printed (ids, counts and shas only); `.env` not opened; nothing written outside the repo; no deletion; no commit or push; no guard or hook block.
+9. **Paid/external calls:** 0. The engine's evaluate, the tool, the classifier, the tagger and every LLM were not run on the profiles.
+10. **Not checked / assumed:** the near-match threshold of 0.85 is a heuristic, so a paraphrase with different words would pass check (a). Check (c) is a substring test only. The 1 component-name hit in the PROMPT is info only by Hariom's Q2 rule and was not inspected. `random.Random(str).sample` is assumed stable for Python 3.11.x.
+11. **Errors and retries:** none (the narrow test passed on the first run).
+12. **Risks for later steps + what I need from Hariom:** `strata_sheet.md` is unsealed and maps holdout ids to strata (accepted in C1 Q1). Any change to a sealed file now breaks `verify_holdout` and needs a versioned amendment. I need Hariom's review and commit, then "OK" for the Part D plan.
+
+## PART D — final report · 2026-11-13
+Plan OK'd by Hariom (Q1 (a), Q2 yes, additions 1–2). Older lines that say "Shyam" are left unchanged on purpose; a separate hygiene prompt renames them.
+
+### Where it fails (limits of the S10 evaluation set-up)
+1. **Retrieval uses only `device_name`.** The tool's query is `device_name + ' biological evaluation ISO 10993'` with `top_k=30` (source: `standards/tool.py`; `eval/s10/frozen_candidates.py::tool_query`, `TOP_K`). Contact, materials, duration and population never reach retrieval, so two profiles with the same name get the same candidates.
+2. **Tags depend on the engine's rule encoding.** `matrix_settled` and `always_rule` are computed from the locked engine and YAMLs (`eval/s10/tagger.py`). If a rule is encoded wrongly, its cells are mis-tagged and the per-tag metrics are biased.
+3. **How the profiles were made.** Profiles drafted by an AI agent, then reviewed and edited by Hariom (2 review rounds); not written independently by a domain expert. Wording approved by Hariom, 2026-11-13. This is a method limitation, not an authorship credit.
+4. **Shared assumptions with a judge.** The drafting agent's model family is the same as gold judge A's planned model family (S10b), so they may share assumptions. S10b will report a leave-one-judge-out sensitivity row.
+5. **The ISO-2025 flag is off.** Eval profiles must use `framework: FDA_2023_ATTACHMENT_A` (`eval/s10/formats.py:99`), so the ISO 10993-1:2025 anchor rows (`standards/ruleset.py:28`) and the 2025 changes are not tested: genotoxicity for prolonged contact and the MMP rule.
+6. **Matrix coverage 21 of 24 rows.** The 3 missing rows are all implant rows: implant/tissue_bone B, implant/blood A, implant/blood B (source: C1 validation output).
+7. **One component name appears in the classifier PROMPT.** Counted as info only under Hariom's C2 Q2 rule and not inspected (source: C2 output `component_names_in_prompt = 1`).
+8. **Small n.** 20 holdout profiles, so intervals are wide; the bootstrap is labelled "approximate (few profiles)" and `profiles_with_under_call` uses an exact Clopper-Pearson interval (`eval/s10/metrics.py`).
+9. **Check (a) is a heuristic.** difflib ratio ≥ 0.85 plus whole-word containment (2+ words); a paraphrase with different words would pass. Check (c) is a plain substring test.
+10. **`strata_sheet.md` is not sealed** and maps holdout ids to strata (accepted in C1 Q1).
+11. **The seeded split assumes Python 3.11.x** behaviour of `random.Random(str).sample` (run on 3.11.17).
+
+### Tests (Part D)
+Source: `.\.venv\Scripts\python.exe tasks.py test` (exit 0), then git.
+- tests `1215 passed, 1 skipped` · mcp `20 passed` · obs `1 passed`
+- `git diff --stat main -- standards` → empty
+- `git status --porcelain` → ` M logs/S10a_report.md` only
+
+## SELF-AUDIT — Part D
+1. **Asked vs done:** PLAIN SUMMARY → done; Results A–C2 table → done; "where it fails" with all 6 named items and addition 1 → done (11 items); full suite → see Tests; header line updated; "Shyam" lines left unchanged (addition 2).
+2. **Decisions I made myself:** added items 8–11 (limits already recorded in C1/C2, as listed in the OK'd plan); the summary table cites numbers already in this file.
+3. **Deviations:** none.
+4. **How I implemented it:** one Edit (header line + PLAIN SUMMARY + results table) and one append of this section to `logs/S10a_report.md`; commands: `tasks.py test`, `git diff --stat main -- standards`, `git status --porcelain`.
+5. **Checks with real output:** see Tests.
+6. **Frozen items:** none changed (see the `standards` diff in Tests).
+7. **Holdouts and sealed files:** none opened, printed, copied or hashed in Part D; no file under `data/gold/s10/` was read.
+8. **Safety:** no `.env`; nothing written outside the repo; no deletion; no commit or push; no guard or hook block; no profile content in this report.
+9. **Paid/external calls:** 0.
+10. **Not checked / assumed:** the "where it fails" list is from the evidence in this file and the code named in it; clinical realism of the profiles was not checked by an independent expert (item 3).
+11. **Errors and retries:** none.
+12. **Risks for later steps + what I need from Hariom:** S10b needs the gold sealed in a second manifest (write-once) and the leave-one-judge-out row (item 4); a rename of old "Shyam" lines must not touch sealed files. I need Hariom's review and commit.
