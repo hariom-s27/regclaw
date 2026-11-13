@@ -1,8 +1,24 @@
 # S10a report — prep for the S10 evaluation (status, code on fakes, profiles, seal)
 
-Resume file: each Part appends its result and SELF-AUDIT here. Parts done so far: **A**, **B**, **C1 (draft written, waiting for Hariom's review)**.
+Resume file: each Part appends its result and SELF-AUDIT here. Parts done so far: **A**, **B**, **C1**, **C2**, **D**.
 
 Branch note: PR #17 merged after Part B (CI #91-#93 green); C2 and D continue on s10/profiles.
+
+## PLAIN SUMMARY
+1. S10a got everything ready to test the "which ISO 10993 parts apply" tool fairly, without spending money on any model call.
+2. New code (output budget, run details, exact intervals, frozen search results, cell tags, one-time seal) was built and tested on fake data only.
+3. 30 test device profiles were written, checked twice by Hariom, checked for copying, split 10 dev / 20 holdout, and the holdout was sealed.
+4. No paid or network call was made, and no locked file (engine, guard, rules, prompt, corpus) was changed.
+5. Next (S10b): write the gold answers, seal them in a second manifest, then run the evaluation.
+
+## Results A–C2 (sources in each Part below)
+| Part | Verdict | Key numbers | Commit / PR |
+|---|---|---|---|
+| A — status + evidence | PASS (Hariom) | baseline 1027 passed / 1 skipped · mcp 20 · obs 1; 4 S10 record files | none (read-only) |
+| B — code on fakes | merged | 1173 passed / 1 skipped · mcp 20 · obs 1; locked-file diff empty | 8111afd, PR #17 (merge 775df42) |
+| C1 — draft profiles | profiles OK | 30 rows validated; 3 per stratum S1–S8 + 6 traps; 21/24 matrix rows; 2 review rounds | git-ignored files only |
+| C2 — checks, split, seal | PASS (Hariom) | checks a/b/c 30/0; dev 10 / holdout 20; 1215 passed / 1 skipped | 511c683 |
+| D — final report | this section + Part D below | full suite in Part D | (this commit) |
 
 ---
 
@@ -483,3 +499,39 @@ Committed manifest: `eval/s10/manifests/profiles_v1.json` (file names, LF sha256
 10. **Not checked / assumed:** the near-match threshold of 0.85 is a heuristic, so a paraphrase with different words would pass check (a). Check (c) is a substring test only. The 1 component-name hit in the PROMPT is info only by Hariom's Q2 rule and was not inspected. `random.Random(str).sample` is assumed stable for Python 3.11.x.
 11. **Errors and retries:** none (the narrow test passed on the first run).
 12. **Risks for later steps + what I need from Hariom:** `strata_sheet.md` is unsealed and maps holdout ids to strata (accepted in C1 Q1). Any change to a sealed file now breaks `verify_holdout` and needs a versioned amendment. I need Hariom's review and commit, then "OK" for the Part D plan.
+
+## PART D — final report · 2026-11-13
+Plan OK'd by Hariom (Q1 (a), Q2 yes, additions 1–2). Older lines that say "Shyam" are left unchanged on purpose; a separate hygiene prompt renames them.
+
+### Where it fails (limits of the S10 evaluation set-up)
+1. **Retrieval uses only `device_name`.** The tool's query is `device_name + ' biological evaluation ISO 10993'` with `top_k=30` (source: `standards/tool.py`; `eval/s10/frozen_candidates.py::tool_query`, `TOP_K`). Contact, materials, duration and population never reach retrieval, so two profiles with the same name get the same candidates.
+2. **Tags depend on the engine's rule encoding.** `matrix_settled` and `always_rule` are computed from the locked engine and YAMLs (`eval/s10/tagger.py`). If a rule is encoded wrongly, its cells are mis-tagged and the per-tag metrics are biased.
+3. **How the profiles were made.** Profiles drafted by an AI agent, then reviewed and edited by Hariom (2 review rounds); not written independently by a domain expert. Wording approved by Hariom, 2026-11-13. This is a method limitation, not an authorship credit.
+4. **Shared assumptions with a judge.** The drafting agent's model family is the same as gold judge A's planned model family (S10b), so they may share assumptions. S10b will report a leave-one-judge-out sensitivity row.
+5. **The ISO-2025 flag is off.** Eval profiles must use `framework: FDA_2023_ATTACHMENT_A` (`eval/s10/formats.py:99`), so the ISO 10993-1:2025 anchor rows (`standards/ruleset.py:28`) and the 2025 changes are not tested: genotoxicity for prolonged contact and the MMP rule.
+6. **Matrix coverage 21 of 24 rows.** The 3 missing rows are all implant rows: implant/tissue_bone B, implant/blood A, implant/blood B (source: C1 validation output).
+7. **One component name appears in the classifier PROMPT.** Counted as info only under Hariom's C2 Q2 rule and not inspected (source: C2 output `component_names_in_prompt = 1`).
+8. **Small n.** 20 holdout profiles, so intervals are wide; the bootstrap is labelled "approximate (few profiles)" and `profiles_with_under_call` uses an exact Clopper-Pearson interval (`eval/s10/metrics.py`).
+9. **Check (a) is a heuristic.** difflib ratio ≥ 0.85 plus whole-word containment (2+ words); a paraphrase with different words would pass. Check (c) is a plain substring test.
+10. **`strata_sheet.md` is not sealed** and maps holdout ids to strata (accepted in C1 Q1).
+11. **The seeded split assumes Python 3.11.x** behaviour of `random.Random(str).sample` (run on 3.11.17).
+
+### Tests (Part D)
+Source: `.\.venv\Scripts\python.exe tasks.py test` (exit 0), then git.
+- tests `1215 passed, 1 skipped` · mcp `20 passed` · obs `1 passed`
+- `git diff --stat main -- standards` → empty
+- `git status --porcelain` → ` M logs/S10a_report.md` only
+
+## SELF-AUDIT — Part D
+1. **Asked vs done:** PLAIN SUMMARY → done; Results A–C2 table → done; "where it fails" with all 6 named items and addition 1 → done (11 items); full suite → see Tests; header line updated; "Shyam" lines left unchanged (addition 2).
+2. **Decisions I made myself:** added items 8–11 (limits already recorded in C1/C2, as listed in the OK'd plan); the summary table cites numbers already in this file.
+3. **Deviations:** none.
+4. **How I implemented it:** one Edit (header line + PLAIN SUMMARY + results table) and one append of this section to `logs/S10a_report.md`; commands: `tasks.py test`, `git diff --stat main -- standards`, `git status --porcelain`.
+5. **Checks with real output:** see Tests.
+6. **Frozen items:** none changed (see the `standards` diff in Tests).
+7. **Holdouts and sealed files:** none opened, printed, copied or hashed in Part D; no file under `data/gold/s10/` was read.
+8. **Safety:** no `.env`; nothing written outside the repo; no deletion; no commit or push; no guard or hook block; no profile content in this report.
+9. **Paid/external calls:** 0.
+10. **Not checked / assumed:** the "where it fails" list is from the evidence in this file and the code named in it; clinical realism of the profiles was not checked by an independent expert (item 3).
+11. **Errors and retries:** none.
+12. **Risks for later steps + what I need from Hariom:** S10b needs the gold sealed in a second manifest (write-once) and the leave-one-judge-out row (item 4); a rename of old "Shyam" lines must not touch sealed files. I need Hariom's review and commit.
