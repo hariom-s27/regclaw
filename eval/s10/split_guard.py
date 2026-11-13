@@ -29,7 +29,7 @@ def file_sha(path) -> str:
 
 
 def seal_holdout(files, manifest_path, *, now=None):
-    """Write the sha manifest for the holdout files (run once, when Hariom seals the set).
+    """Write the sha manifest for the holdout files (run once, when Shyam seals the set).
 
     `manifest_path` is explicit and WRITE-ONCE: an existing manifest is never overwritten.
     Files sealed later (e.g. the gold) go into a second manifest; see verify_holdout."""
