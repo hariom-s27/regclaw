@@ -14,9 +14,20 @@ Python 3.11 · Windows (PowerShell) laptop · repo root = `D:\sem_iitk\sem9\meri
 4. **Tests:** add/extend pytest tests for new code; run `python tasks.py test` before finishing. Tests must pass in stub mode with no API keys or databases.
 5. **MCP server:** never `print()` in `mcp/`; log to stderr only (stdout carries JSON-RPC).
 6. **Secrets:** read keys from `.env` (template `env.example`); never hard-code or print them.
-7. Git: see Standing rules (never commit or push; print one single-line commit command at every STOP).
+7. **Git:** before any commit, show `git status` and the full list of files to be committed, then STOP and wait for the user's OK. Never add a remote and never push. Commit message: `<step>: <summary>`.
 8. **Never commit:** `.env`, any `*.pdf` (incl. `report.pdf`, `data/pdfs/`), model weights (`*.safetensors`, `*.bin`, `obligation/models/`), `pageindex/store/`, caches in `data/*.json`, research notes.
-9. Step log: see Standing rules (each step writes logs/S##_report.md).
+9. **Finish every task with a step log in your final message** (do NOT write log files; the user saves it in the claude.ai Project):
+
+```markdown
+# <step-id> — <title>
+**Date:** YYYY-MM-DD · **Status:** done | blocked
+## Did
+## Found
+## Decided (and why)
+## Remaining
+## Next
+```
+Also list every file created or changed, and the test results.
 
 ## Decision checklist (before any non-trivial change)
 1. **Options:** list at least 2 options, including "do nothing / keep current".
@@ -87,19 +98,17 @@ Both modes:
 - Tests: run the narrowest test first (one file or -k). The full suite still runs before finishing every task (rule 4), and also before every STOP that proposes a commit.
 
 SELF-AUDIT REPORT — give it at every STOP, before anything else; every heading, "none" if empty, short bullets, numbers instead of prose:
-1. Asked vs done
-2. Decisions I made myself
-3. Deviations
-4. How I implemented it
-5. Checks with real output
-6. Frozen items
-7. Holdouts and sealed files
-8. Safety
-9. Paid/external calls
-10. Not checked / assumed
-11. Errors and retries
-12. Risks for later steps + what I need from Hariom
-At the end of the whole task, finish logs/S##_report.md (see Standing rules).
+1. Asked vs done: each numbered step of the prompt → done / partly / not done.
+2. Decisions I made myself: choice, options rejected, why.
+3. Deviations from the prompt or the agreed plan: what, why, effect (or "no deviations").
+4. Implementation: files created/changed (path + one line), main functions, exact commands run.
+5. Checks with real output: per-suite pass/fail/skip counts, shas, row counts.
+6. Not checked / assumed, and how it could be wrong.
+7. Errors and retries: each error, cause, what I did.
+8. Safety: no sealed/data file opened, no forbidden folder written, no commit/push unless told, API calls (count).
+9. Risks for later steps, with a suggested check.
+10. Next: what I need from Shyam.
+At the end of the whole task, also give the rule-9 step log.
 
 ## Standing rules (from 13 Nov 2026; these win over older wording above)
 - Work only inside this repo folder. Never create, edit or delete anything outside it.
@@ -112,4 +121,3 @@ At the end of the whole task, finish logs/S##_report.md (see Standing rules).
 - Each step writes logs/S##_report.md: a PLAIN SUMMARY (5 lines), then the 12-heading SELF-AUDIT from the prompt. Never overwrite an older report.
 - Every number you report comes from a file or command output; name the source.
 - Use .venv\Scripts\python on Windows; tests run in fake mode (tests/conftest.py).
-- Older records say 'Shyam' (Hariom's earlier handle); leave them as written.
