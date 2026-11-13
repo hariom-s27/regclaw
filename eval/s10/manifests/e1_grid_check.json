@@ -1,0 +1,88 @@
+{
+  "format": "s10-e1-grid-check.v1",
+  "grid_file": "data/gold/s10/e1_fda_grid_hariom.csv",
+  "grid_sha256_lf": "c42e67d551d3fc62b77f9f32d0d6a7421e29747d8e76d081fdad80e6b775fdf4",
+  "yaml_file": "standards/data/fda2023_attachment_a.v1.yaml",
+  "yaml_sha256_lf": "5989b50fd98a89c6d4dad246bf88268b2d009eb98cdb00ec4d750a8825b44804",
+  "rows": 24,
+  "cells_compared": 264,
+  "endpoint_columns": [
+    "Cyto",
+    "Sens",
+    "Irr",
+    "AST",
+    "MMP",
+    "SubA",
+    "Geno",
+    "Impl",
+    "Hemo",
+    "Chr",
+    "Carc"
+  ],
+  "mismatches": [],
+  "repro_degr_info": {
+    "Repro": {
+      "marked_count": 0,
+      "rows": []
+    },
+    "Degr": {
+      "marked_count": 0,
+      "rows": []
+    }
+  },
+  "footnote_notes": [
+    {
+      "nature": "externally_communicating",
+      "site": "circulating_blood",
+      "duration": "A",
+      "grid_symbols": "^ on Geno",
+      "yaml_cell_footnotes": {
+        "Geno": "extracorporeal"
+      }
+    },
+    {
+      "nature": "externally_communicating",
+      "site": "tissue_bone_dentin",
+      "duration": "A",
+      "grid_symbols": "+ on site label",
+      "yaml_cell_footnotes": {}
+    },
+    {
+      "nature": "externally_communicating",
+      "site": "tissue_bone_dentin",
+      "duration": "B",
+      "grid_symbols": "+ on site label",
+      "yaml_cell_footnotes": {}
+    },
+    {
+      "nature": "externally_communicating",
+      "site": "tissue_bone_dentin",
+      "duration": "C",
+      "grid_symbols": "+ on site label",
+      "yaml_cell_footnotes": {}
+    },
+    {
+      "nature": "implant",
+      "site": "tissue_bone",
+      "duration": "A",
+      "grid_symbols": "+ on site label",
+      "yaml_cell_footnotes": {}
+    },
+    {
+      "nature": "implant",
+      "site": "tissue_bone",
+      "duration": "B",
+      "grid_symbols": "+ on site label",
+      "yaml_cell_footnotes": {}
+    },
+    {
+      "nature": "implant",
+      "site": "tissue_bone",
+      "duration": "C",
+      "grid_symbols": "+ on site label",
+      "yaml_cell_footnotes": {}
+    }
+  ],
+  "verdict": "match",
+  "date": "2026-11-13T23:27:30.239414+00:00"
+}
