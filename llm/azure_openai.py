@@ -22,12 +22,42 @@ SPAN_NAMES = {'s8_cypher': 'cypher.generate', 's8_hyde': 'hyde.generate', 's8_pr
 # 49% of first attempts. Only these roles get more completion headroom (x5 at any effort):
 # 800 -> 4,000 on the first attempt, 1,600 -> 8,000 on the retry. S4, S10, s8_prelabel unchanged.
 ROLE_BUDGET_SCALE = {'s8_cypher': 5, 's8_hyde': 5}
+# S10-09 v2: optional output budget and client timeout for role S10 only. Unset = behaviour unchanged.
+MAX_COMPLETION_CAP = 128_000
+
+
+def s10_cap():
+    """AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS (int 1..128000) or None when unset."""
+    raw = os.getenv('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', '').strip()
+    if not raw:
+        return None
+    try:
+        cap = int(raw)
+    except ValueError:
+        cap = 0
+    if not 1 <= cap <= MAX_COMPLETION_CAP:
+        raise ValueError(f'AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS must be an integer in 1..{MAX_COMPLETION_CAP}')
+    return cap
+
+
+def s10_timeout():
+    """AZURE_OPENAI_S10_TIMEOUT_S (float > 0) or None when unset."""
+    raw = os.getenv('AZURE_OPENAI_S10_TIMEOUT_S', '').strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.0
+    if not 0 < value < float('inf'):
+        raise ValueError('AZURE_OPENAI_S10_TIMEOUT_S must be a number greater than 0')
+    return value
 
 
 class AzureOpenAIAdapter:
     provider = 'azure_openai'
 
-    def __init__(self, role, *, mode='structured', sdk_client=None):
+    def __init__(self, role, *, mode='structured', sdk_client=None, effort=None):
         if role not in {'S4', 'S10', *S8_ROLES}:
             raise ValueError('role must be S4, S10, s8_cypher, s8_hyde or s8_prelabel')
         if mode not in {'structured', 'strict_tool'}:
@@ -37,31 +67,46 @@ class AzureOpenAIAdapter:
         env_role = 'S8' if role in S8_ROLES else role
         self.model = (os.getenv('AZURE_OPENAI_S8_DEPLOYMENT', 'gpt-5-mini')
                       if role in S8_ROLES else os.environ[f'AZURE_OPENAI_{role}_DEPLOYMENT'])
-        self.effort = os.getenv(f'AZURE_OPENAI_{env_role}_REASONING_EFFORT',
-                                'high' if role == 'S10' else 'low')
+        # S10-25: an explicit effort wins; None keeps the env/default behaviour.
+        self.effort = effort if effort is not None else os.getenv(
+            f'AZURE_OPENAI_{env_role}_REASONING_EFFORT', 'high' if role == 'S10' else 'low')
         if self.effort not in {'minimal', 'low', 'medium', 'high'}:
             raise ValueError('Azure reasoning effort must be minimal, low, medium or high')
+        self.cap = s10_cap() if role == 'S10' else None
+        self.timeout = s10_timeout() if role == 'S10' else None
+        self.last_http_log = []
         if sdk_client is None:
             from openai import OpenAI
-            sdk_client = OpenAI(
+            options = dict(
                 base_url=os.environ['AZURE_OPENAI_ENDPOINT'].rstrip('/') + '/openai/v1/',
                 api_key=os.environ['AZURE_OPENAI_API_KEY'],
                 # S4 retries belong to ner.extract; S10 policy is matched below.
                 max_retries=0)
+            if self.timeout is not None:
+                options['timeout'] = self.timeout
+            sdk_client = OpenAI(**options)
         self.client = sdk_client
 
-    def _send(self, mapped):
+    def _send(self, mapped, http_log=None):
         # Match anthropic 1.14's S10 policy, including long Retry-After values.
         # OpenAI 2.54's own retry policy rejects Retry-After >120s, so leaving
         # SDK retries enabled would subtly change the existing S10 policy.
+        # http_log (optional) gets one row per HTTP request sent, failed or not.
         from openai import APIConnectionError
+        cap = mapped.get('max_completion_tokens')
         for attempt in range(3 if self.role == 'S10' else 1):
             try:
-                return self.client.chat.completions.create(**mapped)
+                result = self.client.chat.completions.create(**mapped)
+                if http_log is not None:
+                    http_log.append(dict(status='ok', finish_reason=None, max_completion_tokens=cap))
+                return result
             except Exception as exc:
                 response = getattr(exc, 'response', None)
                 headers = response.headers if response is not None else {}
                 status = getattr(exc, 'status_code', None)
+                if http_log is not None:
+                    http_log.append(dict(status=status if isinstance(status, int) else type(exc).__name__,
+                                         finish_reason=None, max_completion_tokens=cap))
                 override = headers.get('x-should-retry')
                 retry = (isinstance(exc, APIConnectionError) or status in (408, 409, 429)
                          or isinstance(status, int) and status >= 500)
@@ -85,7 +130,7 @@ class AzureOpenAIAdapter:
                     delay = min(.5 * 2**attempt, 8) * (1 - .25 * random())
                 time.sleep(min(delay, 4_294_967.0))
 
-    def map_request(self, request):
+    def map_request(self, request, *, cap=None):
         system = request['system']
         if isinstance(system, list):
             system = ''.join(block['text'] for block in system)
@@ -103,6 +148,10 @@ class AzureOpenAIAdapter:
         scale = (ROLE_BUDGET_SCALE.get(self.role)
                  or {'minimal': 1, 'low': 1, 'medium': 2, 'high': 3}[self.effort])
         budget = request['max_tokens'] * scale
+        # S10-09 v2: the env cap (or the one-off doubled cap of the truncation re-run) replaces
+        # the scaled budget for role S10 at every effort.
+        if self.role == 'S10' and (cap or self.cap) is not None:
+            budget = cap or self.cap
         return dict(model=self.model, max_completion_tokens=budget,
                     reasoning_effort=self.effort,
                     messages=[dict(role='system', content=system)] + copy.deepcopy(request['messages']),
@@ -116,11 +165,37 @@ class AzureOpenAIAdapter:
         tag = {} if version is None else {'prompt_version': version}
         with stage(span_name, as_type='generation', model=self.model,
                    metadata={**provenance(self), **tag}) as observation:
-            mapped = self.map_request(request)
-            response = self._send(mapped)
-            choice = response.choices[0]
-            message = choice.message
-            raw_finish = choice.finish_reason
+            http_log, attempts, cap = [], [], None
+            self.last_http_log = http_log   # readable by the caller even when _send raises
+            while True:
+                attempt_started = time.perf_counter()
+                sent_before = len(http_log)
+                mapped = self.map_request(request, cap=cap)
+                response = self._send(mapped, http_log)
+                choice = response.choices[0]
+                message = choice.message
+                raw_finish = choice.finish_reason
+                http_log[-1]['finish_reason'] = raw_finish
+                raw_usage = response.usage
+                usage = {} if raw_usage is None else dict(
+                    input_tokens=raw_usage.prompt_tokens, output_tokens=raw_usage.completion_tokens)
+                completion_details = getattr(raw_usage, 'completion_tokens_details', None)
+                prompt_details = getattr(raw_usage, 'prompt_tokens_details', None)
+                if completion_details is not None:
+                    usage['reasoning_tokens'] = getattr(completion_details, 'reasoning_tokens', 0) or 0
+                if prompt_details is not None:
+                    usage['cache_read_input_tokens'] = getattr(prompt_details, 'cached_tokens', 0) or 0
+                sent_cap = mapped['max_completion_tokens']
+                attempts.append(dict(max_completion_tokens=sent_cap, finish_reason=raw_finish, usage=dict(usage),
+                                     latency_s=round(time.perf_counter() - attempt_started, 3),
+                                     http_attempts=len(http_log) - sent_before))
+                # S10-09 v2 (d): one automatic re-run at 2x the env cap (<= 128000) after a truncation.
+                doubled = min(2 * sent_cap, MAX_COMPLETION_CAP)
+                if (self.role == 'S10' and self.cap is not None and raw_finish == 'length'
+                        and len(attempts) == 1 and doubled > sent_cap):
+                    cap = doubled
+                    continue
+                break
             if getattr(message, 'refusal', None):
                 stop = 'refusal'
             else:
@@ -130,18 +205,16 @@ class AzureOpenAIAdapter:
                 data = json.loads(message.content or '')
             except (ValueError, TypeError):
                 data = {}
-            raw_usage = response.usage
-            usage = {} if raw_usage is None else dict(
-                input_tokens=raw_usage.prompt_tokens, output_tokens=raw_usage.completion_tokens)
-            completion_details = getattr(raw_usage, 'completion_tokens_details', None)
-            prompt_details = getattr(raw_usage, 'prompt_tokens_details', None)
-            if completion_details is not None:
-                usage['reasoning_tokens'] = getattr(completion_details, 'reasoning_tokens', 0) or 0
-            if prompt_details is not None:
-                usage['cache_read_input_tokens'] = getattr(prompt_details, 'cached_tokens', 0) or 0
             details = provenance(self, getattr(response, 'model', None))
             if self.role in ROLE_BUDGET_SCALE:  # record the real cap; other roles' provenance unchanged
                 details['max_completion_tokens'] = mapped['max_completion_tokens']
+            if self.role == 'S10':  # S10-09 v2 (c) + S10-25: what was actually sent and what came back
+                details.update(reasoning_effort=mapped['reasoning_effort'],
+                               max_completion_tokens=mapped['max_completion_tokens'], finish_reason=raw_finish,
+                               output_tokens=usage.get('output_tokens'), reasoning_tokens=usage.get('reasoning_tokens'),
+                               cached_input_tokens=usage.get('cache_read_input_tokens'),
+                               latency_s=round(time.perf_counter() - started, 3),
+                               attempts=attempts, http_attempts=len(http_log), http_log=http_log)
             record_response(observation, SimpleNamespace(model=self.model, usage=usage))
             if observation is not None:
                 observation.update(metadata={**details, **tag, 'finish_reason': raw_finish,

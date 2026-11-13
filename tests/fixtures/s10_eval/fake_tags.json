@@ -1,0 +1,16 @@
+{
+  "format": "s10-cell-tags.v1",
+  "tags": [
+    {"profile_id": "FAKE-1", "item": "ISO 10993-1", "tag": "always_rule"},
+    {"profile_id": "FAKE-1", "item": "ISO 10993-5", "tag": "matrix_settled"},
+    {"profile_id": "FAKE-1", "item": "ISO 10993-4", "tag": "matrix_settled"},
+    {"profile_id": "FAKE-1", "item": "ISO 10993-11", "tag": "matrix_settled"},
+    {"profile_id": "FAKE-2", "item": "ISO 10993-1", "tag": "always_rule"},
+    {"profile_id": "FAKE-2", "item": "ISO 10993-4", "tag": "judgement"},
+    {"profile_id": "FAKE-2", "item": "ISO 10993-7", "tag": "judgement"},
+    {"profile_id": "FAKE-2", "item": "ISO 10993-6", "tag": "matrix_settled"},
+    {"profile_id": "FAKE-3", "item": "ISO 10993-3", "tag": "judgement"},
+    {"profile_id": "FAKE-3", "item": "ISO 10993-6", "tag": "judgement"},
+    {"profile_id": "FAKE-3", "item": "ISO 10993-13", "tag": "judgement"}
+  ]
+}
