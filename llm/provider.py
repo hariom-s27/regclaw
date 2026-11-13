@@ -56,11 +56,29 @@ def provenance(client, response_model=None):
     return details
 
 
+def run_dir():
+    """Optional REGCLAW_RUN_DIR (repo-relative) for live smoke runs; None when unset.
+
+    Unset keeps the original paths. A set value must stay inside data/runs/ and
+    outside data/runs/azure_openai/, so smoke runs never write into S8/S10 folders.
+    """
+    value = os.getenv('REGCLAW_RUN_DIR', '').strip()
+    if not value:
+        return None
+    runs = (ROOT / 'data/runs').resolve()
+    path = (ROOT / value).resolve()
+    if not path.is_relative_to(runs) or path == runs or path.is_relative_to(runs / 'azure_openai'):
+        raise ValueError('REGCLAW_RUN_DIR must be inside data/runs/ and outside data/runs/azure_openai/')
+    return path
+
+
 def save_record(role, record, *, root=None):
     """Persist provisional live S10 outputs separately from the Claude outputs."""
     if record['provenance'].get('provider') != 'azure_openai':
         return
-    folder = Path(root or ROOT) / 'data/runs/azure_openai' / role.lower()
+    override = run_dir() if root is None else None
+    folder = (override / role.lower() if override is not None
+              else Path(root or ROOT) / 'data/runs/azure_openai' / role.lower())
     folder.mkdir(parents=True, exist_ok=True)
     (folder / (uuid4().hex + '.json')).write_text(
         json.dumps(record, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
