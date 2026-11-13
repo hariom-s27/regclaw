@@ -132,6 +132,47 @@ def test_real_mode_empty_result_raises_tool_error():
         b.retrieve("anything", 5)
 
 
+def test_run_dir_unset_keeps_default_retriever_args(monkeypatch):
+    import server
+    monkeypatch.delenv("REGCLAW_RUN_DIR", raising=False)
+    assert server._retriever_kwargs() == {}
+
+
+def test_run_dir_routes_both_caches(monkeypatch):
+    import server
+    from llm.provider import ROOT
+    monkeypatch.setenv("REGCLAW_RUN_DIR", "data/runs/s9/live")
+    cache = server._retriever_kwargs()["cache_file"]
+    assert cache == (ROOT / "data/runs/s9/live/cypher_cache.jsonl").resolve()
+    # HybridRetriever puts query_embedding_cache.jsonl next to cache_file.
+    assert cache.with_name("query_embedding_cache.jsonl").parent == cache.parent
+
+
+@pytest.mark.parametrize("value", ["data/runs/azure_openai/s8/x", "data/runs/azure_openai",
+                                   "../x", "data/x", "data/runs"])
+def test_run_dir_guard_rejects_s8_s10_and_outside(monkeypatch, value):
+    import server
+    monkeypatch.setenv("REGCLAW_RUN_DIR", value)
+    with pytest.raises(ValueError):
+        server._retriever_kwargs()
+
+
+async def test_tools_flush_tracing_even_on_error(client, monkeypatch):
+    import server
+    calls = []
+    monkeypatch.setattr(server.tracing, "flush", lambda: calls.append(1))
+    await client.call_tool("query_regulatory_knowledge", {"query": "knee implant tests", "top_k": 2})
+    assert len(calls) == 1
+    monkeypatch.setattr(server.Backend, "classify_standards",
+                        lambda self, p: (_ for _ in ()).throw(ToolError("boom")))
+    profile = {"device_name": "Knee X", "components": [{"name": "implant", "contact_nature": "implant",
+               "contact_site": "tissue_bone", "exposure": {"pattern": "single", "hours_per_use": 8760},
+               "materials": [{"name": "Ti", "material_class": "metal_alloy"}], "sterilization": "ethylene_oxide"}]}
+    with pytest.raises(ToolError):
+        await client.call_tool("get_applicable_standards", {"device_profile": profile})
+    assert len(calls) == 2
+
+
 async def test_stdio_subprocess_end_to_end():
     """Launch server.py as a real stdio subprocess (what Claude Desktop does).
     Fails if anything pollutes stdout, because the JSON-RPC stream breaks."""

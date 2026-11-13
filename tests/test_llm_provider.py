@@ -262,3 +262,33 @@ def test_sdk_azure_v1_url_deployment_and_retry_configuration(monkeypatch):
     assert captured[0][0] == 'https://fixture.openai.azure.com/openai/v1/chat/completions'
     assert captured[0][1]['model'] == 'deployment-extract'
     client.close()
+
+
+def _azure_record():
+    return {'provenance': {'provider': 'azure_openai'}, 'standards': []}
+
+
+def test_save_record_default_path_unchanged_without_run_dir(monkeypatch, tmp_path):
+    monkeypatch.delenv('REGCLAW_RUN_DIR', raising=False)
+    monkeypatch.setattr(provider, 'ROOT', tmp_path)
+    provider.save_record('S10', _azure_record())
+    assert len(list((tmp_path / 'data/runs/azure_openai/s10').glob('*.json'))) == 1
+    provider.save_record('S10', _azure_record(), root=tmp_path / 'explicit')
+    assert len(list((tmp_path / 'explicit/data/runs/azure_openai/s10').glob('*.json'))) == 1
+
+
+def test_save_record_run_dir_routes_outside_s10(monkeypatch, tmp_path):
+    monkeypatch.setattr(provider, 'ROOT', tmp_path)
+    monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/s9/live')
+    provider.save_record('S10', _azure_record())
+    assert len(list((tmp_path / 'data/runs/s9/live/s10').glob('*.json'))) == 1
+    assert not (tmp_path / 'data/runs/azure_openai').exists()
+
+
+@pytest.mark.parametrize('value', ['data/runs/azure_openai/s10', '../outside', 'data/runs'])
+def test_save_record_run_dir_guard(monkeypatch, tmp_path, value):
+    monkeypatch.setattr(provider, 'ROOT', tmp_path)
+    monkeypatch.setenv('REGCLAW_RUN_DIR', value)
+    with pytest.raises(ValueError):
+        provider.save_record('S10', _azure_record())
+    assert not (tmp_path / 'data').exists()

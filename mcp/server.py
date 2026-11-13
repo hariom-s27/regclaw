@@ -37,6 +37,8 @@ from pydantic import BaseModel, Field
 HERE = Path(__file__).resolve().parent
 if str(HERE.parent) not in sys.path:
     sys.path.insert(0, str(HERE.parent))
+from llm.provider import run_dir
+from observability import tracing
 from standards.profile import DeviceProfile
 from standards.tool import get_applicable_standards as classify_profile
 
@@ -184,6 +186,12 @@ class Backend:
                 conn.close()
 
 
+def _retriever_kwargs() -> dict:
+    """REGCLAW_RUN_DIR unset -> {} (default S8 cache family). Set -> both caches in that folder."""
+    folder = run_dir()
+    return {} if folder is None else {"cache_file": folder / "cypher_cache.jsonl"}
+
+
 @lifespan
 async def backend_lifespan(server: FastMCP):
     """Open DB connections once per server process, not once per tool call."""
@@ -193,13 +201,16 @@ async def backend_lifespan(server: FastMCP):
         sys.path.insert(0, str(HERE.parent / "retrieval"))
         from hybrid_retriever import HybridRetriever  # R4 code: Neo4j + pgvector + Haiku + OpenAI
 
-        backend = Backend(retriever=HybridRetriever())
+        backend = Backend(retriever=HybridRetriever(**_retriever_kwargs()))
         backend.retriever.driver.verify_connectivity()
     log.info("backend ready (stub=%s)", STUB)
     try:
         yield {"backend": backend}
     finally:
-        backend.close()
+        try:
+            backend.close()
+        finally:
+            tracing.flush()  # no-op unless LANGFUSE_ENABLED; the client may kill us before atexit
         log.info("backend closed")
 
 
@@ -234,7 +245,13 @@ def query_regulatory_knowledge(
     top_k: Annotated[int, Field(ge=1, le=50, description="Clauses to keep after semantic ranking")] = 10,
 ) -> RetrievalResult:
     """Retrieve ISO 10993 clauses via 4-stage hybrid retrieval: Cypher filter -> pgvector ranking -> neighbour expansion -> full-text fetch."""
-    b = _backend(ctx)
+    try:
+        return _query(_backend(ctx), query, top_k)
+    finally:
+        tracing.flush()  # also when the tool raises; no-op unless LANGFUSE_ENABLED
+
+
+def _query(b: Backend, query: str, top_k: int) -> RetrievalResult:
     if not STUB:
         return b.retrieve(query, top_k)
     candidates = b.stage1_cypher_filter(query)
@@ -262,7 +279,10 @@ def get_applicable_standards(device_profile: DeviceProfile, ctx: Context) -> dic
     recommended = consider; address if the stated trigger applies.
     not_applicable = not indicated for this contact/duration and current triggers.
     """
-    return _backend(ctx).classify_standards(device_profile)
+    try:
+        return _backend(ctx).classify_standards(device_profile)
+    finally:
+        tracing.flush()  # also when the tool raises; no-op unless LANGFUSE_ENABLED
 
 
 # ---------------------------------------------------------------- resources
