@@ -1,0 +1,11 @@
+{
+  "format": "s10-prereg-manifest.v1",
+  "file": "specs/S10_PREREGISTRATION.md",
+  "sha256_lf": "84934b357da1fceff619a40d0a8595ad32d271d22ae734ed11fb0a8d8988eefe",
+  "bytes_lf": 27970,
+  "lines": 174,
+  "version": "v1.0",
+  "approved": "2026-11-14",
+  "decisions": "S10P-01..S10P-29 (D20)",
+  "created_at": "2026-11-13T21:31:46.925467+00:00"
+}
