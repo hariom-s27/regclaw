@@ -110,6 +110,7 @@ The host application owns the protocol stream.
 Diagnostics go to stderr.
 Do not paste interactive text into the server's stdout channel.
 The input and response contracts are in [architecture](docs/architecture.md).
+Live trace (S9, provisional (GPT)): [docs/img/S9_langfuse_trace.png](docs/img/S9_langfuse_trace.png)
 
 ## Architecture
 
