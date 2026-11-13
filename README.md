@@ -69,6 +69,11 @@ The principal settings are:
 | `REGCLAW_STUB` | Fixture or live MCP backend |
 | `LANGFUSE_ENABLED` | Opt-in manual observations |
 
+**Windows setup notes**
+- In `PG_DSN`, use host `127.0.0.1`, not `localhost`: `localhost` tries IPv6 first and the connect can stall for about 130 s.
+- Real mode counts tokens offline: the `cl100k_base` vocabulary file (tiktoken cache name `9b5ad71b2ce5302211f9c61530b329a4922fc6a4`, sha-checked by `embed/token_stats.py`) must already be in the folder named by `TIKTOKEN_CACHE_DIR`; downloads are disabled.
+- Run commands with `.\.venv\Scripts\python.exe`.
+
 Keep tracing off while checking the basic storage path.
 When tracing is enabled, configure its credentials separately.
 The SDK kill switch also stops manual client creation.
