@@ -1,0 +1,35 @@
+{
+  "format": "s10b1-build-manifest.v1",
+  "seed": "S10b-v1",
+  "files": {
+    "data/gold/s10/judge_file_v1.yaml": {
+      "sha256_lf": "83b4519c0c057175510d51620a64f6e17ef540eb19f990851b413f49c87bdba6",
+      "entries": 30,
+      "items_total": 602
+    },
+    "data/gold/s10/audit_a_list.csv": {
+      "sha256_lf": "d8c30a5723c00050fe026157223393c64901a4fed9c461c6d630be42922336a0",
+      "rows": 350,
+      "jids": 30
+    },
+    "data/gold/s10/practice_profiles.yaml": {
+      "sha256_lf": "cfd11a7466f99f8d875fd852dbd223383b52821735fc341edbd35c21f430f9e9",
+      "profiles": 4
+    },
+    "eval/s10/codebook/CODEBOOK_v0.1.md": {
+      "sha256_lf": "7992a3743acfeade7b4d94c9c610cd3620e1fc35d895ea70dc49091655bd80fe",
+      "lines": 114
+    },
+    "data/gold/s10/jid_map_manifest.json": {
+      "sha256_lf": "7d28d5a12c3f5b4ed2b513918f3b4540974d00566629373f8240a5a6b4040a24",
+      "files_sealed": 1
+    },
+    "data/gold/s10/holdout_access_ledger.json": {
+      "sha256_lf": "8dd792f8add2d8ff9e230f42a5795a34924df71c21121798ed6fb1619a872a58",
+      "files_read": 3,
+      "outputs_written": 3,
+      "outcome": "written"
+    }
+  },
+  "date": "2026-11-14T04:55:22.187940+00:00"
+}
