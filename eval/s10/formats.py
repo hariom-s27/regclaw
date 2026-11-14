@@ -48,6 +48,20 @@ GOLD_ENTRY = obj({
 })
 GOLD_SCHEMA = obj({'format': {'const': GOLD_FORMAT}, 'split': {'enum': SPLITS},
                    'labels': {'type': 'array', 'minItems': 1, 'items': GOLD_ENTRY}})
+# S10b-04: practice (decoy) profiles for labeller training. Separate format, split fixed to
+# "practice", no stratum, no comment. The dev/holdout schemas above are unchanged.
+PRACTICE_FORMAT = 's10-practice-profiles.v1'
+PRACTICE_SPLIT = 'practice'
+PRACTICE_ENTRY = obj({
+    'id': ID,
+    'split': {'const': PRACTICE_SPLIT},
+    'contact_category': PROFILE_ENTRY['properties']['contact_category'],
+    'duration': PROFILE_ENTRY['properties']['duration'],
+    'flags': PROFILE_ENTRY['properties']['flags'],
+    'profile': {'type': 'object'},           # DeviceProfile.v1, validated by pydantic below
+})
+PRACTICE_SET_SCHEMA = obj({'format': {'const': PRACTICE_FORMAT}, 'split': {'const': PRACTICE_SPLIT},
+                           'profiles': {'type': 'array', 'minItems': 1, 'items': PRACTICE_ENTRY}})
 
 
 class FormatError(ValueError):
@@ -124,6 +138,22 @@ def validate_profile_set(doc, data=None):
             raise FormatError(f"duplicate profile id {entry['id']}")
         if entry['split'] != doc['split']:
             raise FormatError(f"{entry['id']}: split {entry['split']} differs from file split {doc['split']}")
+        check_profile_entry(entry, data)
+        out[entry['id']] = entry
+    return out
+
+
+def validate_practice_set(doc, data=None):
+    """S10b-04 practice set: schema + the same per-entry checks as eval profiles. Returns {id: entry}."""
+    try:
+        jsonschema.Draft202012Validator(PRACTICE_SET_SCHEMA).validate(doc)
+    except jsonschema.ValidationError as exc:
+        raise FormatError(f'practice set: {exc.message}') from exc
+    data = data or load_data()
+    out = {}
+    for entry in doc['profiles']:
+        if entry['id'] in out:
+            raise FormatError(f"duplicate profile id {entry['id']}")
         check_profile_entry(entry, data)
         out[entry['id']] = entry
     return out
