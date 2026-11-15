@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "device_id": {"type": "string"},
+    "checklist": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string"},
+              "contact_category": {"type": "string"},
+              "duration": {"type": "string", "enum": ["A", "B", "C", "none"]},
+              "table_row": {"type": "string"}
+            },
+            "required": ["name", "contact_category", "duration", "table_row"]
+          }
+        },
+        "eo_sterilised": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "sold_sterile": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "implant": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "blood_lymph_or_csf_contact": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "designed_to_degrade": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "may_degrade_or_corrode": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "novel_material": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "nanomaterial": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "reproductive_concern_stated": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "special_population_stated": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "knee_prosthesis": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "material_classes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["components", "eo_sterilised", "sold_sterile", "implant", "blood_lymph_or_csf_contact",
+                   "designed_to_degrade", "may_degrade_or_corrode", "novel_material", "nanomaterial",
+                   "reproductive_concern_stated", "special_population_stated", "knee_prosthesis",
+                   "material_classes"]
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item": {"type": "string"},
+          "reason": {"type": "string"},
+          "label": {"type": "string", "enum": ["not_applicable", "recommended", "mandatory"]},
+          "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+          "section": {"type": "string"},
+          "needs_sme": {"type": "string"}
+        },
+        "required": ["item", "reason", "label", "confidence", "section", "needs_sme"]
+      }
+    }
+  },
+  "required": ["device_id", "checklist", "cells"]
+}

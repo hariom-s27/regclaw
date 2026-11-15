@@ -87,3 +87,29 @@ Re-check (source: `.\.venv\Scripts\python.exe data\.pytest_tmp\s10b2_scratch\che
 ### Part B: STOP 2 (2026-11-15)
 - Hariom: "probes OK" for practice_probes.yaml sha256_lf `de70acab3a954b472217176a55abc1dcb4aae801c785c209ca059d2873f3490d` (file git-ignored).
 - Code/test changes in Part B: none. Only this report changes in git.
+
+## Part C: schema, validator, kit builder (2026-11-15)
+Plan "OK plan" (no answers given → my recommendations applied: Q1 SMOKE-1 = fixed generic profile in judge_kit.py, name-checked; Q2 natural id order; Q3 eval refused twice (manifest check, then unconditionally); Q4 JUDGE_INSTRUCTIONS_v0.1.md in the Part C commit; Q5 task line items joined by "; ").
+
+Result
+- eval/s10/codebook/judge_output.schema.json: draft 2020-12, S3 shape and order; 4 objects, each additionalProperties false + all properties required; only type/properties/required/items/enum (+ $schema). LF sha `240eb068…39f8`.
+- eval/s10/judge_output.py: validate(result, sheet) → (ok, rule names) with rules schema, device_id, items_missing, items_extra, items_duplicate, section, reason, needs_sme, components_empty.
+- eval/s10/judge_kit.py: TEMPLATE_VERSION s10-judge-prompt.v1; rounds practice / smoke / eval (eval refused); write-once per round folder.
+- Targeted tests (`--basetemp data\.pytest_tmp\s10b2`): tests/test_s10b2_judge_output.py + tests/test_s10b2_judge_kit.py → 38 passed in 7.00s.
+- SMOKE-1 check (source: data/.pytest_tmp/s10b2_scratch/check_smoke.py): validate_practice_set 1; name hits 0 vs 10 practice+probe names, 0 vs 30 judge-file device_name fields; banned hits 0.
+- Real build, once (`.\.venv\Scripts\python.exe -m eval.s10.judge_kit --round practice`, exit 0): devices 10; A 10, B 10, C 2 batches. Input shas: codebook `7992a374…80fe`, instructions `a9a66d83d2bb648dca567a34a1c322cc8aa5ec05edbabcdd5d6f3db1f7865ac4`, schema `240eb0682bc8bfa3c96e300632f8a56325100c9c008e01ce9cf4d55fbc2e39f8`, practice_profiles `cfd11a74…f9e9`, practice_probes `de70acab…490d`. kit_manifest.json sha256_lf `89e20d61f957c0c048c33ef48305fff2bf7440b7ed30f74090746971338a57e0`.
+- Post-build counts: 22 prompt files; 0 contain flags/derived/existing_evidence/attachment_g_material; 0 contain CR; kits folder git-ignored.
+
+SELF-AUDIT (Part C)
+1. Asked vs done: schema: done. Validator: done. Kit builder: done. Tests on fakes: done (38 passed). Practice kit built once: done (A 10, B 10, C 2).
+2. Decisions I made myself: rule names as listed; reason must be non-blank after strip; validator checks item set, not order (S4); sheet drops existing_evidence and derived and never carries flags/split; smoke round also builds a C batch (uniform layout); round folder must be empty (write-once at folder level, so a half-built kit can't be topped up); manifest format name s10-judge-kit-manifest.v1; codebook_v1.json read as {template_version, files: {rel: {sha256_lf}}} (Part F must write this shape); expected codebook/practice shas read from s10b1_build.json, probes sha hard-coded (approved).
+3. Deviations: no deviations.
+4. How I implemented it: files above + tests; commands: pytest (above), check_smoke.py, judge_kit --round practice, git check-ignore, Select-String counts.
+5. Checks with real output: see Result.
+6. Frozen items: CODEBOOK_v0.1.md, JUDGE_INSTRUCTIONS_v0.1.md, practice_profiles.yaml, engine/guard/overclaim, standards/data YAMLs, manifests untouched (only read/hashed).
+7. Holdouts and sealed files: judge_file_v1.yaml read for device_name only by check_smoke.py (count 30). No sealed file opened.
+8. Safety: no commit/push; .env not opened; nothing outside the repo; no LLM call; no blocks.
+9. Paid/external calls: 0. SMOKE-1 validated with validate_practice_set (rule_02), as planned.
+10. Not checked / assumed: whether Claude --json-schema and Codex --output-schema accept the schema ($schema keyword included) is shown only by the Part D smoke.
+11. Errors and retries: none.
+12. Risks + needs: commit; OK the Part D plan.
