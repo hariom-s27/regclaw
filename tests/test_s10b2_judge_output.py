@@ -93,6 +93,21 @@ def test_each_rule(schema, fn, rules):
     assert not ok and failed == rules
 
 
+@pytest.mark.parametrize('section', ['§4', '§4.2', '§10.2.1', '§4.2, §5.1', '§4.2, §5.1, §6'])
+def test_section_forms_pass(schema, section):
+    r = good()
+    r['cells'][0]['section'] = section
+    assert JO.validate(r, SHEET, schema) == (True, [])
+
+
+@pytest.mark.parametrize('section', ['', '§', '4.2', '§4.', '§4.2,§5.1', '§4.2, ', ', §4.2', '§4.2,  §5.1',
+                                     '§4.2; §5.1', '§4.2 §5.1', '4.2, §5.1', '§4.2, 5.1', '§4.2, §5.1.'])
+def test_section_forms_fail(schema, section):
+    r = good()
+    r['cells'][0]['section'] = section
+    assert JO.validate(r, SHEET, schema) == (False, ['section'])
+
+
 def test_edge_lengths_pass(schema):
     r = good()
     r['cells'][0].update(reason='x' * 300, needs_sme='y' * 300, section='§10.2.1')

@@ -162,3 +162,25 @@ Smoke result (Hariom): A failed ("--json-schema is not a valid JSON Schema: no s
 10. Not checked / assumed: that Claude accepts the schema without "$schema" (Hariom's smoke A shows it); B must be re-run because its old result is superseded.
 11. Errors and retries: the first compare run was backgrounded and gave empty output; re-ran it in the foreground with the same script.
 12. Risks + needs: Hariom re-runs smoke A, smoke B and status smoke, checks that the run folders are empty, and pastes the output.
+
+
+## Part D fix 2: judge A stream-json + pinned structured-output tool; section lists (15 Nov 2026)
+Smoke result (Hariom): A schema accepted but guard=num_turns twice (num_turns=2, no denials, success, structured_output present, only claude-opus-5-5); B attempt 1 validator=section ("§4.2, §5.1"), attempt 2 valid; run folders empty.
+- judge_config A: --output-format stream-json + --verbose (--help 2.1.325 does not say whether it is required; added as Hariom approved); new key structured_output_tool: null.
+- guard_a parses the stream; the envelope is the final event (type result). Checks: is_error false, subtype success, num_turns in {1,2}, permission_denials empty, model_missing/model_other, subagent_stats.spawned 0 if present, structured_output present. tool_use count must equal num_turns - 1, all with the pinned name (else tool_use). Null name gives structured_tool_unpinned, with no retry; the names are in the run log (tool_use_names) and on the console. New reasons: event_not_json, no_result_event, subtype, subagents, tool_use, structured_tool_unpinned, structured_output_missing (replaces result_not_json). Raw stream saved as <id>.attemptN.stream.jsonl. Canary A parses the same stream (any tool_use = tool_use).
+- Validator: section = one or more parts joined by ", ", each ^§\d+(\.\d+)*$.
+- Hariom's old A smoke attempts 1-2 (envelope.json) stay in judges/smoke/A; new attempts are numbered from 3.
+
+### SELF-AUDIT (Part D fix 2)
+1. Asked vs done: all plan items done, including Hariom's addition (tool_use count = num_turns - 1; test for num_turns 2 with zero tool_use).
+2. Decisions I made myself: console line printing the observed tool_use names when unpinned; test-only tool name FakeStructTool; an invalid num_turns still triggers tool_use if there is more than one tool_use or a wrong name.
+3. Deviations: none.
+4. How I implemented it: judge_config.yaml, judge_runner.py (guard_a, call, run_round, canary), judge_output.py (section_ok), two test files.
+5. Checks with real output: first run 1 failed / 97 passed (test_config_matches_approved_lists still pinned the old A args; updated to the approved list); re-run 98 passed in 33.52s.
+6. Frozen items: untouched (the config sha changes; it is recorded in codebook_v1.json in Part F).
+7. Holdouts and sealed files: none opened.
+8. Safety: no commit, push or deletion; nothing written outside the repo.
+9. Paid/external calls: 0 (claude --help only).
+10. Not checked / assumed: the real stream event shapes (assistant.message.content[].type tool_use / name; final result event); whether --verbose is required; the real structured-output tool name (the next smoke A shows it).
+11. Errors and retries: one stale assertion, fixed as above.
+12. Risks + needs: Hariom runs smoke A (expected: invalid, structured_tool_unpinned, one call), reports the observed name; the pre-approved follow-up then pins it.

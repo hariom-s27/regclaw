@@ -112,18 +112,34 @@ def _numbers(d):
         if isinstance(d, dict) else {}
 
 
-def guard_a(stdout: bytes, model):
-    """Returns (reasons, observed model keys, structured result or None, tokens)."""
-    try:
-        env = json.loads(stdout.decode('utf-8'))
-    except (ValueError, UnicodeDecodeError):
-        return ['envelope_not_json'], [], None, {}
-    if not isinstance(env, dict):
-        return ['envelope_not_json'], [], None, {}
-    reasons = []
+def _blocks(ev):
+    msg = ev.get('message')
+    content = msg.get('content') if isinstance(msg, dict) else None
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def guard_a(stdout: bytes, model, tool_name=None, mode='run'):
+    """Claude --output-format stream-json. The envelope is the final event (type "result").
+
+    Returns (reasons, observed model keys, structured result or None, tokens, tool_use names, result event).
+    mode 'run': with tool_name set, the tool_use count must equal num_turns - 1, all named tool_name;
+    with tool_name None the attempt is structured_tool_unpinned. mode 'canary': no tool_use at all, no
+    structured output expected.
+    """
+    events, bad = _events(stdout)
+    reasons = ['event_not_json'] if bad else []
+    names = [b.get('name') for ev in events if ev.get('type') == 'assistant'
+             for b in _blocks(ev) if b.get('type') == 'tool_use']
+    env = events[-1] if events else {}
+    if env.get('type') != 'result':
+        return reasons + ['no_result_event'], [], None, {}, names, {}
     if env.get('is_error') is not False:
         reasons.append('is_error')
-    if env.get('num_turns') != 1:
+    if env.get('subtype') != 'success':
+        reasons.append('subtype')
+    turns = env.get('num_turns')
+    turns = turns if isinstance(turns, int) and not isinstance(turns, bool) else None
+    if turns not in (1, 2):
         reasons.append('num_turns')
     if env.get('permission_denials') != []:
         reasons.append('permission_denials')
@@ -133,14 +149,23 @@ def guard_a(stdout: bytes, model):
         reasons.append('model_missing')
     if any(k != model and not k.startswith('claude-haiku') for k in usage):
         reasons.append('model_other')
+    if 'subagent_stats' in env:
+        stats = env['subagent_stats']
+        if not (isinstance(stats, dict) and stats.get('spawned') == 0):
+            reasons.append('subagents')
+    if mode == 'canary':
+        if names:
+            reasons.append('tool_use')
+        return reasons, observed, None, _numbers(env.get('usage')), names, env
+    if tool_name is None:
+        reasons.append('structured_tool_unpinned')
+    elif any(n != tool_name for n in names) or len(names) > 1 or (turns in (1, 2) and len(names) != turns - 1):
+        reasons.append('tool_use')
     result = env.get('structured_output')
     if not isinstance(result, (dict, list)):
-        try:
-            result = json.loads(env.get('result'))
-        except (TypeError, ValueError):
-            result = None
-            reasons.append('result_not_json')
-    return reasons, observed, result, _numbers(env.get('usage'))
+        result = None
+        reasons.append('structured_output_missing')
+    return reasons, observed, result, _numbers(env.get('usage')), names, env
 
 
 def _events(stdout: bytes):
@@ -248,6 +273,7 @@ class Runner:
         self.jcfg = cfg['judges'][judge]
         self.run_dir, self.prefix, self.out = Path(run_dir), list(prefix), out
         self.env = child_env(cfg, judge)
+        self.last_reasons = []
         self.schema_path = self.root / SCHEMA_REL
         schema_raw = self.schema_path.read_bytes()
         self.schema = json.loads(schema_raw.decode('utf-8'))
@@ -277,10 +303,13 @@ class Runner:
             cmd += ['--output-schema', str(self.schema_path), '-o', str(last), '-']
         res = run_child(cmd, prompt, self.run_dir, self.env, self.cfg['timeout_s'])
         if self.judge == 'A':
-            _write_bytes_once(Path(f'{stem}.envelope.json'), res['stdout'])
-            reasons, observed, result, tokens = guard_a(res['stdout'], self.jcfg['model'])
+            _write_bytes_once(Path(f'{stem}.stream.jsonl'), res['stdout'])
+            reasons, observed, result, tokens, names, _ = guard_a(res['stdout'], self.jcfg['model'],
+                                                                  self.jcfg.get('structured_output_tool'))
             observed = ','.join(observed) or None
+            extra = dict(tool_use_names=names)
         else:
+            extra = {}
             _write_bytes_once(Path(f'{stem}.events.jsonl'), res['stdout'])
             reasons, observed, result, tokens = guard_b(res['stdout'], res['stderr'], last, self.jcfg['model'],
                                                         self.jcfg['effort'])
@@ -303,10 +332,13 @@ class Runner:
                              tool_version=version, model_observed=observed, prompt_sha256_lf=prompt_sha,
                              schema_sha256_lf=self.schema_sha, exit_code=res['exit_code'],
                              duration_s=res['duration_s'], guard_ok=guard_ok, guard_reasons=reasons,
-                             valid=valid, rule_names=rules, tokens=tokens))
+                             valid=valid, rule_names=rules, tokens=tokens, **extra))
+        self.last_reasons = reasons
         self.out(f'{self.judge} {device_id} attempt {n}: version ok | exit={res["exit_code"]} | '
                  f'{res["duration_s"]}s | guard={"ok" if guard_ok else ",".join(reasons)} | '
                  f'validator={"valid" if valid else ("-" if not guard_ok else ",".join(rules))}')
+        if 'structured_tool_unpinned' in reasons:
+            self.out(f'{self.judge} {device_id}: tool_use names observed: {",".join(map(str, names)) or "none"}')
         if dir_written:
             raise RunnerStop('run_dir_written: the tool wrote into the run-dir')
         return valid
@@ -323,8 +355,11 @@ class Runner:
             if (out_dir / f'{device_id}.result.json').exists():
                 counts['skipped'] += 1
                 continue
-            ok = self.call(round_name, device_id, prompt, sha, items) or \
-                self.call(round_name, device_id, prompt, sha, items)
+            ok = self.call(round_name, device_id, prompt, sha, items)
+            if not ok and 'structured_tool_unpinned' in self.last_reasons:
+                self.out(f'{self.judge} {device_id}: structured_tool_unpinned, no retry')
+            elif not ok:
+                ok = self.call(round_name, device_id, prompt, sha, items)
             if ok:
                 counts['valid'] += 1
                 consecutive = 0
@@ -356,13 +391,11 @@ def canary(root, cfg, judge, exe, cdir, prefix=(), out=print):
         first = next((l for l in res['stderr'].decode('utf-8', 'replace').splitlines() if l.strip()), '')
         out(f'{judge} stderr first line: {first[:300]}')
     if judge == 'A':
-        reasons, observed, _, _ = guard_a(res['stdout'], jcfg['model'])
-        reasons = [r for r in reasons if r != 'result_not_json']
-        try:
-            text = json.loads(res['stdout'].decode('utf-8')).get('result') or ''
-        except (ValueError, AttributeError, UnicodeDecodeError):
-            text = ''
+        reasons, observed, _, _, names, env = guard_a(res['stdout'], jcfg['model'], mode='canary')
+        text = env.get('result') or ''
         out(f'{judge} models observed: {",".join(observed) or "none"}')
+        if names:
+            out(f'{judge} tool_use names: {",".join(map(str, names))}')
     else:
         reasons, observed, _, _ = guard_b(res['stdout'], res['stderr'], None, jcfg['model'], jcfg['effort'])
         text = agent_text(_events(res['stdout'])[0])

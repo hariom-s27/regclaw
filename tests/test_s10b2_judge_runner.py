@@ -66,11 +66,32 @@ if ROLE == 'claude':
         usage['claude-haiku-4-5'] = {}
     if mode == 'wrong_model':
         usage = {'claude-sonnet-5-5': {}}
-    env = dict(type='result', is_error=(mode == 'is_error'), num_turns=1, permission_denials=[], modelUsage=usage,
+    tool = os.environ.get('FAKE_TOOL', 'FakeStructTool')
+    if canary or mode in ('turn1_no_tool', 'turn2_no_tool'):
+        tools = []
+    elif mode == 'extra_tool':
+        tools = [tool, tool]
+    elif mode == 'wrong_tool':
+        tools = ['Bash']
+    else:
+        tools = [tool]
+    turns = dict(turn1_no_tool=1, turn2_no_tool=2, num_turns3=3).get(mode, 2 if tools else 1)
+    ev = [dict(type='system', subtype='init')]
+    if tools:
+        ev.append(dict(type='assistant', message=dict(content=[dict(type='text', text='ok')] + [
+            dict(type='tool_use', id=f'tu{k}', name=n, input=res or {}) for k, n in enumerate(tools)])))
+        ev.append(dict(type='user', message=dict(content=[dict(type='tool_result', tool_use_id='tu0')])))
+    ev.append(dict(type='assistant', message=dict(content=[dict(type='text', text=text)])))
+    env = dict(type='result', subtype='error_max_turns' if mode == 'subtype' else 'success',
+               is_error=(mode == 'is_error'), num_turns=turns, permission_denials=[], modelUsage=usage,
                result=text, usage=dict(input_tokens=10, output_tokens=20))
+    if mode in ('subagent', 'subagent_ok'):
+        env['subagent_stats'] = dict(spawned=1 if mode == 'subagent' else 0)
     if res is not None and mode != 'result_text':
         env['structured_output'] = res
-    print(json.dumps(env))
+    if mode != 'no_result_event':
+        ev.append(env)
+    print('\n'.join(json.dumps(e) for e in ev))
 else:
     if '-o' in args:
         out = pathlib.Path(args[args.index('-o') + 1])
@@ -88,6 +109,16 @@ else:
 ''' % repr(YN)
 
 
+FAKE_TOOL = 'FakeStructTool'          # test-only name; the real one comes from Hariom's smoke run
+
+
+def set_struct_tool(cfg_path, name):
+    cfg = yaml.safe_load(cfg_path.read_text(encoding='utf-8'))
+    assert 'structured_output_tool' in cfg['judges']['A']
+    cfg['judges']['A']['structured_output_tool'] = name
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding='utf-8')
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     root, run = tmp_path / 'root', tmp_path / 'run'
@@ -98,6 +129,7 @@ def env(tmp_path, monkeypatch):
     cfg = root / JR.CONFIG_REL
     cfg.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(REPO / JR.CONFIG_REL, cfg)
+    set_struct_tool(cfg, FAKE_TOOL)
     fakes = tmp_path / 'fakes'
     fakes.mkdir()
     for name in ('fake_claude.py', 'fake_codex.py'):
@@ -137,10 +169,11 @@ def test_smoke_a_valid(env):
     code, lines = go(env, 'smoke', '--judge', 'A')
     assert code == 0
     d = jdir(env, 'A')
-    assert sorted(p.name for p in d.iterdir()) == ['SMOKE-1.attempt1.envelope.json', 'SMOKE-1.attempt1.stderr.txt',
+    assert sorted(p.name for p in d.iterdir()) == ['SMOKE-1.attempt1.stderr.txt', 'SMOKE-1.attempt1.stream.jsonl',
                                                   'SMOKE-1.result.json']
     rows = log_rows(env)
     assert len(rows) == 1 and rows[0]['valid'] and rows[0]['guard_ok'] and rows[0]['rule_names'] == []
+    assert rows[0]['tool_use_names'] == [FAKE_TOOL]
     assert rows[0]['tool_version'] == '2.1.325 (Claude Code)' and rows[0]['model_observed'] == 'claude-opus-5-5'
     assert rows[0]['tokens'] == dict(input_tokens=10, output_tokens=20)
     assert len(rows[0]['prompt_sha256_lf']) == 64 and len(rows[0]['schema_sha256_lf']) == 64
@@ -149,6 +182,7 @@ def test_smoke_a_valid(env):
     assert a['argv'][:-2] == cfg['judges']['A']['args'] and a['argv'][-2] == '--json-schema'
     assert json.loads(a['argv'][-1]) == json.loads((env['root'] / JK.SCHEMA_REL).read_text(encoding='utf-8'))
     assert a['argv'][a['argv'].index('--tools') + 1] == '' and a['argv'][a['argv'].index('--setting-sources') + 1] == ''
+    assert a['argv'][a['argv'].index('--output-format') + 1] == 'stream-json' and '--verbose' in a['argv']
     assert a['has_key'] is False and a['env_set'] == '1'
     assert Path(a['cwd']).resolve() == env['run'].resolve()
     text = '\n'.join(lines)
@@ -198,11 +232,20 @@ def test_superseded_folders_ignored(env):
 @pytest.mark.parametrize('judge,mode,reasons,rules,valid', [
     ('A', 'is_error', ['is_error'], [], False),
     ('A', 'wrong_model', ['model_missing', 'model_other'], [], False),
-    ('A', 'nonzero', ['exit_code', 'envelope_not_json'], [], False),
+    ('A', 'nonzero', ['exit_code', 'no_result_event'], [], False),
     ('A', 'missing_item', [], ['items_missing'], False),
     ('A', 'extra_item', [], ['items_extra'], False),
     ('A', 'haiku', [], [], True),
-    ('A', 'result_text', [], [], True),
+    ('A', 'result_text', ['structured_output_missing'], [], False),
+    ('A', 'turn1_no_tool', [], [], True),
+    ('A', 'turn2_no_tool', ['tool_use'], [], False),
+    ('A', 'extra_tool', ['tool_use'], [], False),
+    ('A', 'wrong_tool', ['tool_use'], [], False),
+    ('A', 'num_turns3', ['num_turns'], [], False),
+    ('A', 'subagent', ['subagents'], [], False),
+    ('A', 'subagent_ok', [], [], True),
+    ('A', 'subtype', ['subtype'], [], False),
+    ('A', 'no_result_event', ['no_result_event'], [], False),
     ('B', 'tool_event', ['tool_use_event'], [], False),
     ('B', 'no_turn', ['no_turn_completed'], [], False),
     ('B', 'last_not_json', ['last_not_json'], [], False),
@@ -220,6 +263,26 @@ def test_guards_and_validator(env, monkeypatch, judge, mode, reasons, rules, val
     if not valid:
         assert any(p.name.startswith('SMOKE-1.attempt2.') for p in jdir(env, judge).iterdir())
         assert any('still invalid after retry' in l for l in lines)
+
+
+def test_unpinned_tool_logs_names_and_skips_retry(env):
+    set_struct_tool(env['root'] / JR.CONFIG_REL, None)
+    code, lines = go(env, 'smoke', '--judge', 'A')
+    assert code == 0
+    rows = log_rows(env)
+    assert len(rows) == 1                                           # no retry
+    assert rows[0]['guard_reasons'] == ['structured_tool_unpinned'] and rows[0]['tool_use_names'] == [FAKE_TOOL]
+    assert not rows[0]['valid'] and not (jdir(env, 'A') / 'SMOKE-1.result.json').exists()
+    assert f'A SMOKE-1: tool_use names observed: {FAKE_TOOL}' in lines
+    assert 'A SMOKE-1: structured_tool_unpinned, no retry' in lines
+    assert len(argv_rows(env)) == 1
+
+
+def test_real_config_has_unpinned_key():
+    cfg = yaml.safe_load((REPO / JR.CONFIG_REL).read_text(encoding='utf-8'))
+    assert 'structured_output_tool' in cfg['judges']['A']
+    args = cfg['judges']['A']['args']
+    assert args[args.index('--output-format') + 1] == 'stream-json' and '--verbose' in args
 
 
 def test_wrong_version_stops_before_call(env, monkeypatch):
@@ -386,9 +449,9 @@ def test_child_env(monkeypatch):
 
 def test_config_matches_approved_lists():
     cfg = yaml.safe_load((REPO / JR.CONFIG_REL).read_text(encoding='utf-8'))
-    assert cfg['judges']['A']['args'] == ['-p', '--output-format', 'json', '--model', 'claude-opus-5-5', '--effort',
-                                          'high', '--tools', '', '--setting-sources', '', '--disable-slash-commands',
-                                          '--strict-mcp-config', '--no-session-persistence']
+    assert cfg['judges']['A']['args'] == ['-p', '--output-format', 'stream-json', '--verbose', '--model',
+                                          'claude-opus-5-5', '--effort', 'high', '--tools', '', '--setting-sources', '',
+                                          '--disable-slash-commands', '--strict-mcp-config', '--no-session-persistence']
     assert cfg['judges']['B']['args'] == ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', '-m',
                                           'gpt-6-astra', '-c', 'model_reasoning_effort=high', '-c',
                                           'project_doc_max_bytes=0', '-c', 'web_search=disabled', '--json']

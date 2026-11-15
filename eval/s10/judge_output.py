@@ -24,8 +24,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_REL = 'eval/s10/codebook/judge_output.schema.json'
 RULES = ('schema', 'device_id', 'items_missing', 'items_extra', 'items_duplicate', 'section', 'reason',
          'needs_sme', 'components_empty')
-SECTION_RE = re.compile(r'^§\d+(\.\d+)*$')
+SECTION_RE = re.compile(r'^§\d+(\.\d+)*$')     # one part; a cell may cite several parts joined by ", "
+SECTION_SEP = ', '
 TEXT_MAX = 300
+
+
+def section_ok(value):
+    return isinstance(value, str) and all(SECTION_RE.match(p) for p in value.split(SECTION_SEP))
 
 
 def load_schema(root=ROOT):
@@ -56,7 +61,7 @@ def validate(result, sheet, schema=None):
     if any(n > 1 for n in items.values()):
         failed.add('items_duplicate')
     for c in cells:
-        if not (isinstance(c.get('section'), str) and SECTION_RE.match(c['section'])):
+        if not section_ok(c.get('section')):
             failed.add('section')
         if not _one_line(c.get('reason'), 1, TEXT_MAX):
             failed.add('reason')
