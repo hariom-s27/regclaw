@@ -113,3 +113,28 @@ SELF-AUDIT (Part C)
 10. Not checked / assumed: whether Claude --json-schema and Codex --output-schema accept the schema ($schema keyword included) is shown only by the Part D smoke.
 11. Errors and retries: none.
 12. Risks + needs: commit; OK the Part D plan.
+
+## Part D: runner (2026-11-15)
+Plan "OK plan" with: exact A/B argument lists, A env_set (CLAUDE_CODE_DISABLE_CLAUDE_MDS=1, CLAUDE_CODE_DISABLE_AUTO_MEMORY=1), canary text; Q2 attempt files `<id>.attemptN.*` + `<id>.result.json`; Q3 count devices still invalid after their one retry; Q4 add run_dir_written; Q5 strip one outer fence and log fence_stripped. Part C answers matched my choices; "$schema" kept until smoke.
+
+Result
+- eval/s10/judge_config.yaml: per-judge tool, expected_version, model, effort, args (exact lists), env_set; global env_remove, timeout_s 1800, max_consecutive_failures 2, canary_question; C antigravity-chat / "Gemini 3.8 Flash (High)". No --restricted, no --ignore-user-config.
+- eval/s10/judge_runner.py: subcommands canary, smoke, run, import-chat, status; eval round refused; exit codes 0 / 1 refused / 2 input error / 4 STOP.
+- Targeted tests (`--basetemp data\.pytest_tmp\s10b2`): tests/test_s10b2_judge_runner.py 29 passed in 37.52s; all three S10b2 files together 67 passed in 63.65s (output + kit + runner).
+- Fake-executable cases covered: valid A and B (argv exactly config list + appended flags; "" arguments preserved; env keys removed, env_set present; cwd = run-dir); is_error; wrong model; extra Haiku key (valid); result text without structured_output (valid); non-zero exit; missing / extra item; tool-use event; no turn.completed; last message not JSON; wrong model on stderr; wrong version (STOP before any call); timeout; run_dir_written (STOP); run-dir inside repo / missing / not empty; 2 devices in a row invalid (STOP after 4 calls); retry then valid + resume (0 new calls); eval refused; import-chat (fence stripped, 4 valid / 1 invalid, re-import keeps results, paste copies kept); bad JSON, wrong length, wrong label, unknown batch; status; canary A/B (two lines, no schema, B ends with "-", folder untouched); canary non-zero exit prints the first stderr line.
+- --setting-sources "": cannot be tested without a model call (works only with -p); it is in canary A. If Claude rejects it, canary A exits non-zero and prints the first stderr line → report, new plan to drop it.
+- Not run by me: canary, smoke, status (Hariom runs them).
+
+SELF-AUDIT (Part D)
+1. Asked vs done: config: done. Runner: done. Tests with fake executables (all listed cases): done (29 passed). Commands for Hariom: printed, not run.
+2. Decisions I made myself: STOP exit code 4; per-attempt stderr.txt also kept for A; version check runs with the child env and cwd; run-dir must be empty before each call and still empty after (else run_dir_written + STOP); canary folder may be non-empty (it holds the codeword files) but must exist and lie outside the repo, and nothing is written for a canary; canary prints up to 2 non-empty lines (300 chars each) plus exit code, guard verdict and observed models; B "model observed" read from stderr only; non-JSON lines on Codex stdout trip event_not_json; import-chat refuses a --model-label that differs from the config and copies the paste to `C/batch_NN.attemptN.paste.txt`; the smoke kit must be built first (`judge_kit --round smoke`, offline, Hariom runs it); kit prompt files are sha-checked against kit_manifest.json before use.
+3. Deviations: no deviations.
+4. How I implemented it: judge_config.yaml; judge_runner.py (load_config, check_run_dir, child_env, tool_version, run_child, guard_a, guard_b, Runner.call / run_round, canary, import_chat, status, main); tests/test_s10b2_judge_runner.py (fake script written to the pytest temp folder, launched with prefix [sys.executable]).
+5. Checks with real output: pytest 29 passed; 67 passed for all S10b2 files.
+6. Frozen items: untouched (engine/guard/overclaim, standards/data YAMLs, classifier, retrieval_eval, codebook/instructions, manifests, practice files).
+7. Holdouts and sealed files: none opened in Part D.
+8. Safety: no commit/push; .env not opened; tests never launch claude/codex (fakes only; ANTHROPIC_API_KEY in tests is the fake string "fake-not-a-key"); nothing written outside the repo; no model call; no blocks.
+9. Paid/external calls: 0.
+10. Not checked / assumed: real envelope / event shapes (fields assumed: is_error, num_turns, permission_denials, modelUsage, structured_output, result, usage; Codex item.type / turn.completed); whether Claude needs one turn with --json-schema (num_turns == 1 is enforced as specified); whether Codex writes -o into the repo folder under -s read-only. The smoke run shows all of these.
+11. Errors and retries: none (tests passed on the first run).
+12. Risks + needs: Hariom builds the smoke kit, runs canary A/B, smoke A/B and status, and pastes the output to Claude chat.

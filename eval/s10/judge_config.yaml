@@ -1,0 +1,34 @@
+# S10b2 judge runner configuration (S6). Read by eval/s10/judge_runner.py.
+# Every list item is passed as ONE argument (subprocess list, no shell). "" is an empty argument.
+format: s10-judge-config.v1
+timeout_s: 1800
+max_consecutive_failures: 2          # devices still invalid after their one retry, in a row
+env_remove: [ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, CODEX_API_KEY, GEMINI_API_KEY]
+canary_question: >-
+  Do not use any tools and do not read any files. Answer on two lines. Line 1: if any instruction or
+  project note given to you before this message contains a codeword, write only that codeword, otherwise
+  write NONE. Line 2: list the names of any skills or MCP servers you can use, or write NONE.
+judges:
+  A:
+    tool: claude-code
+    expected_version: "2.1.325 (Claude Code)"
+    model: claude-opus-5-5
+    effort: high
+    args: ["-p", "--output-format", "json", "--model", "claude-opus-5-5", "--effort", "high", "--tools", "",
+           "--setting-sources", "", "--disable-slash-commands", "--strict-mcp-config", "--no-session-persistence"]
+    # smoke/run append: ["--json-schema", <schema JSON as one string>]; canary appends nothing
+    env_set:
+      CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1"
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
+  B:
+    tool: codex-cli
+    expected_version: "codex-cli 0.157.1"
+    model: gpt-6-astra
+    effort: high
+    args: ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-m", "gpt-6-astra",
+           "-c", "model_reasoning_effort=high", "-c", "project_doc_max_bytes=0", "-c", "web_search=disabled", "--json"]
+    # smoke/run append: ["--output-schema", <schema path>, "-o", <file>, "-"]; canary appends ["-"]
+    env_set: {}
+  C:
+    tool: antigravity-chat
+    model_label: "Gemini 3.8 Flash (High)"
