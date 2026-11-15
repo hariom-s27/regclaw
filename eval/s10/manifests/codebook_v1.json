@@ -1,0 +1,38 @@
+{
+  "format": "s10-codebook-manifest.v1",
+  "version": "v1.0",
+  "template_version": "s10-judge-prompt.v1",
+  "files": {
+    "eval/s10/codebook/CODEBOOK_v1.0.md": {
+      "sha256_lf": "c90551f9ae19cdf66e662954b0c6643df75c9716085a2b4e3c3dd4d964899d78",
+      "bytes_lf": 14959,
+      "lines": 144
+    },
+    "eval/s10/codebook/JUDGE_INSTRUCTIONS_v1.0.md": {
+      "sha256_lf": "89c326f595858e2164090d50ad6b5d8fae6409bcc6ba3218bfaa35c41ca569f0",
+      "bytes_lf": 4972,
+      "lines": 52
+    },
+    "eval/s10/codebook/judge_output.schema.json": {
+      "sha256_lf": "ccef52c093a071a13cdfd4864d457347d10f4b25c1b8584e95e27c3a7a1d816d",
+      "bytes_lf": 2724,
+      "lines": 60
+    },
+    "eval/s10/judge_kit.py": {
+      "sha256_lf": "80fdbf0ad54043131f80d77efd5b949f1b781173d82a9ca6abe75a01d52e1328",
+      "bytes_lf": 17563,
+      "lines": 363
+    },
+    "eval/s10/judge_config.yaml": {
+      "sha256_lf": "db4d7be3615e92b578d40493d48bdeb0e001e55a8ec991c7cf83966837b7693d",
+      "bytes_lf": 2081,
+      "lines": 38
+    },
+    "specs/S10_PREREG_ADDENDUM_A1.md": {
+      "sha256_lf": "d78813dd54134cdd33cd2df8b9c3b71edae70771f00d1eb48c9bd862433b6abc",
+      "bytes_lf": 9454,
+      "lines": 62
+    }
+  },
+  "created_at": "2026-11-15T23:40:07.664387+00:00"
+}

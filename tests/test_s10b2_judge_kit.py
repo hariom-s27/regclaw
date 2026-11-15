@@ -161,7 +161,7 @@ def test_eval_round_refused(tmp_path):
     put(tmp_path, JK.CODEBOOK_V1_MANIFEST_REL, json.dumps(dict(template_version=JK.TEMPLATE_VERSION, files=files)))
     lines.clear()
     assert JK.run(tmp_path, 'eval', now=NOW, out=lines.append) == 1
-    assert any('no eval kit is built' in l for l in lines)
+    assert any('CODEBOOK_v1.0.md is not recorded' in l for l in lines)
     files[JK.SCHEMA_REL]['sha256_lf'] = '0' * 64
     put(tmp_path, JK.CODEBOOK_V1_MANIFEST_REL, json.dumps(dict(template_version=JK.TEMPLATE_VERSION, files=files)))
     lines.clear()

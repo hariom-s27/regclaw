@@ -7,7 +7,8 @@ Hariom runs every judge call himself. Subcommands (global: --claude-exe, --codex
   run    --round practice --judge A|B   resumes: skips devices with a valid result
   import-chat --round practice|smoke --batch NN --file PATH --antigravity-version V --model-label L
   status --round practice|smoke         valid / invalid / missing per judge
-The eval round is refused in S10b2a.
+Rounds practice, smoke, eval and stability (S10b2b); every round needs its kit_manifest.json (judge_kit builds
+the eval and stability kits only after the codebook_v1.json checks pass).
 
 Before EVERY call: the run-dir (outside the repo, existing, empty) is checked and `<exe> --version` must
 equal the configured version, else the whole run STOPs. Child: argument list (no shell), cwd = run-dir,
@@ -42,7 +43,7 @@ from .judge_output import validate
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_REL = 'eval/s10/judge_config.yaml'
 JUDGES_REL = 'data/gold/s10/judges'
-RUN_ROUNDS = ('practice', 'smoke')
+RUN_ROUNDS = ('practice', 'smoke', 'eval', 'stability')
 FILE_JUDGES = ('A', 'B')
 B_BANNED_ITEMS = frozenset({'command_execution', 'file_change', 'mcp_tool_call', 'web_search'})
 B_MODEL_PINNED = 'pinned by -m (not echoed in --json events)'
@@ -345,7 +346,7 @@ class Runner:
 
     def run_round(self, round_name):
         if round_name not in RUN_ROUNDS:
-            raise RunnerRefused(f'round {round_name} is refused in S10b2a')
+            raise RunnerRefused(f'round {round_name} is not a run round')
         kit = load_kit(self.root, round_name)
         devices = kit_devices(self.root, kit, self.judge)
         out_dir = self.root / JUDGES_REL / round_name / self.judge
@@ -419,7 +420,7 @@ def strip_fence(text):
 
 def import_chat(root, cfg, round_name, batch, file_path, version, label, out=print):
     if round_name not in RUN_ROUNDS:
-        raise RunnerRefused(f'import-chat: round {round_name} is refused in S10b2a')
+        raise RunnerRefused(f'import-chat: round {round_name} is not a run round')
     if label != cfg['judges']['C']['model_label']:
         raise RunnerRefused('import-chat: model label differs from judge_config.yaml')
     root = Path(root)
@@ -470,7 +471,7 @@ def import_chat(root, cfg, round_name, batch, file_path, version, label, out=pri
 
 def status(root, round_name, out=print):
     if round_name not in RUN_ROUNDS:
-        raise RunnerRefused(f'status: round {round_name} is refused in S10b2a')
+        raise RunnerRefused(f'status: round {round_name} is not a run round')
     root = Path(root)
     kit = load_kit(root, round_name)
     table = {}
@@ -502,16 +503,16 @@ def main(argv=None, *, root=ROOT, prefix=(), out=print) -> int:
     s = sub.add_parser('smoke')
     s.add_argument('--judge', choices=FILE_JUDGES, required=True)
     r = sub.add_parser('run')
-    r.add_argument('--round', choices=('practice', 'eval'), required=True)
+    r.add_argument('--round', choices=('practice', 'eval', 'stability'), required=True)
     r.add_argument('--judge', choices=FILE_JUDGES, required=True)
     i = sub.add_parser('import-chat')
-    i.add_argument('--round', choices=('practice', 'smoke', 'eval'), required=True)
+    i.add_argument('--round', choices=('practice', 'smoke', 'eval', 'stability'), required=True)
     i.add_argument('--batch', type=int, required=True)
     i.add_argument('--file', required=True)
     i.add_argument('--antigravity-version', required=True)
     i.add_argument('--model-label', required=True)
     t = sub.add_parser('status')
-    t.add_argument('--round', choices=('practice', 'smoke', 'eval'), required=True)
+    t.add_argument('--round', choices=('practice', 'smoke', 'eval', 'stability'), required=True)
     args = ap.parse_args(argv)
     try:
         cfg = load_config(root)
@@ -522,8 +523,6 @@ def main(argv=None, *, root=ROOT, prefix=(), out=print) -> int:
             return canary(root, cfg, args.judge, exe[args.judge], args.dir, prefix, out)
         if args.cmd in ('smoke', 'run'):
             round_name = 'smoke' if args.cmd == 'smoke' else args.round
-            if round_name == 'eval':
-                raise RunnerRefused('eval round is refused in S10b2a')
             if not args.run_dir:
                 raise RunnerError('--run-dir is required')
             check_run_dir(args.run_dir, root)
