@@ -42,11 +42,15 @@ def fake_files(root, n_rows=350):
     paths['manifest'].write_text(json.dumps(dict(files={
         LT.JUDGE_REL: dict(sha256_lf=normalised_sha(judge.encode())),
         LT.LIST_REL: dict(sha256_lf=normalised_sha(buf.getvalue().encode()))})), encoding='utf-8')
+    paths['codebook_manifest'] = root / 'codebook_v1.json'          # S10b2: audit needs the frozen codebook
+    paths['codebook_manifest'].write_text(json.dumps(dict(template_version='t', files={
+        LT.CODEBOOK_REL: dict(sha256_lf=normalised_sha(paths['codebook'].read_bytes()))})), encoding='utf-8')
     return paths
 
 
 def app_for(paths, upto=150):
-    return LT.LabelApp(paths['judge'], paths['audit_list'], paths['codebook'], paths['labels'], upto, paths['manifest'])
+    return LT.LabelApp(paths['judge'], paths['audit_list'], paths['codebook'], paths['labels'], upto, paths['manifest'],
+                       codebook_manifest=paths['codebook_manifest'])
 
 
 def ok(app, i, **kw):
@@ -161,6 +165,74 @@ def test_sha_mismatch_refuses_start(paths, which):
         paths['manifest'].write_text(json.dumps(m), encoding='utf-8')
     with pytest.raises(PermissionError):
         app_for(paths)
+
+
+def interleave(paths):
+    """Rewrite the fake list so J-ids interleave (A,B,A,B...) inside every look; update the manifest sha."""
+    jids = [f'J-{i:03d}' for i in range(1, 31)]
+    mixed = []
+    for a, b in zip(jids[0::2], jids[1::2]):
+        for it in ITEMS:
+            mixed += [dict(j_id=a, item=it), dict(j_id=b, item=it)]
+    mixed = mixed[:350]
+    buf = io.StringIO(newline='')
+    w = csv.writer(buf, lineterminator='\n')
+    w.writerow(['order', 'j_id', 'item', 'family'])
+    for k, r in enumerate(mixed, start=1):
+        w.writerow([k, r['j_id'], r['item'], 'F1'])
+    paths['audit_list'].write_text(buf.getvalue(), encoding='utf-8')
+    m = json.loads(paths['manifest'].read_text(encoding='utf-8'))
+    m['files'][LT.LIST_REL]['sha256_lf'] = normalised_sha(buf.getvalue().encode())
+    paths['manifest'].write_text(json.dumps(m), encoding='utf-8')
+    return [(r['j_id'], r['item']) for r in mixed]
+
+
+def test_audit_grouped_by_jid_inside_each_look(paths):
+    listed = interleave(paths)
+    app = app_for(paths, 350)
+    looks = [listed[0:150], listed[150:250], listed[250:350]]
+    expect = []
+    for look in looks:
+        for j in dict.fromkeys(k[0] for k in look):
+            expect += [k for k in look if k[0] == j]
+    assert app.keys == expect
+    assert set(app.keys[:150]) == set(looks[0]) and set(app.keys[150:250]) == set(looks[1])
+    assert app.keys[0][0] == app.keys[1][0] and listed[0][0] != listed[1][0]
+    assert app_for(paths, 150).keys == app.keys[:150] and app_for(paths, 250).keys == app.keys[:250]
+
+
+def test_audit_csv_rows_stay_in_list_order(paths):
+    listed = interleave(paths)
+    app = app_for(paths)
+    for i in range(13):                                    # J-001's 12 cells, then J-002's first
+        app.save(ok(app, i))
+    rows = list(csv.DictReader(io.StringIO(paths['labels'].read_text(encoding='utf-8-sig'), newline='')))
+    orders = [int(r['order']) for r in rows]
+    assert orders == sorted(listed.index(k) + 1 for k in app.keys[:13])
+    assert orders != [listed.index(k) + 1 for k in app.keys[:13]]  # display order differs, CSV is in list order
+    assert [(r['j_id'], r['item']) for r in rows] == [listed[o - 1] for o in orders]
+    assert app_for(paths).state()['done'] == 13
+
+
+def test_audit_refused_without_codebook_v1(paths):
+    paths['codebook_manifest'].unlink()
+    with pytest.raises(PermissionError, match='does not exist'):
+        app_for(paths)
+
+
+def test_audit_refused_on_codebook_sha(paths):
+    paths['codebook'].write_text('# changed\n', encoding='utf-8')
+    with pytest.raises(PermissionError, match='codebook sha differs'):
+        app_for(paths)
+
+
+def test_audit_defaults():
+    assert LT.CODEBOOK_REL == 'eval/s10/codebook/CODEBOOK_v1.0.md'
+    assert LT.CODEBOOK_V1_MANIFEST_REL == 'eval/s10/manifests/codebook_v1.json'
+    with pytest.raises(SystemExit):
+        LT.main(['--mode', 'audit'])                               # --upto required in audit mode
+    with pytest.raises(SystemExit):
+        LT.main(['--mode', 'practice', '--upto', '150'])           # --upto is audit-only
 
 
 def test_http_roundtrip(paths):
