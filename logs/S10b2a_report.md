@@ -1,6 +1,161 @@
 # S10b2a: judge kit, runner, label-tool practice modes, freeze script
 
-(PLAIN SUMMARY and the full SELF-AUDIT are added in Part G. Each Part's result is appended below at its STOP.)
+## PLAIN SUMMARY
+1. Built the S10 judge setup for practice: 6 rule probes (PR-5..PR-10), a strict judge output schema with a validator, and a seeded judge kit builder (practice and smoke rounds; eval refused).
+2. Built a runner for judge A (Claude Code) and judge B (Codex CLI) with version checks, a clean environment, an empty run folder, output guards, one retry and a run log, plus a chat import for judge C (Antigravity).
+3. Smoke runs by Hariom forced three fixes: no "$schema" key, stream-json with the pinned StructuredOutput tool for A, and multi-section citations; A and B smoke results are now valid.
+4. Extended the label tool (practice, read-only review, audit gated on the frozen codebook and grouped by J-id) and added practice_compare, which writes numbered practice tables once the practice lock opens.
+5. Wrote the codebook v1 freeze script (not run); codebook v1.0, judge instructions v1.0 and addendum A1 are still to be written by Hariom.
+
+## SELF-AUDIT (whole S10b2a; details in each Part below)
+1. Asked vs done:
+   - Part A (tool facts): done.
+   - Part B (probes, "probes OK"): done.
+   - Part C (schema, validator, kit builder, practice kit): done.
+   - Part D (runner, config; fixes 1-3 after smoke): done.
+   - Part E (S7 label tool, S8 practice_compare): done.
+   - Part F (S9 freeze script; code and tests only): done, not run.
+   - Part G (this report): done.
+2. Decisions I made myself: listed per Part. The main ones:
+   - runner exit codes (0/1/2/4);
+   - run-dir rules;
+   - fence stripping for C;
+   - B model logged as "pinned by -m" when not echoed;
+   - unpinned tool means no retry;
+   - numbered compare tables;
+   - checklist difference rules;
+   - freeze format name and check order.
+   Hariom decided:
+   - PR-9 option D;
+   - probe notes (D23);
+   - B arguments;
+   - --verbose;
+   - StructuredOutput pin;
+   - num_turns strict;
+   - the S10b2a-07 lock definition;
+   - Q1-Q5 in Parts E and F.
+3. Deviations: none. The three smoke fixes were planned and approved before each was made.
+4. How I implemented it:
+   - New code: eval/s10/judge_output.py, judge_kit.py, judge_config.yaml, judge_runner.py, practice_compare.py, codebook_freeze.py.
+   - Changed code: eval/s10/label_tool.py.
+   - Schema: eval/s10/codebook/judge_output.schema.json.
+   - Tests: tests/test_s10b2_* (6 files) and tests/test_s10b_label_tool.py.
+   - Data (git-ignored): data/gold/s10/practice_probes.yaml, and kits for practice and smoke.
+5. Checks with real output:
+   - Targeted run after Part F: 160 passed in 62.36s. Per file:
+     - codebook_freeze 17
+     - judge_output 43
+     - judge_kit 13
+     - judge_runner 43
+     - label_tool_practice 10
+     - practice_compare 6
+     - s10b_label_tool 28
+   - Full suite: see "Tests" below.
+   - Kit shas:
+     - practice kit_manifest 33581eb08fbe4344a368143e92ed4d84e796691e8cc41d8df5569fd64f1c6830
+     - smoke kit_manifest 944e330f818ca8ace0dbcfcd6631e1ba017fc8c0fd83464f9173f80baa0f6976
+   - Input shas:
+     - schema ccef52c093a071a13cdfd4864d457347d10f4b25c1b8584e95e27c3a7a1d816d
+     - probes de70acab3a954b472217176a55abc1dcb4aae801c785c209ca059d2873f3490d
+6. Frozen items: untouched:
+   - standards/engine.py, guard.py, overclaim.py;
+   - the 4 standards YAMLs;
+   - the classifier PROMPT;
+   - retrieval_eval/*;
+   - the corpus;
+   - existing eval/s10/manifests files;
+   - practice_profiles.yaml;
+   - CODEBOOK_v0.1.md, JUDGE_INSTRUCTIONS_v0.1.md.
+7. Holdouts and sealed files:
+   - None opened, printed, copied, hashed or scored.
+   - judge_file_v1.yaml was read by code for device_name only (Parts B and C name checks; counts only).
+   - Files under judges/ were opened only once, by a structure-only script on Hariom's request: event types, block types, tool names and num_turns (Part D note).
+8. Safety:
+   - No commit or push by me.
+   - .env not opened; no keys printed.
+   - Nothing written outside the repo.
+   - No judge or LLM call made by me (only --version and --help).
+   - No AI attribution.
+   - No blocks.
+9. Paid/external calls: 0 by me. All judge calls were made by Hariom.
+10. Not checked / assumed:
+    - Real practice outputs and Hariom's practice labels.
+    - The browser pages, which were tested over HTTP only.
+    - The freeze on real files.
+    - The C smoke import.
+11. Errors and retries:
+    - Smoke-driven fixes 1-3 (Part D).
+    - Test-only mistakes in Parts D and E, fixed in the tests.
+    - One stale argument assertion.
+12. Risks for later steps + what I need from Hariom: see "Where it fails / open" below.
+
+## Where it fails / open
+- Judge B loads Hariom's Codex skills list (no off switch). The listed skills have generic web-tool names and cannot be used under read-only, no web and the guard.
+- Judge C runs in chat with a manual paste; there is no version or model check beyond the label Hariom types.
+- The probes (PR-5..PR-10) and practice profiles were drafted by an AI model and reviewed by Hariom.
+- The Claude Code extension can auto-update; the runner checks the version before every call and stops on a change.
+- The canary covers instruction files, not every possible context source.
+- A fully non-contacting device cannot be expressed in the s10 profile formats, so codebook §6's whole-device rule is not tested in practice and cannot occur in eval.
+- Judge A sometimes answers in text before calling StructuredOutput (num_turns 3). Hariom kept num_turns strict (1-2), so such an attempt is rejected and the one retry handles it.
+- Codex --json events do not echo the model; -m pins it and the run log records "pinned by -m (not echoed in --json events)".
+- Codebook v1.0, judge instructions v1.0 and addendum A1 are not written yet, and the freeze (codebook_freeze.py) has not been run. Audit labelling and the eval kit stay blocked until then.
+- judge_output.py (the validator) is not in the frozen list; it is to be covered by the code lock in S10b2b.
+
+## Practice-round commands (Hariom; placeholders only)
+Hariom labels first, before opening any judge output:
+```
+.\.venv\Scripts\python.exe -m eval.s10.label_tool --mode practice
+```
+Judges A and B (run folders: new, empty, outside the repo):
+```
+.\.venv\Scripts\python.exe -m eval.s10.judge_runner --claude-exe "<CLAUDE_EXE>" --run-dir "<EMPTY_DIR_A>" run --round practice --judge A
+.\.venv\Scripts\python.exe -m eval.s10.judge_runner --codex-exe "<CODEX_EXE>" --run-dir "<EMPTY_DIR_B>" run --round practice --judge B
+```
+Judge C: paste data\gold\s10\kits\practice\C\batch_01.prompt.md into the Antigravity chat as one message, then save the reply as UTF-8 to D:\s10_chat\practice_batch_01.txt. Do the same for batch_02.
+```
+.\.venv\Scripts\python.exe -m eval.s10.judge_runner import-chat --round practice --batch 1 --file D:\s10_chat\practice_batch_01.txt --antigravity-version "<AG_VERSION>" --model-label "Gemini 3.8 Flash (High)"
+.\.venv\Scripts\python.exe -m eval.s10.judge_runner import-chat --round practice --batch 2 --file D:\s10_chat\practice_batch_02.txt --antigravity-version "<AG_VERSION>" --model-label "Gemini 3.8 Flash (High)"
+```
+Status, review, comparison:
+```
+.\.venv\Scripts\python.exe -m eval.s10.judge_runner status --round practice
+.\.venv\Scripts\python.exe -m eval.s10.label_tool --mode review-practice
+.\.venv\Scripts\python.exe -m eval.s10.practice_compare
+```
+The C smoke import (optional, one device) is the same as above with --round smoke --batch 1 after pasting data\gold\s10\kits\smoke\C\batch_01.prompt.md.
+
+## Tests
+- Full-suite command: `.venv\Scripts\python -m pytest tests mcp observability -q`
+- 1397 was an expectation, not a measured run.
+- 1416 passed / 1 skipped was measured on the Part E working tree, before Part F existed.
+- Part E added 23 tests by file count; Part F added 17.
+- Full suite at dad6de0 (E+F), run by Hariom on Windows: 1433 passed, 1 skipped (270.69 s).
+- Targeted files: see SELF-AUDIT item 5.
+
+## PR description
+Title: S10b2a: judge kit, runner, label-tool practice modes, codebook freeze (base: main)
+
+Adds the S10 judge setup for the practice round:
+- Six rule probes (PR-5..PR-10; data git-ignored).
+- A strict judge output schema and validator.
+- A seeded judge kit builder (practice and smoke rounds; the eval round is refused until the codebook is frozen).
+- A runner for judges A (Claude Code) and B (Codex CLI): per-call version check, clean environment, empty run folder, output guards, validator, one retry, resume, run log.
+- A chat import for judge C, and a status command.
+
+Fixes found by the smoke runs:
+- The schema no longer carries "$schema".
+- Judge A uses stream-json with the pinned StructuredOutput tool.
+- Sections may cite several parts.
+- The B model is logged as pinned.
+
+The label tool gains a practice mode (80 seeded cells) and a read-only review mode. Audit mode now requires the frozen codebook and groups cells by J-id inside each look. practice_compare writes numbered practice tables once the practice lock opens. codebook_freeze writes the write-once codebook_v1.json manifest; it has not been run.
+
+Open: codebook v1.0, judge instructions v1.0 and addendum A1 are still to be written and frozen; the validator is to be covered by the S10b2b code lock.
+
+Tests: targeted files 160 passed; full suite 1433 passed, 1 skipped (Windows, at dad6de0).
+
+---
+Each Part's result follows below, appended at its STOP.
 
 ## Part A: status, reading, tool facts (2026-11-15)
 
