@@ -41,7 +41,7 @@ def walk(node):
 
 
 def test_schema_is_strict_mode_shaped(schema):
-    assert schema['$schema'] == 'https://json-schema.org/draft/2020-12/schema'
+    assert '$schema' not in schema          # Claude --json-schema rejects the draft URI; the validator pins 2020-12
     objects = [n for n in walk(schema) if isinstance(n, dict) and n.get('type') == 'object']
     assert len(objects) == 4
     for obj in objects:

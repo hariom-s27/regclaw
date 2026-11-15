@@ -83,7 +83,8 @@ else:
         ev.append(dict(type='turn.completed', usage=dict(input_tokens=5, output_tokens=7)))
     print('\n'.join(json.dumps(e) for e in ev))
     model = 'gpt-5-other' if mode == 'wrong_model_stderr' else 'gpt-6-astra'
-    sys.stderr.write(f'model: {model}\nreasoning effort: high\n')
+    if mode != 'no_model_line':
+        sys.stderr.write(f'model: {model}\nreasoning effort: high\n')
 ''' % repr(YN)
 
 
@@ -167,6 +168,31 @@ def test_smoke_b_valid(env):
     assert a[-3] == '-o' and Path(a[-2]).name == 'SMOKE-1.attempt1.last.json' and a[-1] == '-'
     row = log_rows(env)[0]
     assert row['valid'] and row['model_observed'] == 'gpt-6-astra' and row['tokens'] == dict(input_tokens=5, output_tokens=7)
+
+
+def test_smoke_b_no_model_line_is_pinned(env, monkeypatch):
+    monkeypatch.setenv('FAKE_MODE', 'no_model_line')          # real codex 0.157.1 --json: empty stderr
+    code, _ = go(env, 'smoke', '--judge', 'B')
+    assert code == 0
+    row = log_rows(env)[0]
+    assert row['valid'] and row['guard_ok'] and row['guard_reasons'] == []
+    assert row['model_observed'] == JR.B_MODEL_PINNED
+
+
+def test_superseded_folders_ignored(env):
+    junk_kit = env['root'] / JK.KITS_REL / '_superseded' / 'smoke_schema0' / 'kit_manifest.json'
+    junk_kit.parent.mkdir(parents=True)
+    junk_kit.write_text('not json', encoding='utf-8')
+    junk_res = env['root'] / JR.JUDGES_REL / '_superseded' / 'smoke_schema0' / 'A' / 'SMOKE-1.result.json'
+    junk_res.parent.mkdir(parents=True)
+    junk_res.write_text('{}', encoding='utf-8')
+    code, lines = go(env, 'status', '--round', 'smoke')
+    assert code == 0 and 'smoke A: valid=0 invalid=0 missing=1 (of 1)' in lines
+    code, _ = go(env, 'smoke', '--judge', 'B')
+    assert code == 0 and (jdir(env, 'B') / 'SMOKE-1.result.json').exists()
+    code, lines = go(env, 'status', '--round', 'smoke')
+    assert 'smoke B: valid=1 invalid=0 missing=0 (of 1)' in lines
+    assert junk_kit.read_text(encoding='utf-8') == 'not json' and junk_res.read_text(encoding='utf-8') == '{}'
 
 
 @pytest.mark.parametrize('judge,mode,reasons,rules,valid', [

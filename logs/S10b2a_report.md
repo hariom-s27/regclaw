@@ -138,3 +138,27 @@ SELF-AUDIT (Part D)
 10. Not checked / assumed: real envelope / event shapes (fields assumed: is_error, num_turns, permission_denials, modelUsage, structured_output, result, usage; Codex item.type / turn.completed); whether Claude needs one turn with --json-schema (num_turns == 1 is enforced as specified); whether Codex writes -o into the repo folder under -s read-only. The smoke run shows all of these.
 11. Errors and retries: none (tests passed on the first run).
 12. Risks + needs: Hariom builds the smoke kit, runs canary A/B, smoke A/B and status, and pastes the output to Claude chat.
+
+
+## Part D fix: schema "$schema" key, superseded kits, B model log (15 Nov 2026)
+Smoke result (Hariom): A failed ("--json-schema is not a valid JSON Schema: no schema with key or ref https://json-schema.org/draft/2020-12/schema"); B passed (guard ok, validator valid), with no model name in its --json events.
+- Schema: removed the "$schema" line only. New LF sha ccef52c093a071a13cdfd4864d457347d10f4b25c1b8584e95e27c3a7a1d816d (was 240eb068...). The validator still pins Draft 2020-12 in code.
+- Moved (renamed; nothing deleted; git-ignored): kits/practice -> kits/_superseded/practice_schema0 (23 files, 391040 bytes); kits/smoke -> kits/_superseded/smoke_schema0 (4 files, 51711 bytes); judges/smoke -> judges/_superseded/smoke_schema0 (9 files, 19620 bytes). Byte totals match the pre-move listing.
+- Code paths are always <KITS_REL|JUDGES_REL>/<round>, with round from fixed lists, so _superseded is never read. A new test covers this.
+- Rebuilt kits (judge_kit output): smoke kit_manifest sha 944e330f818ca8ace0dbcfcd6631e1ba017fc8c0fd83464f9173f80baa0f6976; practice kit_manifest sha 33581eb08fbe4344a368143e92ed4d84e796691e8cc41d8df5569fd64f1c6830 (replaces 89e20d61... from Part C).
+- compare_kits.py: smoke 3/3 and practice 22/22 prompt files byte-identical with identical manifest entries; only date and inputs.schema.sha256_lf differ (verdict True for both rounds).
+- guard_b: when stderr has no "model:" line, model_observed = "pinned by -m (not echoed in --json events)", which is not a guard reason. A real model line is still recorded and checked (Hariom, Q1).
+
+### SELF-AUDIT (Part D fix)
+1. Asked vs done: all 5 plan steps done; Hariom runs the smoke re-run.
+2. Decisions I made myself: constant name B_MODEL_PINNED; fake mode no_model_line; comparison checked prompt bytes as well as manifest entries.
+3. Deviations: none.
+4. How I implemented it: edited the schema, judge_runner.py (constant + 2-line fallback) and two test files; Move-Item; judge_kit --round smoke/practice; scratch data/.pytest_tmp/s10b2_scratch/compare_kits.py.
+5. Checks with real output: 3 S10b2 test files: 69 passed in 69.70s; kit build exit 0 twice; compare verdict True twice.
+6. Frozen items: untouched (the schema is not on the frozen list; its new sha goes into codebook_v1.json in Part F).
+7. Holdouts and sealed files: none opened; files under judges/ were listed by name and size only, never opened.
+8. Safety: no deletion, commit or push; nothing written outside the repo.
+9. Paid/external calls: 0.
+10. Not checked / assumed: that Claude accepts the schema without "$schema" (Hariom's smoke A shows it); B must be re-run because its old result is superseded.
+11. Errors and retries: the first compare run was backgrounded and gave empty output; re-ran it in the foreground with the same script.
+12. Risks + needs: Hariom re-runs smoke A, smoke B and status smoke, checks that the run folders are empty, and pastes the output.

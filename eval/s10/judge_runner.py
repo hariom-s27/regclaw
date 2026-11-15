@@ -45,6 +45,7 @@ JUDGES_REL = 'data/gold/s10/judges'
 RUN_ROUNDS = ('practice', 'smoke')
 FILE_JUDGES = ('A', 'B')
 B_BANNED_ITEMS = frozenset({'command_execution', 'file_change', 'mcp_tool_call', 'web_search'})
+B_MODEL_PINNED = 'pinned by -m (not echoed in --json events)'
 VERSION_TIMEOUT_S = 60
 FENCE_RE = re.compile(r'^```(?:json)?[ \t]*\r?\n(.*)\r?\n```$', re.DOTALL)
 
@@ -185,6 +186,8 @@ def guard_b(stdout: bytes, stderr: bytes, last_path, model, effort):
         m = re.match(r'^\s*reasoning effort:\s*(\S+)', line)
         if m and m.group(1) != effort:
             reasons.append('wrong_effort')
+    if observed is None:                     # codex --json does not echo the model; -m pins it (not a guard failure)
+        observed = B_MODEL_PINNED
     result = None
     if last_path is not None:
         try:
