@@ -275,12 +275,13 @@ def test_unpinned_tool_logs_names_and_skips_retry(env):
     assert not rows[0]['valid'] and not (jdir(env, 'A') / 'SMOKE-1.result.json').exists()
     assert f'A SMOKE-1: tool_use names observed: {FAKE_TOOL}' in lines
     assert 'A SMOKE-1: structured_tool_unpinned, no retry' in lines
+    assert 'A SMOKE-1: not retried (marked)' in lines and not any('still invalid after retry' in l for l in lines)
     assert len(argv_rows(env)) == 1
 
 
-def test_real_config_has_unpinned_key():
+def test_real_config_pins_structured_tool():
     cfg = yaml.safe_load((REPO / JR.CONFIG_REL).read_text(encoding='utf-8'))
-    assert 'structured_output_tool' in cfg['judges']['A']
+    assert cfg['judges']['A']['structured_output_tool'] == 'StructuredOutput'     # observed in Hariom's smoke A
     args = cfg['judges']['A']['args']
     assert args[args.index('--output-format') + 1] == 'stream-json' and '--verbose' in args
 

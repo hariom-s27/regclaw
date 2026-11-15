@@ -184,3 +184,23 @@ Smoke result (Hariom): A schema accepted but guard=num_turns twice (num_turns=2,
 10. Not checked / assumed: the real stream event shapes (assistant.message.content[].type tool_use / name; final result event); whether --verbose is required; the real structured-output tool name (the next smoke A shows it).
 11. Errors and retries: one stale assertion, fixed as above.
 12. Risks + needs: Hariom runs smoke A (expected: invalid, structured_tool_unpinned, one call), reports the observed name; the pre-approved follow-up then pins it.
+
+
+## Part D fix 3: pin StructuredOutput (15 Nov 2026)
+Smoke A (Hariom): exactly one tool_use name, StructuredOutput; guard=structured_tool_unpinned only; run folder empty.
+- judge_config A: structured_output_tool: StructuredOutput (the only config change; pre-approved follow-up).
+- Console: a device that is not retried now prints "not retried (marked)" instead of "still invalid after retry (marked)".
+
+### SELF-AUDIT (Part D fix 3)
+1. Asked vs done: both items done.
+2. Decisions I made myself: renamed test_real_config_has_unpinned_key to test_real_config_pins_structured_tool (it now asserts the pinned name).
+3. Deviations: none.
+4. How I implemented it: 1 config line; a retried flag in run_round; 2 test assertions.
+5. Checks with real output: 3 targeted test files: 98 passed in 46.52s; git diff --stat: config 1 line, runner +4/-1, tests +3/-2.
+6. Frozen items: untouched (the config sha changes again; it is recorded in Part F).
+7. Holdouts and sealed files: none opened.
+8. Safety: no commit, push or deletion.
+9. Paid/external calls: 0.
+10. Not checked / assumed: that the pinned run passes the guard (Hariom's next smoke A).
+11. Errors and retries: none.
+12. Risks + needs: Hariom re-runs smoke A, status smoke and the run-folder count.

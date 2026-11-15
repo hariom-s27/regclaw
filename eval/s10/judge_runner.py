@@ -356,9 +356,11 @@ class Runner:
                 counts['skipped'] += 1
                 continue
             ok = self.call(round_name, device_id, prompt, sha, items)
+            retried = False
             if not ok and 'structured_tool_unpinned' in self.last_reasons:
                 self.out(f'{self.judge} {device_id}: structured_tool_unpinned, no retry')
             elif not ok:
+                retried = True
                 ok = self.call(round_name, device_id, prompt, sha, items)
             if ok:
                 counts['valid'] += 1
@@ -366,7 +368,8 @@ class Runner:
                 continue
             counts['invalid'] += 1
             consecutive += 1
-            self.out(f'{self.judge} {device_id}: still invalid after retry (marked)')
+            self.out(f'{self.judge} {device_id}: ' + ('still invalid after retry (marked)' if retried
+                                                      else 'not retried (marked)'))
             if consecutive >= self.cfg['max_consecutive_failures']:
                 self.out(f'counts: {counts}')
                 raise RunnerStop(f'{consecutive} devices in a row still invalid after retry')
