@@ -1,0 +1,52 @@
+{
+  "format": "s10b2b-code-lock.v1",
+  "created_at": "2026-11-15T23:24:00.786673+00:00",
+  "python_version": "3.11.17",
+  "files": {
+    "eval/s10/judge_output.py": {
+      "sha256_lf": "731a272e1aec7410048319c47e2711b64f48306d54d8274aceaa031382afb848",
+      "bytes_lf": 3235,
+      "lines": 75
+    },
+    "eval/s10/judge_runner.py": {
+      "sha256_lf": "5a60488b6d80168420a6b7d39a5a8a082d169d91572969f7e0b2be1ee9c36633",
+      "bytes_lf": 25994,
+      "lines": 549
+    },
+    "eval/s10/metrics.py": {
+      "sha256_lf": "c3cef13cd8b1bcfa4e2e7539172bb63ab3b05e7f53fedf066f086fc05c3c2dee",
+      "bytes_lf": 12378,
+      "lines": 289
+    },
+    "eval/s10/agreement.py": {
+      "sha256_lf": "5f03956d3393043fd2e8f7646fa194b4a30f0fdd68df7a01e46ff2e296edcdbf",
+      "bytes_lf": 5295,
+      "lines": 159
+    },
+    "eval/s10/merge.py": {
+      "sha256_lf": "e90972745ab3553aeddec448530a93963394828507727587723f8801725bd69d",
+      "bytes_lf": 9761,
+      "lines": 206
+    },
+    "eval/s10/gate.py": {
+      "sha256_lf": "683f116a5d3d025c2484ff30840c21d2d923b01687c612f141c58e3d99370f34",
+      "bytes_lf": 12426,
+      "lines": 257
+    },
+    "eval/s10/draws.py": {
+      "sha256_lf": "7ad3101e70e824ed6d8d32b94629f57375bd40a62b2c81d471fc08260bb61a4a",
+      "bytes_lf": 10679,
+      "lines": 243
+    },
+    "eval/s10/sheets.py": {
+      "sha256_lf": "fef01e26f4fe92500dbfb7e68481ff63ce28fcec9dfdcc102f5c6c6edb2f4974",
+      "bytes_lf": 16400,
+      "lines": 314
+    },
+    "eval/s10/diagnostics.py": {
+      "sha256_lf": "a85a31c43c7112f691baa4eeab0f02bccedcfa6aa25788bd837346f16a4430bd",
+      "bytes_lf": 8355,
+      "lines": 172
+    }
+  }
+}
