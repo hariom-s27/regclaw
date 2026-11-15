@@ -346,13 +346,14 @@ def test_retry_then_valid_and_resume(env, monkeypatch):
     assert any('skipped_already_valid=10' in l for l in lines)
 
 
-def test_eval_round_refused(env, tmp_path):
-    assert go(env, 'run', '--round', 'eval', '--judge', 'A')[0] == 1
-    assert go(env, 'status', '--round', 'eval')[0] == 1
+def test_eval_round_without_kit_is_input_error(env, tmp_path):
+    assert go(env, 'run', '--round', 'eval', '--judge', 'A')[0] == 2
+    assert go(env, 'status', '--round', 'eval')[0] == 2
     paste = tmp_path / 'p.txt'
     paste.write_text('[]', encoding='utf-8')
     assert go(env, 'import-chat', '--round', 'eval', '--batch', '1', '--file', str(paste),
-              '--antigravity-version', '1.0', '--model-label', 'Gemini 3.8 Flash (High)')[0] == 1
+              '--antigravity-version', '1.0', '--model-label', 'Gemini 3.8 Flash (High)')[0] == 2
+    assert go(env, 'run', '--round', 'stability', '--judge', 'B')[0] == 2
     assert not argv_rows(env)
 
 

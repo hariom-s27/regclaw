@@ -4,13 +4,19 @@ Rounds:
   practice  PR-1..PR-10 (practice_profiles.yaml + practice_probes.yaml, both sha-checked); codebook v0.1
             (LF sha must equal s10b1_build.json) and JUDGE_INSTRUCTIONS_v0.1.md (must exist; sha recorded).
   smoke     SMOKE-1 only (fixed generic profile below); same codebook/instruction checks as practice.
-  eval      refused in S10b2a: first unless eval/s10/manifests/codebook_v1.json exists and every recorded sha
-            matches, then unconditionally (no eval kit is built in S10b2a).
+  eval      (S10b2b) refused unless eval/s10/manifests/codebook_v1.json exists, every recorded sha matches and
+            it records CODEBOOK_v1.0.md, JUDGE_INSTRUCTIONS_v1.0.md and the schema. Devices = judge_file_v1.yaml
+            (LF sha must equal s10b1_build.json; id = J-id; items = the entry's items, fda-knee included).
+            Judge C batches = data/gold/s10/draws/c_batches.json, which must equal draws.c_batches(sorted J-ids).
+  stability (S10b2b-10) same checks; devices = the 6 of data/gold/s10/draws/stability_set.json (must equal
+            draws.stability(judge file)), in draw order; every judge gets the device's FULL item list in the
+            REVERSE of that judge's main-pass order; judge C: 2 batches (3 + 3) in draw order. The prompt does
+            not show which items are scored.
 Prompt = four blocks with fixed headers (JUDGE INSTRUCTIONS, CODEBOOK, DEVICE SHEET, YOUR TASK). A device
 sheet holds id, contact_category, duration, the DeviceProfile input fields (existing_evidence and derived
 dropped; no flags) and the items in this judge's seeded order: Random("S10b-v1|order|<judge>|<id>").
-Judge C: devices in id order, 5 per batch, one message per batch. Outputs (LF, UTF-8, write-once per round):
-data/gold/s10/kits/<round>/{A,B}/<id>.prompt.md, C/batch_NN.prompt.md, kit_manifest.json.
+Judge C (practice, smoke): devices in id order, 5 per batch, one message per batch. Outputs (LF, UTF-8,
+write-once per round): data/gold/s10/kits/<round>/{A,B}/<id>.prompt.md, C/batch_NN.prompt.md, kit_manifest.json.
 No engine, tool, classifier or LLM is run. Prints counts and shas only.
 
 Run from the repo root:  python -m eval.s10.judge_kit --round practice
@@ -28,13 +34,16 @@ import yaml
 
 from standards.ruleset import normalised_sha
 
+from . import draws
 from .judge_file import load_parts
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_VERSION = 's10-judge-prompt.v1'
 KIT_FORMAT = 's10-judge-kit-manifest.v1'
 SEED = 'S10b-v1'
-ROUNDS = ('practice', 'smoke', 'eval')
+ROUNDS = ('practice', 'smoke', 'eval', 'stability')
+EVAL_ROUNDS = ('eval', 'stability')
+STABILITY_C_SPLIT = (3, 3)
 FILE_JUDGES = ('A', 'B')
 CHAT_JUDGE = 'C'
 BATCH_SIZE = 5
@@ -44,6 +53,9 @@ INSTRUCTIONS_V01_REL = 'eval/s10/codebook/JUDGE_INSTRUCTIONS_v0.1.md'
 SCHEMA_REL = 'eval/s10/codebook/judge_output.schema.json'
 BUILD_MANIFEST_REL = 'eval/s10/manifests/s10b1_build.json'
 CODEBOOK_V1_MANIFEST_REL = 'eval/s10/manifests/codebook_v1.json'
+CODEBOOK_V1_REL = 'eval/s10/codebook/CODEBOOK_v1.0.md'
+INSTRUCTIONS_V1_REL = 'eval/s10/codebook/JUDGE_INSTRUCTIONS_v1.0.md'
+JUDGE_FILE_REL = 'data/gold/s10/judge_file_v1.yaml'
 PRACTICE_REL = 'data/gold/s10/practice_profiles.yaml'
 PROBES_REL = 'data/gold/s10/practice_probes.yaml'
 KITS_REL = 'data/gold/s10/kits'
@@ -166,10 +178,7 @@ def check_eval_manifest(root):
 
 
 def load_round(root, round_name, probes_sha):
-    """Returns (entries in id order, inputs {name: {path, sha256_lf}}, instructions text, codebook text)."""
-    if round_name == 'eval':
-        check_eval_manifest(root)
-        raise KitRefused('eval round refused: no eval kit is built in S10b2a')
+    """Practice / smoke. Returns (entries in id order, inputs {name: {path, sha256_lf}}, instructions, codebook)."""
     if round_name not in ('practice', 'smoke'):
         raise KitError(f'unknown round {round_name!r}')
     cb_raw = _read(root, CODEBOOK_V01_REL)
@@ -203,6 +212,66 @@ def load_round(root, round_name, probes_sha):
     return entries, inputs, to_lf_text(instr_raw), to_lf_text(cb_raw)
 
 
+def main_order(entry, judge):
+    """Main-pass (eval) item order of one judge for one device."""
+    return item_order(entry['items'], judge, entry['id'])
+
+
+def reversed_order(entry, judge):
+    """Stability re-label order: the reverse of that judge's main-pass order (S10b2b-10)."""
+    return list(reversed(main_order(entry, judge)))
+
+
+def _draw_file(root, name):
+    rel = f'{draws.DRAWS_REL}/{draws.OUT[name]}'
+    raw = _read(root, rel)
+    return json.loads(raw.decode('utf-8')), dict(path=rel, sha256_lf=normalised_sha(raw))
+
+
+def load_eval_round(root, round_name):
+    """eval / stability. Returns (devices, inputs, instructions, codebook, C batches [[id, ...]], order fn)."""
+    manifest = check_eval_manifest(root)
+    for rel in (CODEBOOK_V1_REL, INSTRUCTIONS_V1_REL, SCHEMA_REL):
+        if rel not in manifest['files']:
+            raise KitRefused(f'{round_name} round refused: {rel} is not recorded in {CODEBOOK_V1_MANIFEST_REL}')
+    jf_raw = _read(root, JUDGE_FILE_REL)
+    jf_sha = normalised_sha(jf_raw)
+    if jf_sha != _build_manifest_sha(root, JUDGE_FILE_REL):
+        raise KitRefused('judge file sha differs from s10b1_build.json')
+    entries = [dict(id=e['j_id'], contact_category=e['contact_category'], duration=e['duration'],
+                    profile=e['profile'], items=list(e['items'])) for e in yaml.safe_load(to_lf_text(jf_raw))['entries']]
+    ids = [e['id'] for e in entries]
+    if len(set(ids)) != len(ids):
+        raise KitError('judge file J-ids are not unique')
+    entries = sorted(entries, key=lambda e: device_key(e['id']))
+    cb_raw, instr_raw, schema_raw = _read(root, CODEBOOK_V1_REL), _read(root, INSTRUCTIONS_V1_REL), _read(root, SCHEMA_REL)
+    inputs = dict(codebook=dict(path=CODEBOOK_V1_REL, sha256_lf=normalised_sha(cb_raw)),
+                  instructions=dict(path=INSTRUCTIONS_V1_REL, sha256_lf=normalised_sha(instr_raw)),
+                  schema=dict(path=SCHEMA_REL, sha256_lf=normalised_sha(schema_raw)),
+                  judge_file=dict(path=JUDGE_FILE_REL, sha256_lf=jf_sha))
+    if round_name == 'eval':
+        doc, info = _draw_file(root, 'c-batches')
+        expect = draws.c_batches(ids)
+        if doc.get('assignment') != expect:
+            raise KitRefused('c_batches.json differs from the c-batches draw')
+        inputs['c_batches'] = info
+        devices, batches, order = entries, draws.batches_of(expect), main_order
+    else:
+        doc, info = _draw_file(root, 'stability')
+        expect = draws.stability([dict(j_id=e['id'], items=e['items']) for e in entries])
+        if doc.get('devices') != expect:
+            raise KitRefused('stability_set.json differs from the stability draw')
+        inputs['stability_set'] = info
+        by_id = {e['id']: e for e in entries}
+        devices = [by_id[d['j_id']] for d in expect]
+        drawn, batches = [d['j_id'] for d in expect], []
+        for size in STABILITY_C_SPLIT:
+            batches.append(drawn[:size])
+            drawn = drawn[size:]
+        order = reversed_order
+    return devices, inputs, to_lf_text(instr_raw), to_lf_text(cb_raw), batches, order
+
+
 def _write_once(path: Path, text: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('x', encoding='utf-8', newline='\n') as fh:
@@ -216,8 +285,18 @@ def build(root, round_name, *, probes_sha=PROBES_SHA256_LF, now=None):
     out_dir = root / KITS_REL / round_name
     if out_dir.exists() and any(out_dir.iterdir()):
         raise FileExistsError(f'{KITS_REL}/{round_name} already holds files (write-once)')
-    entries, inputs, instructions, codebook = load_round(root, round_name, probes_sha)
-    parts = load_parts(root)
+    if round_name in EVAL_ROUNDS:
+        entries, inputs, instructions, codebook, c_groups, order = load_eval_round(root, round_name)
+        items_source = JUDGE_FILE_REL
+    else:
+        entries, inputs, instructions, codebook = load_round(root, round_name, probes_sha)
+        parts = load_parts(root)
+
+        def order(e, judge):
+            return item_order(parts, judge, e['id'])
+        ids = [e['id'] for e in entries]
+        c_groups = [ids[start:start + BATCH_SIZE] for start in range(0, len(ids), BATCH_SIZE)]
+        items_source = 'standards/data/endpoint_to_part.v1.yaml'
     files = []
 
     def record(path, judge, sheets, text):
@@ -229,17 +308,22 @@ def build(root, round_name, *, probes_sha=PROBES_SHA256_LF, now=None):
 
     for judge in FILE_JUDGES:
         for e in entries:
-            sheet = device_sheet(e, item_order(parts, judge, e['id']))
+            sheet = device_sheet(e, order(e, judge))
             record(out_dir / judge / f'{e["id"]}.prompt.md', judge, [sheet],
                    device_prompt(instructions, codebook, sheet))
-    sheets_c = [device_sheet(e, item_order(parts, CHAT_JUDGE, e['id'])) for e in entries]
-    for n, start in enumerate(range(0, len(sheets_c), BATCH_SIZE), start=1):
-        chunk = sheets_c[start:start + BATCH_SIZE]
+    sheets_c = {e['id']: device_sheet(e, order(e, CHAT_JUDGE)) for e in entries}
+    for n, group in enumerate(c_groups, start=1):
+        chunk = [sheets_c[d] for d in group]
         record(out_dir / CHAT_JUDGE / f'batch_{n:02d}.prompt.md', CHAT_JUDGE, chunk,
                batch_prompt(instructions, codebook, chunk))
     manifest = dict(format=KIT_FORMAT, round=round_name, template_version=TEMPLATE_VERSION,
-                    seed_template=f'{SEED}|order|<judge>|<device_id>', items_source='standards/data/endpoint_to_part.v1.yaml',
+                    seed_template=f'{SEED}|order|<judge>|<device_id>', items_source=items_source,
                     inputs=inputs, files=files, date=now or datetime.now(timezone.utc).isoformat())
+    if round_name == 'eval':
+        manifest.update(c_batch_rule='data/gold/s10/draws/c_batches.json (Random("S10b-v1|c-batches"))')
+    elif round_name == 'stability':
+        manifest.update(item_order_rule='reverse of the judge\'s main-pass order (seed_strings = main-pass seeds)',
+                        c_batch_rule=f'stability draw order, batches of {"+".join(map(str, STABILITY_C_SPLIT))}')
     _write_once(out_dir / 'kit_manifest.json', json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')
     return manifest
 
