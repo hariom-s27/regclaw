@@ -13,7 +13,8 @@ of first appearance), items in list order within a J-id; the CSV order column fo
                   Needs the audit-B draw and all audit-B labels.
   referee-pass2   needs every pass-1 sheet label; first writes sheets/referee_pass1_lock.json (pass 1 locked:
                   write-once sha of every pass-1 label and its source), then sheets/referee_pass2_sheet.md +
-                  referee_pass2_labels.csv: per cell the 3 judge reasons cleaned by clean_reason and shuffled with
+                  referee_pass2_labels.csv: per cell the 3 judge reasons cleaned by clean_reason (label words ->
+                  [label], judge/model/vendor names -> [judge], S10P-24 anonymised) and shuffled with
                   Random("S10b-v1|referee-order|<cell_id>"); no tally, no confidence, no judge names; a missing or
                   empty reason shows NO_REASON. verify_pass1_lock() re-checks pass 1 against the lock later.
 Every referee CSV has the column unsure_guideline_gap ("yes" when unsure -> guideline gap; label still required).
@@ -58,6 +59,13 @@ SET_NAME, LOCK_NAME = 'referee_set.json', 'referee_pass1_lock.json'
 # ---- reason cleaning (S10b2b-12) -----------------------------------------------------------------------
 _LABEL_RE = re.compile(r'(?i)\b(?:mandatory|recommended|not_applicable|not[ -]applicable|n/a)\b')
 _NA_RE = re.compile(r'\bNA\b')                                  # upper-case only: "na" is left alone
+JUDGE_NAMES = ('claude', 'opus', 'sonnet', 'haiku', 'anthropic', 'gpt', 'openai', 'codex', 'gemini', 'google',
+               'antigravity', 'chatgpt', 'astra')
+MODEL_WORDS = ('astra', 'flash', 'pro', 'mini')     # masked only when attached to a masked name + version
+# S10P-24 anonymised: a name plus an optional directly following version (separator space / - / . / none, starting
+# with a digit: 6, 4, 4o, 5.5, 3.8) plus an optional model word becomes ONE [judge]; or "judge a/b/c".
+_NAME_RE = re.compile(r'(?i)\b(?:judge\s+[abc]|(?:' + '|'.join(JUDGE_NAMES) + r')'
+                      r'(?:[ .\-]?\d+(?:\.\d+)*[a-z]*(?:[ \-](?:' + '|'.join(MODEL_WORDS) + r'))?)?)\b')
 _ARROW_RE = re.compile(r'\s*(?:->|=>|→)\s*')
 _SECTION_RE = re.compile(r'(?i)(?:\b(?:section|sec\.?)\s*§?|§)\s*(\d+(?:\.\d+)*)')
 _QUOTES = str.maketrans({'“': '"', '”': '"', '„': '"', '″': '"',
@@ -65,9 +73,12 @@ _QUOTES = str.maketrans({'“': '"', '”': '"', '„': '"', '″': '"',
 
 
 def clean_reason(text):
-    """Mask label words with [label] (mandatory, recommended, not_applicable and its variants not applicable,
+    """Mask judge / model / vendor names (JUDGE_NAMES with an attached version and model word, and "judge a/b/c";
+    whole word, any case) with one [judge] each, and
+    label words with [label] (mandatory, recommended, not_applicable and its variants not applicable,
     not-applicable, N/A, NA), straighten quotes, arrows -> " → ", section refs -> §N.N, collapse whitespace."""
     s = str(text).translate(_QUOTES)
+    s = _NAME_RE.sub('[judge]', s)
     s = _LABEL_RE.sub('[label]', s)
     s = _NA_RE.sub('[label]', s)
     s = _SECTION_RE.sub(lambda m: f'§{m.group(1)}', s)

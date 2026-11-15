@@ -50,6 +50,41 @@ def test_no_label_word_survives_cleaning_fuzz():
         assert not LABEL_WORD.search(out), out
 
 
+NAME_WORD = re.compile(r'(?i)\b(?:judge\s+[abc]|' + '|'.join(SH.JUDGE_NAMES) + r')\b')
+
+
+@pytest.mark.parametrize('name', list(SH.JUDGE_NAMES) + ['judge a', 'judge b', 'judge c'])
+def test_every_name_masked_any_case_and_punctuation(name):
+    for variant in (name, name.upper(), name.title(), name[:1].upper() + name[1:]):
+        for raw in (variant, f'({variant})', f'{variant}, then', f'"{variant}".', f'per {variant}: ok', f'{variant}-6'):
+            out = SH.clean_reason(raw)
+            assert '[judge]' in out and not NAME_WORD.search(out), (raw, out)
+
+
+@pytest.mark.parametrize('raw,clean', [
+    ('Judge  A said so; JUDGE b too', '[judge] said so; [judge] too'),
+    ('As Claude Opus 5.5 and GPT-6 noted (Gemini via Antigravity)', 'As [judge] [judge] and [judge] noted ([judge] via [judge])'),
+    ('OpenAI, Anthropic, Google; ChatGPT; codex; haiku; sonnet.', '[judge], [judge], [judge]; [judge]; [judge]; [judge]; [judge].'),
+    ('opuses googled codexes haikus sonnets claudes gpts judged judge d', 'opuses googled codexes haikus sonnets claudes gpts judged judge d'),
+    ('Magnum opusculum; geminid; astral; gpts stay', 'Magnum opusculum; geminid; astral; gpts stay'),
+    ('flash sterilisation, pro forma, mini spike', 'flash sterilisation, pro forma, mini spike'),
+    ('Per Opus 5.5. Then gpt4: done', 'Per [judge]. Then [judge]: done'),
+])
+def test_name_masking_cases(raw, clean):
+    assert SH.clean_reason(raw) == clean
+
+
+@pytest.mark.parametrize('raw', ['GPT-6', 'gpt4', 'gpt-5o', 'GPT-6 Astra', 'Gemini 3.8 Flash', 'Opus 5.5', 'astra',
+                                 'ASTRA', 'gemini 3.8 pro', 'gpt-5 mini', 'Sonnet5.5', 'codex.2'])
+def test_name_with_version_and_model_word_is_one_mask(raw):
+    assert SH.clean_reason(raw) == '[judge]'
+
+
+def test_claude_opus_version():
+    assert SH.clean_reason('Claude Opus 5.5') == '[judge] [judge]'
+    assert SH.clean_reason('Gemini 3.8 Flash (High) said so') == '[judge] (High) said so'
+
+
 def test_shuffled_reasons_replay_and_missing():
     got = SH.shuffled_reasons('J-001|ISO 10993-5', ['A is mandatory', None, '   '])
     want = ['A is [label]', SH.NO_REASON, SH.NO_REASON]
