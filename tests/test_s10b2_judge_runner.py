@@ -388,6 +388,25 @@ def test_import_chat(env, tmp_path):
     assert (d / 'batch_01.attempt2.paste.txt').exists()
 
 
+def test_import_chat_smoke_round(env, tmp_path):
+    kit = json.loads((env['root'] / JK.KITS_REL / 'smoke' / 'kit_manifest.json').read_text(encoding='utf-8'))
+    entry = [f for f in kit['files'] if f['judge'] == 'C'][0]
+    assert entry['device_ids'] == ['SMOKE-1']
+    arr = [dict(device_id='SMOKE-1', checklist=dict(components=[dict(name='p', contact_category='c', duration='A',
+                                                                     table_row='r')],
+                                                    **{k: 'no' for k in YN}, material_classes=[]),
+                cells=[dict(item=i, reason='r', label='recommended', confidence='low', section='§4.2, §5.1',
+                            needs_sme='') for i in entry['item_order']['SMOKE-1']])]
+    paste = tmp_path / 'smoke.txt'
+    paste.write_bytes('﻿'.encode('utf-8') + json.dumps(arr).encode('utf-8'))       # UTF-8 with BOM
+    code, lines = go(env, 'import-chat', '--round', 'smoke', '--batch', '1', '--file', str(paste),
+                     '--antigravity-version', '1.0', '--model-label', 'Gemini 3.8 Flash (High)')
+    assert code == 0 and 'C batch_01: valid=1 invalid=0 already_valid=0' in lines
+    assert (jdir(env, 'C') / 'SMOKE-1.result.json').exists()
+    code, lines = go(env, 'status', '--round', 'smoke')
+    assert 'smoke C: valid=1 invalid=0 missing=0 (of 1)' in lines
+
+
 def test_import_chat_bad_inputs(env, tmp_path):
     paste = tmp_path / 'bad.txt'
     paste.write_text('Here is the answer: not json', encoding='utf-8')

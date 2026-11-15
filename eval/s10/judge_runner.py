@@ -5,7 +5,7 @@ Hariom runs every judge call himself. Subcommands (global: --claude-exe, --codex
                                         model's first two lines; writes nothing (DIR is only the cwd)
   smoke  --judge A|B                    round smoke (SMOKE-1)
   run    --round practice --judge A|B   resumes: skips devices with a valid result
-  import-chat --round practice --batch NN --file PATH --antigravity-version V --model-label L
+  import-chat --round practice|smoke --batch NN --file PATH --antigravity-version V --model-label L
   status --round practice|smoke         valid / invalid / missing per judge
 The eval round is refused in S10b2a.
 
@@ -418,7 +418,7 @@ def strip_fence(text):
 
 
 def import_chat(root, cfg, round_name, batch, file_path, version, label, out=print):
-    if round_name != 'practice':
+    if round_name not in RUN_ROUNDS:
         raise RunnerRefused(f'import-chat: round {round_name} is refused in S10b2a')
     if label != cfg['judges']['C']['model_label']:
         raise RunnerRefused('import-chat: model label differs from judge_config.yaml')
@@ -505,7 +505,7 @@ def main(argv=None, *, root=ROOT, prefix=(), out=print) -> int:
     r.add_argument('--round', choices=('practice', 'eval'), required=True)
     r.add_argument('--judge', choices=FILE_JUDGES, required=True)
     i = sub.add_parser('import-chat')
-    i.add_argument('--round', choices=('practice', 'eval'), required=True)
+    i.add_argument('--round', choices=('practice', 'smoke', 'eval'), required=True)
     i.add_argument('--batch', type=int, required=True)
     i.add_argument('--file', required=True)
     i.add_argument('--antigravity-version', required=True)
