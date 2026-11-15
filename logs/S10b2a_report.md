@@ -204,3 +204,96 @@ Smoke A (Hariom): exactly one tool_use name, StructuredOutput; guard=structured_
 10. Not checked / assumed: that the pinned run passes the guard (Hariom's next smoke A).
 11. Errors and retries: none.
 12. Risks + needs: Hariom re-runs smoke A, status smoke and the run-folder count.
+
+### Part D note: judge A extra-turn finding and decision (16 Nov 2026)
+- Finding (data/.pytest_tmp/s10b2_scratch/stream_shape.py on judges/practice/A/PR-4.attempt1.stream.jsonl; event types, subtypes, block types, tool names and num_turns only; no text printed):
+  - system/init, then 5 x system/thinking_tokens;
+  - assistant [thinking], then assistant [text] with no tool call;
+  - rate_limit_event, then user [text];
+  - assistant [tool_use: StructuredOutput], then user [tool_result];
+  - rate_limit_event, then result/success with num_turns=3.
+- Reading: the model first answered in plain text; after a user-side text message (its text not read; most likely a CLI prompt to use the structured-output tool) it called StructuredOutput once. Guard reason: num_turns only (one tool_use, pinned name).
+- Decision (Hariom, 16 Nov 2026): keep num_turns strict (allowed 1-2). This pattern stays rejected; the runner's one retry handles it. No code change.
+
+
+## Part E: label tool practice / review-practice / audit changes (S7), practice_compare (S8) (15 Nov 2026)
+- judge_runner import-chat now accepts --round smoke (Hariom Q1), so judge C can be smoke-tested on SMOKE-1.
+- label_tool.py:
+  - Shared labelling core (_Labeller).
+  - Audit: needs eval/s10/manifests/codebook_v1.json with the LF sha of the codebook in use (default CODEBOOK_v1.0.md); display order is grouped by J-id inside each look (1-150, 151-250, 251-350); the gap-free rule follows display order; CSV rows stay in list order.
+  - Practice: PR-1..PR-4 x 20 parts = 80 cells, seed "S10b-v1|hariom-practice|<id>"; practice and codebook v0.1 shas checked against s10b1_build.json; judge view of the profile; labels_hariom_practice.csv with a device_id column.
+  - Review-practice: read-only; needs 80 labels + valid A/B/C results for PR-1..PR-4, else it refuses with counts.
+- practice_compare.py:
+  - Lock S10b2a-07 (Hariom Q2): 80 labels complete AND A, B, C valid for all 10 practice devices.
+  - Writes data/gold/s10/practice/practice_table_NN.md (next free number, never overwrites).
+  - Table: per item A/B/C label (section), Hariom, STRADDLE; reasons for non-unanimous or STRADDLE cells; checklist fields where A/B/C differ.
+  - Console prints counts only.
+
+### SELF-AUDIT (Part E)
+1. Asked vs done:
+   - S7 practice / review-practice / audit: done.
+   - S8: done.
+   - Q1 (smoke import-chat): done.
+   - Q3 (A=B=C over 200 + all-four over 80): done.
+   - Q4 (numbered tables): done.
+   - Q5 (device_id): done.
+   - Hariom's addition (reasons + checklist differences): done.
+2. Decisions I made myself:
+   - In audit mode, --upto is required; outside audit it is refused.
+   - Review also requires each result to pass judge_output.validate again.
+   - material_classes is compared as a sorted list; components as an ordered list.
+   - Checklist "different" means the A/B/C values are not all equal.
+   - The table header records the date and the practice kit_manifest sha.
+   - Exit codes: 0 written, 1 refused, 2 input error.
+   - The progress bar shows done/total.
+3. Deviations: none.
+4. How I implemented it:
+   - label_tool.py rebuilt from a new head plus the existing PAGE (6 small JS edits, checked to match once each) and a new REVIEW_PAGE; scratch scripts in data/.pytest_tmp/s10b2_scratch/.
+   - New practice_compare.py and two new test files.
+   - Existing label-tool fixture extended with a fake codebook_v1.json; existing assertions unchanged.
+5. Checks with real output:
+   - Six targeted files: 143 passed in 54.21s.
+   - Earlier runs: 2 test bugs in new audit tests (fake list size; label count needed to cross a J-id) and 2 in compare tests (heading count; split boundaries); all in the tests, fixed there.
+6. Frozen items: untouched (s10b1_build.json, practice_profiles.yaml and codebook v0.1 read only in code; none opened by me).
+7. Holdouts and sealed files: none opened. No labels_*.csv or judges/ file opened (existence checks only).
+8. Safety: no commit, push or deletion; tool not started on real files.
+9. Paid/external calls: 0.
+10. Not checked / assumed:
+    - The real practice run: Hariom's labelling, the judges' practice outputs and the table on real data.
+    - The browser pages were checked only through tests (HTTP), not visually.
+11. Errors and retries: the 4 test bugs above.
+12. Risks + needs:
+    - Audit mode cannot start until Part F's codebook_v1.json exists.
+    - Hariom labels the practice set before looking at any judge output.
+
+
+## Part F: codebook freeze script (S9), code + tests only (16 Nov 2026)
+- eval/s10/codebook_freeze.py writes eval/s10/manifests/codebook_v1.json once: {format, version v1.0, template_version, files: {rel: {sha256_lf, bytes_lf, lines}}, created_at}.
+- It freezes exactly these 6 files: CODEBOOK_v1.0.md, JUDGE_INSTRUCTIONS_v1.0.md, judge_output.schema.json, judge_kit.py, judge_config.yaml, specs/S10_PREREG_ADDENDUM_A1.md.
+- --expected-sha REL=SHA can be repeated and works for any of the 6 files (Hariom Q1); per-file bytes_lf and lines are recorded (Q2).
+- Exit codes: 0 written, 1 sha mismatch, 2 file missing or bad argument, 3 manifest already exists.
+- Not run on real files.
+
+### SELF-AUDIT (Part F)
+1. Asked vs done: code and tests done; the freeze was not run (as instructed).
+2. Decisions I made myself:
+   - format name s10-codebook-manifest.v1;
+   - --expected-sha accepts upper-case shas and refuses the same file given twice;
+   - checks run in this order: manifest exists, then arguments, then missing files, then sha check.
+3. Deviations: none.
+4. How I implemented it: new eval/s10/codebook_freeze.py (reuses compute() from prereg_freeze.py and TEMPLATE_VERSION from judge_kit); new tests/test_s10b2_codebook_freeze.py (temp root under data/.pytest_tmp/s10b2).
+5. Checks with real output: per-file counts from one run of 7 files, 160 passed in 62.36s:
+   - codebook_freeze 17
+   - judge_output 43
+   - judge_kit 13
+   - judge_runner 43
+   - label_tool_practice 10
+   - practice_compare 6
+   - s10b_label_tool 28
+6. Frozen items: untouched. Neither judge_output.py nor judge_runner.py is in the frozen list (Hariom note 2).
+7. Holdouts and sealed files: none opened.
+8. Safety: no commit, push or deletion; no freeze run.
+9. Paid/external calls: 0.
+10. Not checked / assumed: the real v1.0 files and the addendum do not exist yet.
+11. Errors and retries: none.
+12. Risks + needs: after Hariom's freeze, any edit to the 6 files blocks the eval kit until a new versioned manifest exists, so every fix must land before the freeze.
