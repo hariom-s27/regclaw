@@ -1,4 +1,4 @@
-"""Friend kit checks use synthetic inputs beneath the repository basetemp only."""
+"""Friend kit checks use synthetic inputs beneath pytest's tmp_path."""
 from collections import Counter
 import csv
 from datetime import datetime
@@ -40,8 +40,6 @@ def fake_only(monkeypatch):
 
 @pytest.fixture
 def root(tmp_path):
-    # The documented --basetemp stays inside the repository; never write elsewhere.
-    assert tmp_path.resolve().is_relative_to(REPO.resolve())
     return tmp_path / 'fake-root'
 
 

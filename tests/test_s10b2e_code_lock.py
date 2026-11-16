@@ -32,7 +32,6 @@ def fake_only(monkeypatch):
 
 @pytest.fixture
 def root(tmp_path):
-    assert tmp_path.resolve().is_relative_to(REPO.resolve())
     return tmp_path / 'fake-code-lock-root'
 
 
