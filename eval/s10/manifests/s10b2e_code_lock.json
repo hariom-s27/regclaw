@@ -1,0 +1,27 @@
+{
+  "format": "s10b2e-code-lock.v1",
+  "created_at": "2026-11-16T19:33:50.997040+00:00",
+  "python_version": "3.11.17",
+  "files": {
+    "eval/s10/second_rater.py": {
+      "sha256_lf": "08f696fcfc6a3c13e0395a46a3b3311d913c6507d2ec4c8327110b129b72dc45",
+      "bytes_lf": 18988,
+      "lines": 405
+    },
+    "eval/s10/label_quality.py": {
+      "sha256_lf": "583a6472cd25437284102075521f59cab71d1d06c0751886ddde74c695fd0693",
+      "bytes_lf": 18221,
+      "lines": 448
+    },
+    "eval/s10/census.py": {
+      "sha256_lf": "79e7050dfa605b6fc44b4f67661addb96ed8b5d3add9a992b51ee60cf4e0f070",
+      "bytes_lf": 3802,
+      "lines": 89
+    },
+    "eval/s10/addendum_freeze.py": {
+      "sha256_lf": "c2492029d4160da0074d52e481c3f8168a4570d2406462bf4ac9ff2d449aea0a",
+      "bytes_lf": 4053,
+      "lines": 97
+    }
+  }
+}
