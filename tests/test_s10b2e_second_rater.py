@@ -278,6 +278,7 @@ def test_sheet_blind_fields_order_lf_and_shas(root):
     for word in (JID, LEAK, 'stratum', 'confidence', 'routed', 'reason', 'existing_evidence', 'derived', NA, R, M):
         assert word not in md
     assert 'CODEBOOK_v1.0.md' in md and 'v0.1' not in md
+    assert 'yes when' in md and 'yeswhen' not in md
     assert md.count('Synthetic device') == len(rows)
     assert all(r == dict(sheet_id=r['sheet_id'], label='', unsure_guideline_gap='', note='') for r in rows)
     for rel in (SR.SHEET_REL, SR.LABELS_REL):
@@ -468,6 +469,11 @@ def test_coldread_eligibility_seed_and_training_counts(root):
     for hidden in ('PR-', 'stratum', NA, R, M, LEAK, 'confidence', 'reason', 'v0.1'):
         assert hidden not in md
     assert 'CODEBOOK_v1.0.md' in md
+    assert 'yes when' in md and 'yeswhen' not in md
+    expected_ids = [f'C-{i:03d}' for i in range(1, 21)]
+    assert [row['sheet_id'] for row in read_csv(root / SR.COLD_LABELS_REL)] == expected_ids
+    assert [line[3:] for line in md.splitlines() if line.startswith('## ')] == expected_ids
+    assert 'S-' not in md
     for rel in (SR.COLD_SHEET_REL, SR.COLD_LABELS_REL):
         raw = (root / rel).read_bytes()
         assert b'\r' not in raw and f'{rel} sha256_lf={sha(raw)}' in out

@@ -227,7 +227,7 @@ def coldread_draw(practice_entries, items, hariom, judges):
             if len(set(labels)) == 1:
                 reference[cell_id(device, item)] = labels[0]
     picked = random.Random(f'{SEED}|coldread').sample(sorted(reference), min(COLD_N, len(reference)))
-    cells = [dict(sheet_id=f'S-{i:03d}', cell_id=cid) for i, cid in enumerate(picked, 1)]
+    cells = [dict(sheet_id=f'C-{i:03d}', cell_id=cid) for i, cid in enumerate(picked, 1)]
     return dict(cells=cells, population=len(reference), reference={cid: reference[cid] for cid in picked})
 
 
