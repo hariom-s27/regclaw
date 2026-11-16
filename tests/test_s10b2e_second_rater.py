@@ -577,8 +577,8 @@ def test_draw_write_once_precedes_source_read(root, monkeypatch):
     assert (root / SR.DRAW_REL).read_bytes() == b'keep\n'
 
 
-def test_cli_requires_expected_sha_and_does_not_offer_lock(root):
-    for args in (['freeze'], ['label'], ['lock']):
+def test_cli_requires_expected_sha_and_rejects_unknown_command(root):
+    for args in (['freeze'], ['label']):
         with pytest.raises(SystemExit) as exc:
             SR.main(args, root=root)
         assert exc.value.code == 2

@@ -309,8 +309,10 @@ def test_report_e2_pool_overlap_and_no_writes(root):
     rate_line = next(line for line in out if line.startswith('weighted scheme=binary '))
     rate = float(rate_line.split('rate=')[1].split()[0])
     assert rate == pytest.approx(Fraction(1, 75))
+    # Mandatory HT numerator=60/25+60/50=3.6; denominator=60+60=120; rate=.03.
+    assert 'E1_input weighted_binary_rate_on_final_mandatory=0.03 population=120 undefined=False' in out
     assert out[-1].startswith('P-21 PASS:')
-    assert all(line.startswith(('stratum=', 'weighted ', 'friend_class=', 'overlap_group=',
+    assert all(line.startswith(('stratum=', 'weighted ', 'E1_input ', 'friend_class=', 'overlap_group=',
                                 'overlap kappa=', 'E2_pool ', 'P-21 ')) for line in out)
 
 
@@ -344,6 +346,46 @@ def test_report_sha_mismatch_refuses_no_partial_aggregates(root, rel):
     before = snapshot(root)
     code, out, err = report_cli(root)
     assert code == 2 and out == [] and err and snapshot(root) == before
+
+
+def test_e1_input_hand_computed_and_stratum_restriction():
+    rows = [
+        dict(cell_id='a', final=M, friend_label=R, stratum='audited_mandatory',
+             inclusion_probability=.25, stratum_population=8),
+        dict(cell_id='b', final=M, friend_label=M, stratum='audited_mandatory',
+             inclusion_probability=.25, stratum_population=8),
+        dict(cell_id='c', final=M, friend_label=M, stratum='unaudited_mandatory',
+             inclusion_probability=.5, stratum_population=4),
+        dict(cell_id='d', final=M, friend_label=M, stratum='unaudited_mandatory',
+             inclusion_probability=.5, stratum_population=4),
+        dict(cell_id='split', final=M, friend_label=NA, stratum='unaudited_split',
+             inclusion_probability=1, stratum_population=1),
+        dict(cell_id='nonmandatory', final=NA, friend_label=M, stratum='audited_not_applicable',
+             inclusion_probability=1, stratum_population=1),
+    ]
+    before = deepcopy(rows)
+    result = Q.e1_input(rows)
+    # One error of weight 4; mandatory populations 8+4=12; rate=4/12=1/3.
+    # The split-M error and nonmandatory error are outside this approved frame.
+    assert result['weighted_binary_rate_on_final_mandatory'] == pytest.approx(Fraction(1, 3))
+    assert result['population'] == 12 and result['undefined'] is False
+    assert rows == before
+
+
+def test_e1_input_empty_is_flagged():
+    assert Q.e1_input([]) == dict(weighted_binary_rate_on_final_mandatory=None,
+                                 population=0, undefined=True)
+
+
+@pytest.mark.parametrize('error_class', [Q.QualityError, SR.FriendError])
+def test_report_catches_valueerror_subclasses_without_echo(root, monkeypatch, error_class):
+    assert issubclass(error_class, ValueError)
+
+    def fail(*args):
+        raise error_class(FK.LEAK)
+
+    monkeypatch.setattr(Q, 'load_report_inputs', fail)
+    assert report_cli(root) == (2, [], ['ERROR: label-quality input check failed; nothing written'])
 
 
 @pytest.mark.parametrize('kind', ['friend-path', 'human-path', 'friend-count', 'human-count', 'incomplete-labels'])

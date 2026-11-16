@@ -6,6 +6,7 @@ Run later from the repository root with ``python -m eval.s10.second_rater``:
   coldread-sheet
   coldread-compare
   freeze --expected-draw-sha <sha printed by draw>
+  lock  (only after review and explicit approval)
 
 Generated files are UTF-8, LF and write-once. The rater fills the generated CSV
 manually. Console output contains aggregates and LF shas, never cell content.
@@ -18,6 +19,7 @@ from datetime import datetime, timezone
 import io
 import json
 from pathlib import Path
+import platform
 import random
 import re
 import sys
@@ -30,6 +32,7 @@ from . import draws as D
 from .judge_kit import sheet_profile
 from .label_tool import ReviewApp, check_codebook_v1
 from .merge import JUDGES, LABELS, cell_id
+from .prereg_freeze import compute
 
 ROOT = Path(__file__).resolve().parents[2]
 SEED = 'S10b-A2'
@@ -40,6 +43,10 @@ LABELS_REL = 'data/gold/s10/sheets/friend_labels.csv'
 COLD_SHEET_REL = 'data/gold/s10/sheets/friend_coldread_sheet.md'
 COLD_LABELS_REL = 'data/gold/s10/sheets/friend_coldread_labels.csv'
 MANIFEST_REL = 'eval/s10/manifests/friend_labels_v1.json'
+CODE_LOCK_REL = 'eval/s10/manifests/s10b2e_code_lock.json'
+CODE_LOCK_FORMAT = 's10b2e-code-lock.v1'
+CODE_LOCK_FILES = ('eval/s10/second_rater.py', 'eval/s10/label_quality.py',
+                   'eval/s10/census.py', 'eval/s10/addendum_freeze.py')
 CODEBOOK_REL = 'eval/s10/codebook/CODEBOOK_v1.0.md'
 CODEBOOK_MANIFEST_REL = 'eval/s10/manifests/codebook_v1.json'
 FIELDS = ('sheet_id', 'label', 'unsure_guideline_gap', 'note')
@@ -274,9 +281,31 @@ def freeze_friend(root, *, expected_draw_sha, now=None):
                 created_at=now or datetime.now(timezone.utc).isoformat())
 
 
+def code_lock_stats(root):
+    """Read only the four approved module paths; no manifest-selected inputs."""
+    root = Path(root).resolve()
+    stats = {}
+    for relative in CODE_LOCK_FILES:
+        path = root / relative
+        resolved = path.resolve()
+        if (not resolved.is_relative_to(root)
+                or resolved.relative_to(root).as_posix().casefold() != relative.casefold()):
+            raise FriendError('code lock source path check failed')
+        stats[relative] = compute(path.read_bytes())
+    return stats
+
+
+def build_code_lock_manifest(stats, *, now=None, python_version=None):
+    if set(stats) != set(CODE_LOCK_FILES):
+        raise FriendError('code lock file list check failed')
+    return dict(format=CODE_LOCK_FORMAT, created_at=now or datetime.now(timezone.utc).isoformat(),
+                python_version=python_version or platform.python_version(),
+                files={relative: stats[relative] for relative in CODE_LOCK_FILES})
+
+
 OUTPUTS = {'draw': (DRAW_REL,), 'sheet': (SHEET_REL, LABELS_REL),
            'coldread-sheet': (COLD_SHEET_REL, COLD_LABELS_REL),
-           'coldread-compare': (), 'freeze': (MANIFEST_REL,)}
+           'coldread-compare': (), 'freeze': (MANIFEST_REL,), 'lock': (CODE_LOCK_REL,)}
 
 
 def _exists(path):
@@ -331,6 +360,15 @@ def main(argv=None, *, root=ROOT, now=None, out=print, err=None):
                     counts[label]['agree' if row['label'] == label else 'disagree'] += 1
                 lines = [f'{label} agree={counts[label]["agree"]} disagree={counts[label]["disagree"]}'
                          for label in LABELS]
+        elif args.command == 'lock':
+            if not (root / CODE_LOCK_REL).resolve().is_relative_to(root.resolve()):
+                raise FriendError('code lock destination check failed')
+            doc = build_code_lock_manifest(code_lock_stats(root), now=now)
+            payloads = [(CODE_LOCK_REL, _json_text(doc))]
+            lines = [f'files={len(CODE_LOCK_FILES)}']
+            for relative, stats in doc['files'].items():
+                lines.append(f'{relative} sha256_lf={stats["sha256_lf"]} '
+                             f'bytes_lf={stats["bytes_lf"]} lines={stats["lines"]}')
         else:
             if not re.fullmatch(r'[0-9a-f]{64}', args.expected_draw_sha):
                 raise FriendError('expected draw sha format check failed')
@@ -355,7 +393,7 @@ def main(argv=None, *, root=ROOT, now=None, out=print, err=None):
     except FileExistsError:
         err(f'REFUSED: output exists (write-once); files_written={written}')
         return 3
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, csv.Error, ZeroDivisionError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, csv.Error, ZeroDivisionError, RuntimeError) as exc:
         if isinstance(exc, FriendError) and str(exc).startswith('REFUSED:'):
             err(str(exc))
         else:

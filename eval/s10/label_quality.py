@@ -316,6 +316,15 @@ def e2_pool(merged, friend, hariom):
     return dict(x=x, n=n)
 
 
+def e1_input(rows):
+    """Mandatory-frame HT binary rate over the two approved mandatory strata."""
+    mandatory = [row for row in rows if row['final'] == 'mandatory'
+                 and row['stratum'] in ('audited_mandatory', 'unaudited_mandatory')]
+    weighted = weighted_disagreement(mandatory, 'binary')
+    return dict(weighted_binary_rate_on_final_mandatory=weighted['rate'],
+                population=weighted['population'], undefined=weighted['undefined'])
+
+
 def build_report(draw, friend, merged_rows, hariom):
     """Pure aggregate construction; friend and hariom are validated label maps."""
     merged = {row['cell_id']: row for row in checked_merge_rows(merged_rows)}
@@ -333,7 +342,7 @@ def build_report(draw, friend, merged_rows, hariom):
     weighted = {scheme: weighted_disagreement(rows, scheme) for scheme in SCHEMES}
     table = G.table([(row['final'], row['friend_label']) for row in rows], LABELS)
     code, message = p21_check(weighted['binary']['rate'])
-    return dict(weighted=weighted, per_class=per_class_bounds(table),
+    return dict(weighted=weighted, e1_input=e1_input(rows), per_class=per_class_bounds(table),
                 overlap=overlap_agreement(friend, hariom), e2_pool=e2_pool(merged, friend, hariom),
                 p21=dict(exit_code=code, message=message))
 
@@ -396,6 +405,10 @@ def report_lines(report, strata):
     for scheme in SCHEMES:
         value = report['weighted'][scheme]
         lines.append(f'weighted scheme={scheme} rate={_number(value["rate"])} undefined={value["undefined"]}')
+    value = report['e1_input']
+    lines.append('E1_input weighted_binary_rate_on_final_mandatory='
+                 f'{_number(value["weighted_binary_rate_on_final_mandatory"])} '
+                 f'population={value["population"]} undefined={value["undefined"]}')
     for label in LABELS:
         value = report['per_class'][label]
         lines.append(f'friend_class={label} n={value["n"]} x={value["x"]} '
