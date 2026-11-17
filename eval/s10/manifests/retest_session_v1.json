@@ -1,0 +1,33 @@
+{
+  "format": "s10-retest-session.v1",
+  "created_at": "2026-11-17T15:33:46.597832+00:00",
+  "files": {
+    "data/gold/s10/sheets/retest_labels.csv": {
+      "sha256_lf": "395ac8ccb4fb348cee809a99e517a9c8c6f276868f2eecdb41aca3c7441abbe1",
+      "bytes": 4538,
+      "rows": 30,
+      "first_timestamp_utc": "2026-11-17T14:56:22+00:00",
+      "last_timestamp_utc": "2026-11-17T15:06:07+00:00"
+    },
+    "data/gold/s10/sheets/retest_filler_labels.csv": {
+      "sha256_lf": "0faa2486b7e3bbfdca8820c79ded3f0e6a14baa6ec39d420c5e975bcc1b26c92",
+      "bytes": 4295,
+      "rows": 30,
+      "first_timestamp_utc": "2026-11-17T14:56:36+00:00",
+      "last_timestamp_utc": "2026-11-17T15:06:36+00:00"
+    },
+    "data/gold/s10/sheets/retest_recognition.csv": {
+      "sha256_lf": "92c810171e3ba5490c64403bbb6a3acd2fc0a650b2bb0331c763d495322426b7",
+      "bytes": 3390,
+      "rows": 60,
+      "first_timestamp_utc": "2026-11-17T14:56:28+00:00",
+      "last_timestamp_utc": "2026-11-17T15:06:37+00:00"
+    }
+  },
+  "draws": {
+    "data/gold/s10/draws/retest.json": "4b855c198bac3d82b731e3907e15b87564b589a4caffb1dcf4e43bcd2e16ece4",
+    "data/gold/s10/draws/retest_fillers.json": "9ef0be5dc570fcd54081ae1268be5ef9686a72104a46db5873d8b03d84c8dfa8"
+  },
+  "addendum_a3_sha256_lf": "33bd04d17d87e5d53943d6c42d471fda3d572805c01316bdbc8dabdae979bbff",
+  "code_lock_sha256_lf": "95213d88fa0e72ec9b8ed2e8ef0eaa40fe794588d6f27b047c9f5b265f4682ef"
+}
