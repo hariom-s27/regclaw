@@ -1,0 +1,10 @@
+{
+  "format": "s10-friend-labels-manifest.v1",
+  "file": "data/gold/s10/sheets/friend_labels.csv",
+  "sha256_lf": "66c33b7dcfc28267508369564099c2354224523fcf7a9737a7745e20888581a8",
+  "rows": 150,
+  "valid_rows": 150,
+  "friend_set_sha256_lf": "b652454d05afac6cec6e9a061098eb5f16585d42786f65030307d7a7b5e8be29",
+  "sheet_sha256_lf": "d444ce763c398ecd26afa8cb070ccb8ec15800dafe630ae7c6dd9d6cec593e08",
+  "created_at": "2026-11-17T08:04:50.106126+00:00"
+}
