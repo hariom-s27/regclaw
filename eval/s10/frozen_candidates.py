@@ -33,6 +33,11 @@ MANIFEST_FORMAT = 's10-frozen-candidates-manifest.v1'
 CYPHER_CACHE_NAME = 'cypher_cache.jsonl'
 EMBEDDING_CACHE_NAME = 'query_embedding_cache.jsonl'
 CALL_LEDGER_NAME = 's10c_call_ledger.jsonl'
+CALL_CAP = 150
+CANDIDATE_RUN_NAME = 's10c_candidates_run.json'
+CANDIDATE_RUN_FORMAT = 's10c-candidates-run.v1'
+CANDIDATE_RECEIPT_FORMAT = 's10c-candidates-receipt.v1'
+CANDIDATE_RECEIPT_REL = 'eval/s10/manifests/s10c_candidates_run.json'
 
 
 class FrozenCandidatesError(RuntimeError):
@@ -171,7 +176,7 @@ def cache_row_count(path):
 
 
 def ledger_total(path):
-    """Validate and sum the shared append-only S10c ledger."""
+    """Validate and sum one phase's append-only S10c ledger."""
     path = Path(path)
     if not path.exists():
         return 0
@@ -200,15 +205,109 @@ def append_call_ledger(path, *, step, calls, now=None):
         stream.write(json.dumps(row, sort_keys=True) + '\n')
 
 
+def write_candidate_run_manifest(*, root, run_dir, candidates_path, manifest_path, ledger_start, calls):
+    """Publish completion only after the request ledger and candidate outputs exist.
+
+    The committed receipt anchors the local manifest's LF hash. Consumers verify
+    both that hash and the ledger hash before accepting its recorded total.
+    """
+    root, run_dir = Path(root).resolve(), Path(run_dir).resolve()
+    ledger = run_dir / CALL_LEDGER_NAME
+    total = ledger_total(ledger)
+    if total != ledger_start + calls or total > CALL_CAP:
+        raise FrozenCandidatesError('candidate ledger total mismatch or cap exceeded')
+    ledger_sha = normalised_sha(ledger.read_bytes())
+    counts = dict(ledger_start=ledger_start, http_attempts=calls, ledger_total=total)
+    doc = dict(format=CANDIDATE_RUN_FORMAT, phase='candidates', run_dir=run_dir.relative_to(root).as_posix(),
+               counts=counts, ledger_sha256_lf=ledger_sha,
+               outputs={name: dict(sha256_lf=normalised_sha(Path(path).read_bytes()))
+                        for name, path in (('candidates', candidates_path), ('candidates_manifest', manifest_path))})
+    text = json.dumps(doc, indent=2, sort_keys=True) + '\n'
+    receipt = dict(format=CANDIDATE_RECEIPT_FORMAT, counts=counts,
+                   shas=dict(run_manifest_sha256_lf=normalised_sha(text.encode('utf-8')),
+                             ledger_sha256_lf=ledger_sha))
+    _write_once(run_dir / CANDIDATE_RUN_NAME, text)
+    # This final write is the completion anchor. Partial saves never qualify.
+    _write_once(root / CANDIDATE_RECEIPT_REL, json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+    return receipt
+
+
 def _live_retriever_factory(*, cache_file):
     # Import only after CLI preflight; fake factories never import live dependencies.
     from retrieval.hybrid_retriever import HybridRetriever
     return HybridRetriever(cache_file=cache_file)
 
 
+class RetrievalRequests:
+    """Count Text2Cypher HTTP attempts and embedding requests, including failures.
+
+    Cache-row deltas are an independent cross-check, never a request estimate.
+    The default S8 Azure client disables SDK retries and sends one HTTP request
+    per generation. Each query reserves both possible generations per Cypher
+    try plus the embedder's configured attempt budget before retrieval starts.
+    """
+
+    def __init__(self, retriever, ledger_path):
+        self.client = retriever.llm
+        self.embedder = retriever.query_embeddings.embedder
+        self.embedding_start = self._embedding_count()
+        self.cypher_requests = 0
+        self.ledger_path = ledger_path
+        self.ledger_start = ledger_total(ledger_path)
+        self.has_http_log = isinstance(getattr(self.client, 'last_http_log', None), list)
+        self.has_counter = type(getattr(self.client, 'api_requests', None)) is int
+        if not (self.has_http_log or self.has_counter):
+            raise FrozenCandidatesError('Text2Cypher request counter unavailable')
+        tries = getattr(retriever, 'max_retries', None)
+        attempts = getattr(self.embedder, 'attempts', None)
+        if type(tries) is not int or tries < 0 or type(attempts) is not int or attempts < 1:
+            raise FrozenCandidatesError('retrieval request budget unavailable')
+        self.query_reserve = 2 * (tries + 1) + attempts
+        retrieve = retriever.retrieve
+        generate = self.client.generate
+
+        def counted_generate(request):
+            if self.has_http_log:
+                self.client.last_http_log = []
+            before = getattr(self.client, 'api_requests', None)
+            try:
+                return generate(request)
+            finally:
+                n = (len(self.client.last_http_log) if self.has_http_log
+                     else self.client.api_requests - before)
+                if type(n) is not int or n < 0:
+                    raise FrozenCandidatesError('invalid Text2Cypher request counter')
+                self.cypher_requests += n
+
+        def guarded_retrieve(*args, **kwargs):
+            if ledger_total(ledger_path) != self.ledger_start:
+                raise FrozenCandidatesError('call ledger changed during retrieval')
+            if self.ledger_start + self.total() + self.query_reserve > CALL_CAP:
+                raise FrozenCandidatesError('retrieval call cap')
+            return retrieve(*args, **kwargs)
+
+        self.client.generate = counted_generate
+        retriever.retrieve = guarded_retrieve
+
+    def _embedding_count(self):
+        value = getattr(self.embedder, 'api_requests', None)
+        if type(value) is not int or value < 0:
+            raise FrozenCandidatesError('embedding request counter unavailable')
+        return value
+
+    def counts(self):
+        embeddings = self._embedding_count() - self.embedding_start
+        if embeddings < 0:
+            raise FrozenCandidatesError('embedding request counter decreased')
+        return self.cypher_requests, embeddings
+
+    def total(self):
+        return sum(self.counts())
+
+
 def main(argv=None, *, data=None, retriever_factory=None, now=None):
-    """Build dev candidates and account for new retrieval cache rows."""
-    from llm.provider import run_dir
+    """Build dev candidates, charging actual requests; cache rows cross-check only."""
+    from llm import provider
     from standards.data_loader import load_data
     from .split_guard import load_eval_files
 
@@ -226,15 +325,22 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
             return 3
         cache_dir = check_folder(args.cache_dir, 'cache_dir')
         check_folder(args.out, 'out_path')
-        folder = run_dir()
+        folder = provider.run_dir()
         if folder is None:
             raise FrozenCandidatesError('REGCLAW_RUN_DIR required for call accounting')
         folder = check_folder(folder, 'run_dir')
+        completion = folder / CANDIDATE_RUN_NAME
+        receipt_path = provider.ROOT / CANDIDATE_RECEIPT_REL
+        if completion.exists() or completion.is_symlink() or receipt_path.exists() or receipt_path.is_symlink():
+            print('REFUSED: candidate completion manifest already exists (write-once)')
+            return 3
+        if (folder / 'STOPPED.json').exists():
+            raise FrozenCandidatesError('candidate folder stopped')
         ledger_path = folder / CALL_LEDGER_NAME
-        ledger_total(ledger_path)
+        ledger_start = ledger_total(ledger_path)
         cache_paths = [cache_dir / name for name in (CYPHER_CACHE_NAME, EMBEDDING_CACHE_NAME)]
         destinations = [Path(args.out).resolve(), Path(args.manifest).resolve()]
-        reserved = {Path(args.profiles).resolve(), ledger_path, *cache_paths}
+        reserved = {Path(args.profiles).resolve(), ledger_path, completion, receipt_path, *cache_paths}
         if len(set(destinations)) != len(destinations) or any(p in reserved for p in destinations):
             raise FrozenCandidatesError('output paths overlap an input, cache or ledger')
         data = load_data() if data is None else data
@@ -246,15 +352,17 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
         print(f'ERROR: {type(exc).__name__}')
         return 2
 
-    made = []
+    made, counters = [], []
 
     def factory(*, cache_file):
         retriever = (retriever_factory or _live_retriever_factory)(cache_file=cache_file)
         made.append(retriever)
+        counters.append(RetrievalRequests(retriever, ledger_path))
         return retriever
 
     error = None
     counts = None
+    request_counts = None
     disabled = logging.root.manager.disable
     try:
         # Dependencies log query/profile content; the CLI exposes only aggregates.
@@ -266,29 +374,37 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
                 manifest_sha = normalised_sha(Path(args.manifest).read_bytes())
             finally:
                 try:
+                    request_counts = [counter.counts() for counter in counters]
+                    calls = sum(sum(pair) for pair in request_counts)
+                    append_call_ledger(ledger_path, step='candidates', calls=calls, now=now)
                     counts = [cache_row_count(path) - n for path, n in zip(cache_paths, before)]
                     if any(n < 0 for n in counts):
                         raise FrozenCandidatesError('retrieval cache row count decreased')
-                    append_call_ledger(ledger_path, step='candidates', calls=sum(counts), now=now)
                 finally:
                     for retriever in made:
                         close = getattr(retriever, 'close', None)
                         if close is not None:
                             close()
+            receipt = write_candidate_run_manifest(root=provider.ROOT, run_dir=folder,
+                candidates_path=args.out, manifest_path=args.manifest, ledger_start=ledger_start, calls=calls)
     except Exception as exc:
         error = type(exc).__name__
     finally:
         logging.disable(disabled)
-    if counts is not None:
-        calls = sum(counts)
-        print(f'cypher_rows={counts[0]} embedding_rows={counts[1]} retrieval_calls={calls} '
-              f'retrieval_calls_upper_bound={calls * 3}')
+    if counts is not None and request_counts is not None:
+        cypher = sum(row[0] for row in request_counts)
+        embeddings = sum(row[1] for row in request_counts)
+        print(f'cypher_rows={counts[0]} embedding_rows={counts[1]} '
+              f'cypher_requests={cypher} embedding_requests={embeddings} retrieval_calls={cypher + embeddings}')
     if error is not None:
         print(f'ERROR: {error}')
         return 2
     print(f'profiles={len(profiles)} candidates={sum(row["n"] for row in manifest["profiles"].values())} '
           f'candidates_sha256_lf={manifest["file_sha256"]} '
-          f'manifest_sha256_lf={manifest_sha}')
+          f'manifest_sha256_lf={manifest_sha} '
+          f'run_manifest_sha256_lf={receipt["shas"]["run_manifest_sha256_lf"]} '
+          f'ledger_sha256_lf={receipt["shas"]["ledger_sha256_lf"]} '
+          f'ledger_total={receipt["counts"]["ledger_total"]}')
     return 0
 
 

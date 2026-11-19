@@ -25,6 +25,14 @@ from llm.azure_openai import AzureOpenAIAdapter, S8_ROLES
 from standards.ruleset import normalised_sha
 
 
+@pytest.fixture
+def tmp_path(tmp_path_factory):
+    # Test-name suffixes can accidentally form 's8', which the cache guard rejects.
+    root = tmp_path_factory.mktemp('partaworld')
+    assert 's8' not in str(root).casefold(), "partaworld root contains 's8'; choose a --basetemp without 's8'"
+    return root
+
+
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
     monkeypatch.setenv('REGCLAW_STUB', '1')
@@ -380,13 +388,18 @@ class FakeRetriever:
     def __init__(self, cache_file, *, fail=False, append=True, embedding_cache=None):
         self.cypher_cache = NS(path=Path(cache_file))
         self.query_embeddings = NS(cache=NS(path=Path(embedding_cache) if embedding_cache
-                                          else Path(cache_file).with_name(FC.EMBEDDING_CACHE_NAME)))
+                                          else Path(cache_file).with_name(FC.EMBEDDING_CACHE_NAME)),
+                                   embedder=NS(api_requests=0, attempts=5))
+        self.llm = NS(last_http_log=[], generate=self.generate)
+        self.max_retries = 2
         self.fail, self.append = fail, append
         self.requests, self.closed = [], False
 
     def retrieve(self, query, top_k):
         self.requests.append((query, top_k))
         if self.append:
+            self.llm.generate({'FAKE': 'request'})
+            self.query_embeddings.embedder.api_requests += 1
             for path in (self.cypher_cache.path, self.query_embeddings.cache.path):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open('a' if path.exists() else 'x', encoding='utf-8', newline='\n') as stream:
@@ -397,6 +410,10 @@ class FakeRetriever:
             raise RuntimeError('FAKE private exception content')
         return [dict(clause_id='FAKE:clause', doc='FAKE-doc', edition='FAKE-edition',
                      text='FAKE private candidate text')], None
+
+    def generate(self, request):
+        self.llm.last_http_log.append(dict(status='ok'))
+        return dict(provenance=dict(http_attempts=1))
 
     def close(self):
         self.closed = True
@@ -477,7 +494,8 @@ def test_candidates_cli_counts_cache_deltas_and_ledger(tmp_path, fake_data, monk
                                 profiles=F.validate_profile_set(profile_doc(), fake_data))
     assert replay.retrieve(FC.tool_query('FAKE device from this test'))[0][0]['text'] == 'FAKE private candidate text'
     output = capsys.readouterr().out
-    assert f'retrieval_calls={expected}' in output and f'retrieval_calls_upper_bound={expected * 3}' in output
+    assert f'retrieval_calls={expected}' in output
+    assert f'cypher_requests={int(append)} embedding_requests={int(append)}' in output
     assert normalised_sha((tmp_path / 'M.json').read_bytes()) in output
 
 
