@@ -14,8 +14,13 @@ Both files are write-once. Cache folder rule (S10-26): the Text2Cypher cache and
 query-embedding cache must both sit in an explicit cache folder that is not under
 data/runs/azure_openai/ and has no "s8" anywhere in its path.
 """
+import argparse
+from contextlib import redirect_stderr, redirect_stdout
 import hashlib
+import io
 import json
+import logging
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,6 +31,8 @@ TOP_K = 30
 CANDIDATES_FORMAT = 's10-frozen-candidates.v1'
 MANIFEST_FORMAT = 's10-frozen-candidates-manifest.v1'
 CYPHER_CACHE_NAME = 'cypher_cache.jsonl'
+EMBEDDING_CACHE_NAME = 'query_embedding_cache.jsonl'
+CALL_LEDGER_NAME = 's10c_call_ledger.jsonl'
 
 
 class FrozenCandidatesError(RuntimeError):
@@ -152,3 +159,138 @@ class FrozenRetriever:
             self.misses.append((query, top_k))
             raise LookupError('no frozen candidates for this query and top_k')
         return [dict(c) for c in self.candidates[query]], None
+
+
+def cache_row_count(path):
+    """Count persisted request rows without exposing cache contents."""
+    path = Path(path)
+    if not path.exists():
+        return 0
+    with path.open(encoding='utf-8') as stream:
+        return sum(1 for line in stream if line.strip())
+
+
+def ledger_total(path):
+    """Validate and sum the shared append-only S10c ledger."""
+    path = Path(path)
+    if not path.exists():
+        return 0
+    total = 0
+    with path.open(encoding='utf-8') as stream:
+        for line in stream:
+            row = json.loads(line)
+            if (not isinstance(row, dict) or set(row) != {'step', 'calls', 'timestamp'}
+                    or not isinstance(row['step'], str) or not row['step']
+                    or type(row['calls']) is not int or row['calls'] < 0
+                    or not isinstance(row['timestamp'], str) or not row['timestamp']):
+                raise FrozenCandidatesError('invalid call ledger row')
+            total += row['calls']
+    return total
+
+
+def append_call_ledger(path, *, step, calls, now=None):
+    """Append one charge. Only the approved ledger uses append mode."""
+    if type(calls) is not int or calls < 0 or not isinstance(step, str) or not step:
+        raise FrozenCandidatesError('invalid call ledger charge')
+    path = Path(path)
+    ledger_total(path)
+    row = dict(step=step, calls=calls, timestamp=now or datetime.now(timezone.utc).isoformat())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a' if path.exists() else 'x', encoding='utf-8', newline='\n') as stream:
+        stream.write(json.dumps(row, sort_keys=True) + '\n')
+
+
+def _live_retriever_factory(*, cache_file):
+    # Import only after CLI preflight; fake factories never import live dependencies.
+    from retrieval.hybrid_retriever import HybridRetriever
+    return HybridRetriever(cache_file=cache_file)
+
+
+def main(argv=None, *, data=None, retriever_factory=None, now=None):
+    """Build dev candidates and account for new retrieval cache rows."""
+    from llm.provider import run_dir
+    from standards.data_loader import load_data
+    from .split_guard import load_eval_files
+
+    parser = argparse.ArgumentParser(prog='python -m eval.s10.frozen_candidates')
+    commands = parser.add_subparsers(dest='command', required=True)
+    build = commands.add_parser('build', help='build dev frozen candidates (write-once)')
+    build.add_argument('--profiles', required=True)
+    build.add_argument('--cache-dir', required=True)
+    build.add_argument('--out', required=True)
+    build.add_argument('--manifest', required=True)
+    args = parser.parse_args(argv)
+    try:
+        if any(Path(path).exists() for path in (args.out, args.manifest)):
+            print('REFUSED: candidate output already exists (write-once)')
+            return 3
+        cache_dir = check_folder(args.cache_dir, 'cache_dir')
+        check_folder(args.out, 'out_path')
+        folder = run_dir()
+        if folder is None:
+            raise FrozenCandidatesError('REGCLAW_RUN_DIR required for call accounting')
+        folder = check_folder(folder, 'run_dir')
+        ledger_path = folder / CALL_LEDGER_NAME
+        ledger_total(ledger_path)
+        cache_paths = [cache_dir / name for name in (CYPHER_CACHE_NAME, EMBEDDING_CACHE_NAME)]
+        destinations = [Path(args.out).resolve(), Path(args.manifest).resolve()]
+        reserved = {Path(args.profiles).resolve(), ledger_path, *cache_paths}
+        if len(set(destinations)) != len(destinations) or any(p in reserved for p in destinations):
+            raise FrozenCandidatesError('output paths overlap an input, cache or ledger')
+        data = load_data() if data is None else data
+        split, profiles, _ = load_eval_files(args.profiles, data=data)
+        if split != 'dev':
+            raise FrozenCandidatesError('dev profiles required')
+        before = [cache_row_count(path) for path in cache_paths]
+    except Exception as exc:
+        print(f'ERROR: {type(exc).__name__}')
+        return 2
+
+    made = []
+
+    def factory(*, cache_file):
+        retriever = (retriever_factory or _live_retriever_factory)(cache_file=cache_file)
+        made.append(retriever)
+        return retriever
+
+    error = None
+    counts = None
+    disabled = logging.root.manager.disable
+    try:
+        # Dependencies log query/profile content; the CLI exposes only aggregates.
+        logging.disable(logging.CRITICAL)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            try:
+                manifest = build_candidates(profiles, cache_dir=cache_dir, out_path=args.out,
+                                            manifest_path=args.manifest, retriever_factory=factory, now=now)
+                manifest_sha = normalised_sha(Path(args.manifest).read_bytes())
+            finally:
+                try:
+                    counts = [cache_row_count(path) - n for path, n in zip(cache_paths, before)]
+                    if any(n < 0 for n in counts):
+                        raise FrozenCandidatesError('retrieval cache row count decreased')
+                    append_call_ledger(ledger_path, step='candidates', calls=sum(counts), now=now)
+                finally:
+                    for retriever in made:
+                        close = getattr(retriever, 'close', None)
+                        if close is not None:
+                            close()
+    except Exception as exc:
+        error = type(exc).__name__
+    finally:
+        logging.disable(disabled)
+    if counts is not None:
+        calls = sum(counts)
+        print(f'cypher_rows={counts[0]} embedding_rows={counts[1]} retrieval_calls={calls} '
+              f'retrieval_calls_upper_bound={calls * 3}')
+    if error is not None:
+        print(f'ERROR: {error}')
+        return 2
+    print(f'profiles={len(profiles)} candidates={sum(row["n"] for row in manifest["profiles"].values())} '
+          f'candidates_sha256_lf={manifest["file_sha256"]} '
+          f'manifest_sha256_lf={manifest_sha}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
