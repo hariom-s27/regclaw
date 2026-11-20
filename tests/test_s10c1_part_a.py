@@ -24,6 +24,8 @@ from llm import provider
 from llm.azure_openai import AzureOpenAIAdapter, S8_ROLES
 from standards.ruleset import normalised_sha
 
+CHECK_RULESET = FC.ruleset.check_ruleset
+
 
 @pytest.fixture
 def tmp_path(tmp_path_factory):
@@ -423,6 +425,16 @@ def candidate_args(tmp_path, monkeypatch, split='dev', cache_parts=('cache',)):
     monkeypatch.setattr(provider, 'ROOT', tmp_path)
     monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/s10c1-fake')
     p = write_profiles(tmp_path, split)
+    write_new(tmp_path / FC.PROFILES_MANIFEST_REL, json.dumps(dict(
+        format='s10-profiles-manifest.v1', files={'dev_profiles.yaml': dict(
+            sha256_lf=normalised_sha(p.read_bytes()))})))
+    expected = {}
+    for rel in FC.PROVENANCE_FILES:
+        path = write_new(tmp_path / rel, 'FAKE provenance\r\n')
+        if rel.startswith('standards/data/'):
+            expected[path.name] = normalised_sha(path.read_bytes())
+    monkeypatch.setattr(FC.ruleset, 'RULESET_FILES_SHA256', expected)
+    monkeypatch.setattr(FC.ruleset, 'check_ruleset', lambda: CHECK_RULESET(tmp_path / 'standards/data'))
     args = ['build', '--profiles', str(p), '--cache-dir', str(tmp_path.joinpath(*cache_parts)),
             '--out', str(tmp_path / 'C.json'), '--manifest', str(tmp_path / 'M.json')]
     return args, tmp_path / 'data/runs/s10c1-fake' / FC.CALL_LEDGER_NAME
@@ -460,6 +472,7 @@ def test_candidates_cli_outputs_are_write_once(tmp_path, fake_data, monkeypatch,
     args, ledger = candidate_args(tmp_path, monkeypatch)
     path = write_new(tmp_path / existing, 'FAKE existing output\n')
     before, made = path.read_bytes(), []
+    monkeypatch.setattr(FC.ruleset, 'check_ruleset', lambda: pytest.fail('ruleset read before output refusal'))
     assert FC.main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 3
     assert made == [] and path.read_bytes() == before and not ledger.exists()
 
@@ -551,3 +564,88 @@ def test_part_a_uses_only_injected_fake_inputs(tmp_path, fake_data, monkeypatch)
     assert os.environ['REGCLAW_STUB'] == '1'
     assert T.main(['build', '--profiles', args[2], '--out', str(tmp_path / 'T.json')], data=fake_data) == 0
     assert FC.main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
+
+
+def candidate_snapshot(root):
+    return {p.relative_to(root): p.read_bytes() if p.is_file() else None for p in root.rglob('*')}
+
+
+@pytest.mark.parametrize('name', tuple(FC.ruleset.RULESET_FILES_SHA256))
+def test_candidate_ruleset_mismatch_precedes_inputs_and_writes(tmp_path, fake_data, monkeypatch, capsys, name):
+    args, _ = candidate_args(tmp_path, monkeypatch)
+    (tmp_path / 'standards/data' / name).write_bytes(b'PRIVATE changed rule\n')
+    monkeypatch.setattr(FC, 'verify_dev_profiles', lambda *a: pytest.fail('profiles read before ruleset check'))
+    before = candidate_snapshot(tmp_path)
+    assert FC.main(args, data=fake_data,
+                   retriever_factory=lambda **kw: pytest.fail('retriever constructed')) == 2
+    assert capsys.readouterr().out == 'ruleset_mismatch count=1\n'
+    assert candidate_snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize('kind', ['missing', 'malformed', 'format', 'dev-entry', 'sha', 'changed-profile'])
+def test_candidate_profiles_freeze_refuses_before_calls_or_writes(tmp_path, fake_data, monkeypatch, capsys, kind):
+    args, _ = candidate_args(tmp_path, monkeypatch)
+    path = tmp_path / FC.PROFILES_MANIFEST_REL
+    if kind in ('malformed', 'format', 'dev-entry', 'sha'):
+        doc = json.loads(path.read_bytes())
+        if kind == 'format':
+            doc['format'] = 'PRIVATE invalid'
+        elif kind == 'dev-entry':
+            doc['files'] = {'P.yaml': doc['files']['dev_profiles.yaml']}
+        elif kind == 'sha':
+            doc['files']['dev_profiles.yaml']['sha256_lf'] = '0' * 64
+        path.write_text('PRIVATE invalid {' if kind == 'malformed' else json.dumps(doc), encoding='utf-8')
+    elif kind == 'changed-profile':
+        p = Path(args[args.index('--profiles') + 1])
+        p.write_bytes(p.read_bytes() + b'\n# PRIVATE changed\n')
+    if kind == 'missing':
+        original = Path.read_bytes
+        def missing(p):
+            if p == path:
+                raise FileNotFoundError('PRIVATE missing manifest')
+            return original(p)
+        monkeypatch.setattr(Path, 'read_bytes', missing)
+    def snapshot():
+        result = {}
+        for p in tmp_path.rglob('*'):
+            if p.is_file():
+                with p.open('rb') as stream:
+                    result[p.relative_to(tmp_path)] = stream.read()
+            else:
+                result[p.relative_to(tmp_path)] = None
+        return result
+    before = snapshot()
+    assert FC.main(args, data=fake_data,
+                   retriever_factory=lambda **kw: pytest.fail('retriever constructed')) == 2
+    diagnostic = 'profiles_sha' if kind in ('sha', 'changed-profile') else 'profiles_manifest'
+    assert capsys.readouterr().out == diagnostic + ' count=1\n'
+    assert snapshot() == before
+
+
+def test_candidate_completion_records_lf_profile_and_all_provenance_hashes(tmp_path, fake_data, monkeypatch):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    path = Path(args[args.index('--profiles') + 1])
+    path.write_bytes(path.read_bytes().replace(b'\n', b'\r\n'))
+    assert FC.main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
+    doc = json.loads((ledger.parent / FC.CANDIDATE_RUN_NAME).read_bytes())
+    assert doc['profiles_sha256_lf'] == normalised_sha(path.read_bytes())
+    assert set(doc['provenance_files']) == set(FC.PROVENANCE_FILES)
+    for rel, info in doc['provenance_files'].items():
+        assert info == dict(sha256_lf=normalised_sha((tmp_path / rel).read_bytes()))
+    assert 'FAKE' not in json.dumps(doc) and 'PRIVATE' not in json.dumps(doc)
+
+
+def test_candidate_missing_provenance_refuses_before_factory(tmp_path, fake_data, monkeypatch, capsys):
+    args, _ = candidate_args(tmp_path, monkeypatch)
+    original = Path.read_bytes
+    def missing(path):
+        if path == tmp_path / 'data/embed_identity.json':
+            raise FileNotFoundError('PRIVATE identity')
+        return original(path)
+    before = candidate_snapshot(tmp_path)
+    monkeypatch.setattr(Path, 'read_bytes', missing)
+    assert FC.main(args, data=fake_data,
+                   retriever_factory=lambda **kw: pytest.fail('retriever constructed')) == 2
+    monkeypatch.setattr(Path, 'read_bytes', original)
+    assert capsys.readouterr().out == 'candidate_provenance count=1\n'
+    assert candidate_snapshot(tmp_path) == before

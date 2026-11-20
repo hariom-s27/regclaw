@@ -23,6 +23,14 @@ from standards.ruleset import normalised_sha
 M, N, R = 'mandatory', 'not_applicable', 'recommended'
 PARTS = [f'ISO 10993-{i}' for i in range(1, 21)]
 STAMP = '2026-11-19T00:00:00+00:00'
+CHECK_RULESET = E.ruleset.check_ruleset
+
+
+@pytest.fixture
+def tmp_path(tmp_path_factory):
+    root = tmp_path_factory.mktemp('devworld')
+    assert 's8' not in str(root).casefold()
+    return root
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +38,7 @@ def fake_only(monkeypatch, tmp_path):
     monkeypatch.setenv('REGCLAW_STUB', '1')
     monkeypatch.setenv('LANGFUSE_ENABLED', 'false')
     _netguard.block_network(monkeypatch, 'dev export network forbidden')
+    monkeypatch.setattr(E.ruleset, 'check_ruleset', lambda: None)
     repo = Path(__file__).resolve().parents[1]
     attempts = []
 
@@ -289,6 +298,7 @@ def test_existing_output_precedes_input_reads(tmp_path, monkeypatch, rel):
     def fail(*args, **kwargs):
         raise AssertionError('input read before existing-output refusal')
     monkeypatch.setattr(E, 'load_inputs', fail)
+    monkeypatch.setattr(E.ruleset, 'check_ruleset', fail)
     assert go(tmp_path) == (3, ['output_exists count=1'])
     assert path.read_bytes() == before and len(exported(tmp_path)) == 1
 
@@ -549,3 +559,39 @@ def test_loader_errors_are_sanitized_before_writes(tmp_path, monkeypatch, capsys
     assert calls == [True] and writes == [] and exported(tmp_path) == []
     captured = capsys.readouterr()
     assert captured.out == '' and captured.err == ''
+
+
+@pytest.mark.parametrize('changed', [None, *E.ruleset.RULESET_FILES_SHA256])
+def test_ruleset_gate_precedes_inputs_and_writes(tmp_path, monkeypatch, changed):
+    write_world(tmp_path)
+    folder = tmp_path / 'standards/data'
+    expected = {}
+    for name in E.ruleset.RULESET_FILES_SHA256:
+        path = folder / name
+        if not path.exists():
+            put(tmp_path, 'standards/data/' + name, 'FAKE rule data\r\n')
+        expected[name] = normalised_sha(path.read_bytes())
+    monkeypatch.setattr(E.ruleset, 'RULESET_FILES_SHA256', expected)
+    if changed:
+        (folder / changed).write_bytes(b'PRIVATE changed rule\n')
+    events = []
+    original = E.load_inputs
+
+    def gate():
+        events.append('ruleset')
+        return CHECK_RULESET(folder)
+
+    def inputs(root):
+        events.append('inputs')
+        return original(root)
+
+    monkeypatch.setattr(E.ruleset, 'check_ruleset', gate)
+    monkeypatch.setattr(E, 'load_inputs', inputs)
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    code, lines = go(tmp_path)
+    if changed:
+        assert (code, lines) == (1, ['ruleset_mismatch count=1'])
+        assert events == ['ruleset'] and exported(tmp_path) == []
+        assert {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == before
+    else:
+        assert code == 0 and events == ['ruleset', 'inputs']

@@ -22,6 +22,7 @@ TEST_NAMES = (
     'tests/conftest.py', 'tests/_netguard.py', 'tests/test_s10c1_part_a.py',
     'tests/test_s10c1_dev_export.py', 'tests/test_s10c1_live.py',
     'tests/test_s10c1_analysis.py', 'tests/test_s10c1_lock.py',
+    'tests/test_s10c1_addendum_freeze_n.py',
 )
 
 
@@ -127,7 +128,8 @@ def file_set(w):
 
 
 def test_locked_exact_source_inventory_and_provenance_separation(world):
-    assert len(K.LOCKED) == 56
+    assert len(K.LOCKED) == 57
+    assert 'eval/s10/addendum_freeze_n.py' in K.LOCKED
     assert tuple(sorted(set(K.LOCKED))) == K.LOCKED
     assert all(rel.endswith('.py') and not rel.startswith('tests/') for rel in K.LOCKED)
     assert {'ner/__init__.py', 'ner/checks.py', 'ner/client.py', 'ner/normalise.py',
@@ -218,7 +220,7 @@ def test_listing_sha_mismatch_has_no_content_or_writes(world):
     args = reviewed(w)
     args[-1] = '0' * 64
     before = file_set(w)
-    assert invoke(w, args) == (1, [], [])
+    assert invoke(w, args) == (1, [], ['listing_sha_mismatch'])
     assert file_set(w) == before
 
 
@@ -237,7 +239,8 @@ def test_reviewed_listing_invalid_encoding_or_expected_sha(world, variant):
     if variant == 'invalid-sha':
         args[-1] = 'INVALID'
     before = file_set(w)
-    assert invoke(w, args) == (2, [], ['input_or_output_validation count=1'])
+    diagnostic = 'expected_listing_sha' if variant == 'invalid-sha' else 'input_or_output_validation count=1'
+    assert invoke(w, args) == (2, [], [diagnostic])
     assert file_set(w) == before
 
 
@@ -273,7 +276,8 @@ def test_malformed_reviewed_listing_refuses_without_writes(world, variant):
         lines[-1] = lines[-1].rstrip('\n')
     args = reviewed(w, raw=''.join(lines).encode())
     before = file_set(w)
-    assert invoke(w, args)[0] == 2
+    diagnostic = 'reviewed_listing_stats' if variant == 'bad-stats' else 'reviewed_listing'
+    assert invoke(w, args) == (2, [], [diagnostic])
     assert file_set(w) == before
 
 
@@ -321,7 +325,7 @@ def test_legacy_format_and_exact_sets(world, rel, variant):
             else:
                 doc['files']['data/NEVER-open.py'] = dict(sha256_lf='0' * 64)
     w = world(manifest_change=change)
-    assert invoke(w, ['--show']) == (2, [], ['input_or_output_validation count=1'])
+    assert invoke(w, ['--show']) == (2, [], ['legacy_manifest'])
 
 
 def test_codebook_cannot_drop_its_known_source_entry(world):
@@ -330,7 +334,7 @@ def test_codebook_cannot_drop_its_known_source_entry(world):
             doc['files'].pop('eval/s10/judge_kit.py')
     w = world(manifest_change=change)
     before = file_set(w)
-    assert invoke(w, ['--show']) == (2, [], ['input_or_output_validation count=1'])
+    assert invoke(w, ['--show']) == (2, [], ['codebook_source'])
     assert file_set(w) == before
 
 
@@ -360,7 +364,7 @@ def test_source_alias_refused_before_open(world, monkeypatch):
 
     monkeypatch.setattr(Path, 'resolve', redirected)
     before = file_set(w)
-    assert invoke(w, ['--show']) == (2, [], ['input_or_output_validation count=1'])
+    assert invoke(w, ['--show']) == (2, [], ['path_alias'])
     assert file_set(w) == before
 
 
@@ -478,3 +482,29 @@ def test_committed_manifest_matches_code_read_only(monkeypatch):
     K.check_overlaps(root, doc['files'])
     assert L.verify_code_lock(root) == K.compute(raw)['sha256_lf']
     # provenance_tests and installed versions are deliberately never enforced.
+
+
+@pytest.mark.parametrize('path,check', [('listing.txt', 'listing_path'),
+    ('data/../listing.txt', 'path_boundary'), ('data/.env.secret', 'forbidden_path')])
+def test_path_validation_prints_fixed_check_name(world, path, check):
+    w = world()
+    before = file_set(w)
+    assert invoke(w, ['--show', '--save-listing', path]) == (2, [], [check])
+    assert file_set(w) == before
+
+
+@pytest.mark.parametrize('kind,check', [('overlap', 'overlap_manifest'), ('engine', 'engine_file_set'),
+                                      ('prompt', 'prompt_literal'), ('distribution', 'distribution_metadata')])
+def test_remaining_lock_input_checks_are_named_without_writes(world, monkeypatch, kind, check):
+    w = world(**({'source_change': lambda rel, raw: b'OTHER = 1\n'
+                  if rel == 'standards/classifier.py' else raw} if kind == 'prompt' else {}))
+    if kind == 'overlap':
+        (w.root / K.OVERLAP_MANIFESTS[0]).write_text('[]', encoding='utf-8')
+    elif kind == 'engine':
+        monkeypatch.setattr(K.ruleset, 'ENGINE_FILES_SHA256', {'unknown.py': '0' * 64})
+    elif kind == 'distribution':
+        monkeypatch.setattr(K.metadata, 'distributions', lambda: [NS(metadata={'Name': ''}, version='1')])
+    args = reviewed(w) if kind == 'distribution' else ['--show']
+    before = file_set(w)
+    assert invoke(w, args) == (2, [], [check])
+    assert file_set(w) == before

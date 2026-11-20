@@ -28,6 +28,8 @@ from standards.ruleset import normalised_sha
 from .addendum_freeze import SEALED_NAMES
 from . import frozen_candidates as FC
 from . import runner as R
+from . import dev_export as E
+from .tagger import build_tags
 from .split_guard import load_eval_files
 from .tagger import load_tags
 
@@ -259,18 +261,32 @@ def preflight(args, *, root=ROOT, data=None, client_factory=None, retriever_fact
     cap, timeout = s10_cap(), s10_timeout()
     require(cap is not None and timeout is not None, 'request_settings')
     files = [checked_path(root, value) for value in (args.profiles, args.candidates, args.candidates_manifest)]
+    profiles_manifest = checked_path(root, FC.PROFILES_MANIFEST_REL)
+    try:
+        profiles_sha = FC.verify_dev_profiles(root, files[0])
+    except FC.CandidateInput as exc:
+        raise LiveCheck(str(exc)) from exc
     candidate_run = checked_path(root, args.candidates_run_manifest)
     candidate_doc, candidate_folder, candidate_files = completed_step(root, 'candidates', candidate_run)
+    require(candidate_doc.get('profiles_sha256_lf') == profiles_sha, 'candidate_profiles_sha')
     require(candidate_folder != folder, 'step_run_dirs')
     for name, path in zip(('candidates', 'candidates_manifest'), files[1:3]):
         require(normalised_sha(path.read_bytes()) == candidate_doc['outputs'][name]['sha256_lf'],
                 'candidate_run_sha')
-    files += candidate_files
+    files += [profiles_manifest, *candidate_files]
     prior_calls = dict(candidates=candidate_doc['counts']['ledger_total'], pilot=0)
     earlier_dirs = {candidate_run.parent, candidate_folder}
     gold_path = checked_path(root, args.gold) if args.phase == 'main' else None
     tag_path = checked_path(root, args.tags) if args.phase == 'main' else None
     if args.phase == 'main':
+        export_manifest = checked_path(root, E.MANIFEST_REL)
+        try:
+            export = json.loads(export_manifest.read_bytes())
+            require(export.get('format') == E.MANIFEST_FORMAT, 'export_manifest')
+            expected_gold_sha = export['outputs'][E.GOLD_REL]['sha256_lf']
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise LiveCheck('export_manifest') from exc
+        require(normalised_sha(gold_path.read_bytes()) == expected_gold_sha, 'gold_export_sha')
         pilot = checked_path(root, args.pilot_settings)
         checked_path(root, pilot.parent / 'run_manifest.json')
         pilot_doc, pilot_folder, pilot_files = completed_step(root, 'pilot', pilot.parent / 'run_manifest.json')
@@ -284,7 +300,7 @@ def preflight(args, *, root=ROOT, data=None, client_factory=None, retriever_fact
                 'pilot_profiles_sha')
         prior_calls['pilot'] = pilot_doc['counts']['ledger_total']
         _main_pilot_check(pilot, cap, timeout, lock_sha)
-        files += [gold_path, tag_path, *pilot_files]
+        files += [gold_path, tag_path, export_manifest, *pilot_files]
     starting_ledger = FC.ledger_total(folder / FC.CALL_LEDGER_NAME)
     starting_total = sum(prior_calls.values()) + starting_ledger
     out(f'candidates_calls={prior_calls["candidates"]} pilot_calls={prior_calls["pilot"]} '
@@ -299,6 +315,10 @@ def preflight(args, *, root=ROOT, data=None, client_factory=None, retriever_fact
     retriever = (retriever_factory or FC.FrozenRetriever)(files[1], manifest_path=files[2], profiles=profiles)
     require(not getattr(retriever, 'misses', ()), 'frozen_candidates')
     tags = load_tags(tag_path, required=list(gold)) if tag_path else None
+    if args.phase == 'main':
+        expected_tags = {(row['profile_id'], row['item']): row['tag']
+                         for row in build_tags(profiles, data)['tags']}
+        require(tags == expected_tags, 'tags_mismatch')
     files.append(checked_path(root, LOCK_REL))
     shas = {path.relative_to(root).as_posix(): normalised_sha(path.read_bytes()) for path in files}
     clients = {setting.name: (client_factory or R.azure_client_factory)(setting) for setting in SETTINGS}

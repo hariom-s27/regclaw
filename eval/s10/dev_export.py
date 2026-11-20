@@ -13,6 +13,7 @@ import sys
 import jsonschema
 import yaml
 
+from standards import ruleset
 from standards.ruleset import normalised_sha
 from .addendum_freeze import SEALED_NAMES
 from . import draws as D
@@ -284,6 +285,7 @@ def write_once(root, rel, text):
 def run(root=ROOT, *, out=print):
     try:
         preflight(root)
+        ruleset.check_ruleset()
         inputs = load_inputs(root)
         out(f'merge_sha256_lf={inputs["input_shas"][D.MERGE_REL]}')
         matches, unmatched = match_dev_entries(inputs['dev'], inputs['entries'], inputs['parts'])
@@ -297,6 +299,9 @@ def run(root=ROOT, *, out=print):
         # Validate/render everything before the first exclusive create. Never roll back files.
         for rel, text in payloads:
             write_once(root, rel, text)
+    except ruleset.RulesetChanged:
+        out('ruleset_mismatch count=1')
+        return 1
     except ExportError as exc:
         out(f'{exc.check} count={exc.count}')
         return exc.code

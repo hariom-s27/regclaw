@@ -7,6 +7,7 @@ data/pdfs/
 data/*.json
 data/cache/
 data/scratch/
+data/s10c1/
 data/runs/
 data/parse_eval/
 data/gold/

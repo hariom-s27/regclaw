@@ -43,6 +43,7 @@ LOCKED = (
     'embed/token_stats.py',
     'eval/s10/__init__.py',
     'eval/s10/addendum_freeze.py',
+    'eval/s10/addendum_freeze_n.py',
     'eval/s10/agreement.py',
     'eval/s10/analysis.py',
     'eval/s10/dev_export.py',
@@ -316,12 +317,17 @@ def main(argv=None, *, root=ROOT, now=None, out=print, err=None):
             out(f'written {MANIFEST_REL} files={len(LOCKED)} listing_sha256={sha}')
         return 0
     except DigestMismatch as exc:
+        if not exc.names:
+            err('listing_sha_mismatch')
         for name in exc.names:
             err(name)
         return 1
     except FileExistsError:
         err('output_exists count=1')
         return 3
+    except LockInput as exc:
+        err(str(exc))
+        return 2
     except (OSError, ValueError, TypeError, KeyError, SyntaxError, RecursionError, FrozenCandidatesError):
         err('input_or_output_validation count=1')
         return 2

@@ -20,10 +20,12 @@ import hashlib
 import io
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from standards import ruleset
 from standards.ruleset import normalised_sha
 
 QUERY_SUFFIX = ' biological evaluation ISO 10993'
@@ -38,10 +40,46 @@ CANDIDATE_RUN_NAME = 's10c_candidates_run.json'
 CANDIDATE_RUN_FORMAT = 's10c-candidates-run.v1'
 CANDIDATE_RECEIPT_FORMAT = 's10c-candidates-receipt.v1'
 CANDIDATE_RECEIPT_REL = 'eval/s10/manifests/s10c_candidates_run.json'
+PROFILES_MANIFEST_REL = 'eval/s10/manifests/profiles_v1.json'
+PROVENANCE_FILES = tuple('standards/data/' + name for name in ruleset.RULESET_FILES_SHA256) + (
+    'data/embed_identity.json',)
 
 
 class FrozenCandidatesError(RuntimeError):
     """Building or replaying frozen candidates was refused."""
+
+
+class CandidateInput(FrozenCandidatesError):
+    """Fixed preflight check names, without input content."""
+
+
+def verify_dev_profiles(root, profiles_path):
+    """Compare input bytes with the fixed dev entry; never follow manifest-selected paths."""
+    try:
+        manifest = json.loads((Path(root) / PROFILES_MANIFEST_REL).read_bytes())
+        if not isinstance(manifest, dict) or manifest.get('format') != 's10-profiles-manifest.v1':
+            raise CandidateInput('profiles_manifest')
+        expected = manifest['files']['dev_profiles.yaml']['sha256_lf']
+        if not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected):
+            raise CandidateInput('profiles_manifest')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise CandidateInput('profiles_manifest') from exc
+    try:
+        actual = normalised_sha(Path(profiles_path).read_bytes())
+    except OSError as exc:
+        raise CandidateInput('profiles_input') from exc
+    if actual != expected:
+        raise CandidateInput('profiles_sha')
+    return actual
+
+
+def candidate_provenance(root):
+    """Capture fixed input hashes before constructing a retriever; provenance only."""
+    try:
+        return {rel: dict(sha256_lf=normalised_sha((Path(root) / rel).read_bytes()))
+                for rel in PROVENANCE_FILES}
+    except OSError as exc:
+        raise CandidateInput('candidate_provenance') from exc
 
 
 def tool_query(device_name):
@@ -205,7 +243,8 @@ def append_call_ledger(path, *, step, calls, now=None):
         stream.write(json.dumps(row, sort_keys=True) + '\n')
 
 
-def write_candidate_run_manifest(*, root, run_dir, candidates_path, manifest_path, ledger_start, calls):
+def write_candidate_run_manifest(*, root, run_dir, candidates_path, manifest_path, ledger_start, calls,
+                                 profiles_sha256_lf, provenance_files):
     """Publish completion only after the request ledger and candidate outputs exist.
 
     The committed receipt anchors the local manifest's LF hash. Consumers verify
@@ -219,6 +258,7 @@ def write_candidate_run_manifest(*, root, run_dir, candidates_path, manifest_pat
     ledger_sha = normalised_sha(ledger.read_bytes())
     counts = dict(ledger_start=ledger_start, http_attempts=calls, ledger_total=total)
     doc = dict(format=CANDIDATE_RUN_FORMAT, phase='candidates', run_dir=run_dir.relative_to(root).as_posix(),
+               profiles_sha256_lf=profiles_sha256_lf, provenance_files=provenance_files,
                counts=counts, ledger_sha256_lf=ledger_sha,
                outputs={name: dict(sha256_lf=normalised_sha(Path(path).read_bytes()))
                         for name, path in (('candidates', candidates_path), ('candidates_manifest', manifest_path))})
@@ -334,6 +374,9 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
         if completion.exists() or completion.is_symlink() or receipt_path.exists() or receipt_path.is_symlink():
             print('REFUSED: candidate completion manifest already exists (write-once)')
             return 3
+        ruleset.check_ruleset()
+        profiles_sha = verify_dev_profiles(provider.ROOT, args.profiles)
+        provenance_files = candidate_provenance(provider.ROOT)
         if (folder / 'STOPPED.json').exists():
             raise FrozenCandidatesError('candidate folder stopped')
         ledger_path = folder / CALL_LEDGER_NAME
@@ -348,6 +391,12 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
         if split != 'dev':
             raise FrozenCandidatesError('dev profiles required')
         before = [cache_row_count(path) for path in cache_paths]
+    except ruleset.RulesetChanged:
+        print('ruleset_mismatch count=1')
+        return 2
+    except CandidateInput as exc:
+        print(f'{exc} count=1')
+        return 2
     except Exception as exc:
         print(f'ERROR: {type(exc).__name__}')
         return 2
@@ -386,7 +435,8 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
                         if close is not None:
                             close()
             receipt = write_candidate_run_manifest(root=provider.ROOT, run_dir=folder,
-                candidates_path=args.out, manifest_path=args.manifest, ledger_start=ledger_start, calls=calls)
+                candidates_path=args.out, manifest_path=args.manifest, ledger_start=ledger_start, calls=calls,
+                profiles_sha256_lf=profiles_sha, provenance_files=provenance_files)
     except Exception as exc:
         error = type(exc).__name__
     finally:

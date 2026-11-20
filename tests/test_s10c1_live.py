@@ -22,6 +22,7 @@ from standards.ruleset import normalised_sha
 
 STAMP = '2026-11-19T00:00:00+00:00'
 FAKE_LOCKED = ('fake_module.py',)
+CHECK_RULESET = FC.ruleset.check_ruleset
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +90,18 @@ def fake_data():
                             banned_phrases=[], caveat='FAKE data.'), data_version={'fake': 'in-test'})
 
 
+def candidate_inputs(root, profiles_path, monkeypatch):
+    put(root / FC.PROFILES_MANIFEST_REL, dumps(dict(format='s10-profiles-manifest.v1', files={
+        'dev_profiles.yaml': dict(sha256_lf=normalised_sha(profiles_path.read_bytes()))})))
+    expected = {}
+    for rel in FC.PROVENANCE_FILES:
+        path = put(root / rel, 'FAKE provenance\r\n')
+        if rel.startswith('standards/data/'):
+            expected[path.name] = normalised_sha(path.read_bytes())
+    monkeypatch.setattr(FC.ruleset, 'RULESET_FILES_SHA256', expected)
+    monkeypatch.setattr(FC.ruleset, 'check_ruleset', lambda: CHECK_RULESET(root / 'standards/data'))
+
+
 def profile(index, split='dev'):
     return dict(id=f'FAKE-{index}', stratum=f'S{index + 1}' if index < 8 else 'trap', split=split,
                 contact_category='surface/intact_skin', duration='A', flags=[], profile=dict(
@@ -127,14 +140,15 @@ def world(tmp_path_factory, monkeypatch, *, split='dev', lock_kind=None, sidecar
     rows = [profile(i, split) for i in range(10)]
     profiles = {row['id']: row for row in rows}
     p = put(root / 'P.yaml', yaml.safe_dump(dict(format=F.PROFILES_FORMAT, split=split, profiles=rows)))
+    candidate_inputs(root, p, monkeypatch)
     g = put(root / 'G.yaml', yaml.safe_dump(dict(format=F.GOLD_FORMAT_V2, split=split,
         reference=dict(method='jury median with boundary routing (S10P-04); 0 routed',
                        merge_sha256_lf='a' * 64, export_sha256_lf='b' * 64),
         labels=[dict(profile_id=pid, item=part, label='mandatory' if part != 'ISO 10993-9' else 'not_applicable')
                 for pid in profiles for part in ('ISO 10993-1', 'ISO 10993-5', 'ISO 10993-9')])))
-    t = put(root / 'T.json', dumps(dict(format='s10-cell-tags.v1', tags=[
-        dict(profile_id=pid, item=part, tag='judgement') for pid in profiles
-        for part in ('ISO 10993-1', 'ISO 10993-5', 'ISO 10993-9')])))
+    t = put(root / 'T.json', dumps(L.build_tags(profiles, data)))
+    put(root / L.E.MANIFEST_REL, dumps(dict(format=L.E.MANIFEST_FORMAT, outputs={
+        L.E.GOLD_REL: dict(sha256_lf=normalised_sha(g.read_bytes()))})))
     candidates, candidate_manifest = root / 'C.json', root / 'CM.json'
 
     def retriever_factory(*, cache_file):
@@ -146,7 +160,8 @@ def world(tmp_path_factory, monkeypatch, *, split='dev', lock_kind=None, sidecar
     candidate_folder = root / 'data/runs/candidates-fake'
     FC.append_call_ledger(candidate_folder / FC.CALL_LEDGER_NAME, step='candidates', calls=candidate_calls, now=STAMP)
     FC.write_candidate_run_manifest(root=root, run_dir=candidate_folder, candidates_path=candidates,
-        manifest_path=candidate_manifest, ledger_start=0, calls=candidate_calls)
+        manifest_path=candidate_manifest, ledger_start=0, calls=candidate_calls,
+        profiles_sha256_lf=normalised_sha(p.read_bytes()), provenance_files=FC.candidate_provenance(root))
     code = put(root / FAKE_LOCKED[0], 'FAKE source for hash validation\n')
     lock = dict(format=L.LOCK_FORMAT, files={FAKE_LOCKED[0]: dict(sha256_lf=normalised_sha(code.read_bytes()))})
     if lock_kind == 'format':
@@ -686,7 +701,7 @@ def test_main_refuses_profiles_sha_different_from_pilot(tmp_path_factory, monkey
     monkeypatch.setattr(Path, 'read_bytes', changed_profiles)
     before, calls, clients = snapshot_tree(obj.root), len(obj.calls), len(obj.clients)
     code, lines = invoke(obj, 'main')
-    assert code == 2 and lines == ['pilot_profiles_sha count=1']
+    assert code == 2 and lines == ['profiles_sha count=1']
     assert len(obj.calls) == calls and len(obj.clients) == clients
     assert snapshot_tree(obj.root) == before and not (obj.root / 'main').exists()
 
@@ -711,6 +726,7 @@ def candidate_case(tmp_path_factory, monkeypatch):
     assert 's8' not in str(root).casefold(), "livecache root contains 's8'; choose a --basetemp without 's8'"
     monkeypatch.setattr(provider, 'ROOT', root)
     p = put(root / 'P.yaml', yaml.safe_dump(dict(format=F.PROFILES_FORMAT, split='dev', profiles=[profile(0)])))
+    candidate_inputs(root, p, monkeypatch)
     args = ['build', '--profiles', str(p), '--cache-dir', str(root / 'cache'),
             '--out', str(root / 'C.json'), '--manifest', str(root / 'M.json')]
     return root, args, root / 'data/runs/live-fake' / FC.CALL_LEDGER_NAME
@@ -796,3 +812,128 @@ def test_retrieval_cap_refuses_before_requests(tmp_path_factory, monkeypatch):
     assert FC.main(args, data=fake_data(), retriever_factory=factory, now=STAMP) == 2
     assert made[0].query_embeddings.embedder.api_requests == 0 and FC.ledger_total(ledger) == 145
     assert not (root / 'C.json').exists()
+
+
+def reanchor_candidates(obj, mutate):
+    doc = json.loads(obj.candidate_run.read_bytes())
+    mutate(doc)
+    text = dumps(doc)
+    obj.candidate_run.write_text(text, encoding='utf-8')
+    receipt_path = obj.root / FC.CANDIDATE_RECEIPT_REL
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt['shas']['run_manifest_sha256_lf'] = normalised_sha(text.encode('utf-8'))
+    receipt_path.write_text(dumps(receipt), encoding='utf-8')
+
+
+@pytest.mark.parametrize('phase', ['pilot', 'main'])
+@pytest.mark.parametrize('kind', ['missing-manifest', 'malformed', 'format', 'dev-entry', 'sha',
+                                  'changed-profile', 'candidate-sha', 'candidate-missing-sha'])
+def test_profiles_freeze_and_candidate_identity_refuse_before_calls_or_writes(
+        tmp_path_factory, monkeypatch, phase, kind):
+    obj = world(tmp_path_factory, monkeypatch)
+    if phase == 'main':
+        assert invoke(obj)[0] == 0
+        main_run_dir(monkeypatch)
+    manifest_path = obj.root / FC.PROFILES_MANIFEST_REL
+    if kind in ('malformed', 'format', 'dev-entry', 'sha'):
+        doc = json.loads(manifest_path.read_bytes())
+        if kind == 'format':
+            doc['format'] = 'PRIVATE invalid'
+        elif kind == 'dev-entry':
+            doc['files'] = {'P.yaml': doc['files']['dev_profiles.yaml']}
+        elif kind == 'sha':
+            doc['files']['dev_profiles.yaml']['sha256_lf'] = '0' * 64
+        manifest_path.write_text('PRIVATE invalid {' if kind == 'malformed' else dumps(doc), encoding='utf-8')
+    elif kind == 'changed-profile':
+        obj.p.write_bytes(obj.p.read_bytes() + b'\n# PRIVATE changed\n')
+    elif kind == 'candidate-sha':
+        reanchor_candidates(obj, lambda doc: doc.update(profiles_sha256_lf='0' * 64))
+    elif kind == 'candidate-missing-sha':
+        reanchor_candidates(obj, lambda doc: doc.pop('profiles_sha256_lf'))
+    if kind == 'missing-manifest':
+        original = Path.read_bytes
+        def missing(path):
+            if path == manifest_path:
+                raise FileNotFoundError('PRIVATE missing profiles manifest')
+            return original(path)
+        monkeypatch.setattr(Path, 'read_bytes', missing)
+    before, calls, clients = snapshot_tree(obj.root), len(obj.calls), len(obj.clients)
+    code, lines = invoke(obj, phase)
+    diagnostic = ('candidate_profiles_sha' if kind.startswith('candidate-') else
+                  'profiles_sha' if kind in ('sha', 'changed-profile') else 'profiles_manifest')
+    assert (code, lines) == (2, [diagnostic + ' count=1'])
+    assert len(obj.calls) == calls and len(obj.clients) == clients and snapshot_tree(obj.root) == before
+
+
+def test_candidate_provenance_is_not_enforced_by_live(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory, monkeypatch)
+    reanchor_candidates(obj, lambda doc: doc.update(provenance_files={
+        rel: dict(sha256_lf='0' * 64) for rel in FC.PROVENANCE_FILES}))
+    assert invoke(obj)[0] == 0
+
+
+@pytest.mark.parametrize('kind', ['changed', 'missing', 'extra', 'duplicate'])
+def test_main_rebuilds_complete_tags_before_clients_or_writes(tmp_path_factory, monkeypatch, kind):
+    obj = world(tmp_path_factory, monkeypatch)
+    assert invoke(obj)[0] == 0
+    main_run_dir(monkeypatch)
+    doc = json.loads(obj.t.read_bytes())
+    if kind == 'changed':
+        row = doc['tags'][0]
+        row['tag'] = 'judgement' if row['tag'] != 'judgement' else 'always_rule'
+    elif kind == 'missing':
+        doc['tags'].pop()
+    elif kind == 'extra':
+        doc['tags'].append(dict(profile_id='PRIVATE-extra', item='ISO 10993-5', tag='judgement'))
+    else:
+        doc['tags'].append(dict(doc['tags'][0]))
+    obj.t.write_text(dumps(doc), encoding='utf-8')
+    before, calls, clients = snapshot_tree(obj.root), len(obj.calls), len(obj.clients)
+    code, lines = invoke(obj, 'main')
+    assert code == 2 and 'PRIVATE' not in '\n'.join(lines)
+    if kind in ('changed', 'extra'):
+        assert lines[-1] == 'tags_mismatch count=1'
+    assert len(obj.calls) == calls and len(obj.clients) == clients and snapshot_tree(obj.root) == before
+
+
+def test_main_accepts_reordered_rebuilt_tags_and_crlf_inputs(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory, monkeypatch)
+    obj.p.write_bytes(obj.p.read_bytes().replace(b'\n', b'\r\n'))
+    obj.g.write_bytes(obj.g.read_bytes().replace(b'\n', b'\r\n'))
+    assert invoke(obj)[0] == 0
+    main_run_dir(monkeypatch)
+    doc = json.loads(obj.t.read_bytes())
+    doc['tags'].reverse()
+    obj.t.write_text(json.dumps(doc, separators=(',', ':')), encoding='utf-8')
+    assert invoke(obj, 'main')[0] == 0
+
+
+@pytest.mark.parametrize('kind', ['missing', 'malformed', 'format', 'entry', 'sha', 'changed-gold'])
+def test_gold_export_freeze_refuses_before_clients_or_writes(tmp_path_factory, monkeypatch, kind):
+    obj = world(tmp_path_factory, monkeypatch)
+    assert invoke(obj)[0] == 0
+    main_run_dir(monkeypatch)
+    path = obj.root / L.E.MANIFEST_REL
+    if kind in ('malformed', 'format', 'entry', 'sha'):
+        doc = json.loads(path.read_bytes())
+        if kind == 'format':
+            doc['format'] = 'PRIVATE invalid'
+        elif kind == 'entry':
+            doc['outputs'] = {'G.yaml': doc['outputs'][L.E.GOLD_REL]}
+        elif kind == 'sha':
+            doc['outputs'][L.E.GOLD_REL]['sha256_lf'] = '0' * 64
+        path.write_text('PRIVATE invalid {' if kind == 'malformed' else dumps(doc), encoding='utf-8')
+    elif kind == 'changed-gold':
+        obj.g.write_bytes(obj.g.read_bytes() + b'\n# PRIVATE changed\n')
+    if kind == 'missing':
+        original = Path.read_bytes
+        def missing(p):
+            if p == path:
+                raise FileNotFoundError('PRIVATE missing export manifest')
+            return original(p)
+        monkeypatch.setattr(Path, 'read_bytes', missing)
+    before, calls, clients = snapshot_tree(obj.root), len(obj.calls), len(obj.clients)
+    code, lines = invoke(obj, 'main')
+    diagnostic = 'gold_export_sha' if kind in ('sha', 'changed-gold') else 'export_manifest'
+    assert (code, lines) == (2, [diagnostic + ' count=1'])
+    assert len(obj.calls) == calls and len(obj.clients) == clients and snapshot_tree(obj.root) == before
