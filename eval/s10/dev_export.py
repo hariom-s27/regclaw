@@ -42,6 +42,9 @@ REFERENCE_METHOD = F.GOLD_REFERENCE_V2['properties']['method']['const']
 EXPECTED_E1_DISPLAY = '0.0149'
 EXPECTED_E1_POPULATION = 298
 EXPECTED_E2 = {'x': 1, 'n': 126}
+# G-09: merge_v1.json LF sha frozen at A2 signing (prefix and suffix as approved).
+MERGE_SHA_PREFIX = '08616cf9'
+MERGE_SHA_SUFFIX = 'ad903'
 
 
 class ExportError(ValueError):
@@ -123,6 +126,9 @@ def load_inputs(root):
     """
     raw = {rel: fixed_path(root, rel).read_bytes() for rel in INPUTS}
     shas = {rel: normalised_sha(value) for rel, value in raw.items()}
+    # G-09: refuse before any parsing unless the merge file is the A2-signed one.
+    _require(shas[D.MERGE_REL].startswith(MERGE_SHA_PREFIX) and shas[D.MERGE_REL].endswith(MERGE_SHA_SUFFIX),
+             'merge_sha', code=1)
     profiles_manifest = json.loads(raw[PROFILES_MANIFEST_REL])
     build = json.loads(raw[BUILD_REL])
     _require(profiles_manifest.get('format') == 's10-profiles-manifest.v1', 'profiles_manifest')

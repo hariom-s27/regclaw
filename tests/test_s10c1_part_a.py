@@ -17,6 +17,7 @@ import _netguard
 import standards.tool
 from eval.s10 import formats as F
 from eval.s10 import frozen_candidates as FC
+from eval.s10 import live as L
 from eval.s10 import runner as R
 from eval.s10 import split_guard as SG
 from eval.s10 import tagger as T
@@ -25,6 +26,8 @@ from llm.azure_openai import AzureOpenAIAdapter, S8_ROLES
 from standards.ruleset import normalised_sha
 
 CHECK_RULESET = FC.ruleset.check_ruleset
+FAKE_LOCKED = ('fake_module.py',)
+LIVE_ENV = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai'}
 
 
 @pytest.fixture
@@ -435,15 +438,33 @@ def candidate_args(tmp_path, monkeypatch, split='dev', cache_parts=('cache',)):
             expected[path.name] = normalised_sha(path.read_bytes())
     monkeypatch.setattr(FC.ruleset, 'RULESET_FILES_SHA256', expected)
     monkeypatch.setattr(FC.ruleset, 'check_ruleset', lambda: CHECK_RULESET(tmp_path / 'standards/data'))
+    write_fake_lock(tmp_path)
     args = ['build', '--profiles', str(p), '--cache-dir', str(tmp_path.joinpath(*cache_parts)),
             '--out', str(tmp_path / 'C.json'), '--manifest', str(tmp_path / 'M.json')]
     return args, tmp_path / 'data/runs/s10c1-fake' / FC.CALL_LEDGER_NAME
 
 
+def write_fake_lock(root):
+    code = write_new(root / FAKE_LOCKED[0], 'FAKE source for hash validation\n')
+    return write_new(root / L.LOCK_REL, json.dumps(dict(format=L.LOCK_FORMAT, files={
+        FAKE_LOCKED[0]: dict(sha256_lf=normalised_sha(code.read_bytes()))}), indent=2) + '\n')
+
+
+def fc_main(args, **kwargs):
+    """Candidate CLI with a synthetic live environment and the fake lock (G-02)."""
+    kwargs.setdefault('env', LIVE_ENV)
+    kwargs.setdefault('locked_files', FAKE_LOCKED)
+    return FC.main(args, **kwargs)
+
+
+def global_ledger(root):
+    return root / FC.GLOBAL_LEDGER_REL
+
+
 def test_candidates_cli_refuses_holdout_before_factory(tmp_path, fake_data, monkeypatch):
     args, ledger = candidate_args(tmp_path, monkeypatch, 'holdout')
     made = []
-    assert FC.main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
+    assert fc_main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
     assert made == [] and not ledger.exists() and not (tmp_path / 'cache').exists()
 
 
@@ -451,7 +472,7 @@ def test_candidates_cli_refuses_holdout_before_factory(tmp_path, fake_data, monk
 def test_candidates_cli_refuses_guarded_cache_paths(tmp_path, fake_data, monkeypatch, parts):
     args, ledger = candidate_args(tmp_path, monkeypatch, cache_parts=parts)
     made = []
-    assert FC.main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
+    assert fc_main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
     assert made == [] and not ledger.exists() and not tmp_path.joinpath(*parts).exists()
 
 
@@ -463,7 +484,7 @@ def test_candidates_cli_requires_valid_ledger_location(tmp_path, fake_data, monk
     else:
         monkeypatch.setenv('REGCLAW_RUN_DIR', env)
     made = []
-    assert FC.main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
+    assert fc_main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
     assert made == [] and not (tmp_path / 'cache').exists()
 
 
@@ -473,14 +494,14 @@ def test_candidates_cli_outputs_are_write_once(tmp_path, fake_data, monkeypatch,
     path = write_new(tmp_path / existing, 'FAKE existing output\n')
     before, made = path.read_bytes(), []
     monkeypatch.setattr(FC.ruleset, 'check_ruleset', lambda: pytest.fail('ruleset read before output refusal'))
-    assert FC.main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 3
+    assert fc_main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 3
     assert made == [] and path.read_bytes() == before and not ledger.exists()
 
 
 @pytest.mark.parametrize('append', [False, True])
 def test_candidates_cli_counts_cache_deltas_and_ledger(tmp_path, fake_data, monkeypatch, capsys, append):
     args, ledger = candidate_args(tmp_path, monkeypatch)
-    FC.append_call_ledger(ledger, step='pilot', calls=4, now='FAKE-before')
+    FC.charge(global_ledger(tmp_path), ledger, step='pilot', calls=4, now='FAKE-before')
     ledger_before = ledger.read_bytes()
     cache_before = {}
     for name in (FC.CYPHER_CACHE_NAME, FC.EMBEDDING_CACHE_NAME):
@@ -492,12 +513,14 @@ def test_candidates_cli_counts_cache_deltas_and_ledger(tmp_path, fake_data, monk
         made.append(FakeRetriever(**kwargs, append=append))
         return made[-1]
 
-    assert FC.main(args, data=fake_data, retriever_factory=factory, now='FAKE-after') == 0
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now='FAKE-after') == 0
     expected = 2 if append else 0
-    assert FC.ledger_total(ledger) == 4 + expected
+    assert FC.ledger_total(ledger) == FC.ledger_total(global_ledger(tmp_path)) == 4 + expected
     assert ledger.read_bytes().startswith(ledger_before)
     rows = [json.loads(line) for line in ledger.read_text(encoding='utf-8').splitlines()]
     assert rows[-1] == dict(step='candidates', calls=expected, timestamp='FAKE-after')
+    global_rows = [json.loads(line) for line in global_ledger(tmp_path).read_text(encoding='utf-8').splitlines()]
+    assert global_rows == rows
     assert made[0].closed and made[0].requests == [(FC.tool_query('FAKE device from this test'), 30)]
     for name, before in cache_before.items():
         assert (tmp_path / 'cache' / name).read_bytes().startswith(before)
@@ -520,7 +543,7 @@ def test_candidates_cli_accounts_for_failed_build(tmp_path, fake_data, monkeypat
         made.append(FakeRetriever(**kwargs, fail=True))
         return made[-1]
 
-    assert FC.main(args, data=fake_data, retriever_factory=factory, now='FAKE-failure') == 2
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now='FAKE-failure') == 2
     assert FC.ledger_total(ledger) == 2 and made[0].closed
     assert not (tmp_path / 'C.json').exists() and not (tmp_path / 'M.json').exists()
     output = capsys.readouterr().out
@@ -531,7 +554,7 @@ def test_candidates_cli_accounts_for_failed_build(tmp_path, fake_data, monkeypat
 def test_candidates_cli_prints_only_counts_and_shas(tmp_path, fake_data, monkeypatch, capsys, fail):
     args, _ = candidate_args(tmp_path, monkeypatch)
     before = logging.root.manager.disable
-    assert FC.main(args, data=fake_data,
+    assert fc_main(args, data=fake_data,
                    retriever_factory=lambda **kw: FakeRetriever(**kw, fail=fail)) == (2 if fail else 0)
     output = capsys.readouterr()
     assert 'FAKE' not in output.out and 'private' not in output.out and output.err == ''
@@ -542,7 +565,7 @@ def test_candidates_cli_rejects_invalid_ledger_before_factory(tmp_path, fake_dat
     args, ledger = candidate_args(tmp_path, monkeypatch)
     write_new(ledger, json.dumps(dict(step='FAKE', calls=True, timestamp='FAKE')) + '\n')
     made = []
-    assert FC.main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
+    assert fc_main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
     assert made == [] and not (tmp_path / 'cache').exists()
 
 
@@ -554,7 +577,7 @@ def test_candidates_cli_checks_factory_cache_paths(tmp_path, fake_data, monkeypa
         made.append(FakeRetriever(**kwargs, embedding_cache=tmp_path / 'other' / FC.EMBEDDING_CACHE_NAME))
         return made[-1]
 
-    assert FC.main(args, data=fake_data, retriever_factory=factory) == 2
+    assert fc_main(args, data=fake_data, retriever_factory=factory) == 2
     assert made[0].requests == [] and made[0].closed and FC.ledger_total(ledger) == 0
     assert not (tmp_path / 'C.json').exists()
 
@@ -563,7 +586,7 @@ def test_part_a_uses_only_injected_fake_inputs(tmp_path, fake_data, monkeypatch)
     args, _ = candidate_args(tmp_path, monkeypatch)
     assert os.environ['REGCLAW_STUB'] == '1'
     assert T.main(['build', '--profiles', args[2], '--out', str(tmp_path / 'T.json')], data=fake_data) == 0
-    assert FC.main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
+    assert fc_main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
 
 
 def candidate_snapshot(root):
@@ -576,7 +599,7 @@ def test_candidate_ruleset_mismatch_precedes_inputs_and_writes(tmp_path, fake_da
     (tmp_path / 'standards/data' / name).write_bytes(b'PRIVATE changed rule\n')
     monkeypatch.setattr(FC, 'verify_dev_profiles', lambda *a: pytest.fail('profiles read before ruleset check'))
     before = candidate_snapshot(tmp_path)
-    assert FC.main(args, data=fake_data,
+    assert fc_main(args, data=fake_data,
                    retriever_factory=lambda **kw: pytest.fail('retriever constructed')) == 2
     assert capsys.readouterr().out == 'ruleset_mismatch count=1\n'
     assert candidate_snapshot(tmp_path) == before
@@ -615,7 +638,7 @@ def test_candidate_profiles_freeze_refuses_before_calls_or_writes(tmp_path, fake
                 result[p.relative_to(tmp_path)] = None
         return result
     before = snapshot()
-    assert FC.main(args, data=fake_data,
+    assert fc_main(args, data=fake_data,
                    retriever_factory=lambda **kw: pytest.fail('retriever constructed')) == 2
     diagnostic = 'profiles_sha' if kind in ('sha', 'changed-profile') else 'profiles_manifest'
     assert capsys.readouterr().out == diagnostic + ' count=1\n'
@@ -626,7 +649,7 @@ def test_candidate_completion_records_lf_profile_and_all_provenance_hashes(tmp_p
     args, ledger = candidate_args(tmp_path, monkeypatch)
     path = Path(args[args.index('--profiles') + 1])
     path.write_bytes(path.read_bytes().replace(b'\n', b'\r\n'))
-    assert FC.main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
+    assert fc_main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
     doc = json.loads((ledger.parent / FC.CANDIDATE_RUN_NAME).read_bytes())
     assert doc['profiles_sha256_lf'] == normalised_sha(path.read_bytes())
     assert set(doc['provenance_files']) == set(FC.PROVENANCE_FILES)
@@ -644,8 +667,151 @@ def test_candidate_missing_provenance_refuses_before_factory(tmp_path, fake_data
         return original(path)
     before = candidate_snapshot(tmp_path)
     monkeypatch.setattr(Path, 'read_bytes', missing)
-    assert FC.main(args, data=fake_data,
+    assert fc_main(args, data=fake_data,
                    retriever_factory=lambda **kw: pytest.fail('retriever constructed')) == 2
     monkeypatch.setattr(Path, 'read_bytes', original)
     assert capsys.readouterr().out == 'candidate_provenance count=1\n'
     assert candidate_snapshot(tmp_path) == before
+
+
+def must_not_build(**kwargs):
+    pytest.fail('retriever constructed before every refusal passed')
+
+
+@pytest.mark.parametrize('env,expected', [
+    ({'REGCLAW_STUB': '1', 'LLM_PROVIDER': 'azure_openai'}, 'stub_mode'),
+    ({'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'anthropic'}, 'provider'),
+    ({**LIVE_ENV, 'LANGFUSE_ENABLED': 'true'}, 'langfuse'),
+    ({**LIVE_ENV, 'LANGFUSE_ENABLED': '1'}, 'langfuse'),
+    ({**LIVE_ENV, 'LANGFUSE_ENABLED': ''}, 'langfuse'),
+    ({**LIVE_ENV, 'LANGFUSE_ENABLED': 'False'}, 'langfuse'),
+    (None, 'stub_mode'),
+])
+def test_candidate_environment_refuses_before_factory(tmp_path, fake_data, monkeypatch, capsys, env, expected):
+    # G-02 + G-10; env=None uses the real process environment, which is stubbed in tests.
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    before = candidate_snapshot(tmp_path)
+    kwargs = dict(locked_files=FAKE_LOCKED) if env is None else dict(env=env)
+    assert (FC.main(args, data=fake_data, retriever_factory=must_not_build, **kwargs) if env is None
+            else fc_main(args, data=fake_data, retriever_factory=must_not_build, **kwargs)) == 2
+    assert capsys.readouterr().out == f'{expected} count=1\n'
+    assert candidate_snapshot(tmp_path) == before and not ledger.exists()
+
+
+def test_candidate_accepts_langfuse_false(tmp_path, fake_data, monkeypatch):
+    args, _ = candidate_args(tmp_path, monkeypatch)
+    assert fc_main(args, data=fake_data, retriever_factory=FakeRetriever,
+                   env={**LIVE_ENV, 'LANGFUSE_ENABLED': 'false'}) == 0
+
+
+@pytest.mark.parametrize('kind,expected', [('sha', 'code_lock_sha count=1\n'),
+                                           ('files', 'code_lock_files count=1\n'),
+                                           ('missing', 'ERROR: FileNotFoundError\n')])
+def test_candidate_code_lock_refuses_before_factory(tmp_path, fake_data, monkeypatch, capsys, kind, expected):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    lock_path = tmp_path / L.LOCK_REL
+    kwargs = {}
+    if kind == 'sha':
+        doc = json.loads(lock_path.read_bytes())
+        doc['files'][FAKE_LOCKED[0]]['sha256_lf'] = '0' * 64
+        lock_path.write_text(json.dumps(doc), encoding='utf-8')
+    elif kind == 'files':
+        kwargs['locked_files'] = ('other_module.py',)
+    else:
+        original = Path.read_bytes
+        def missing(path):
+            if Path(path).name == lock_path.name:
+                raise FileNotFoundError('PRIVATE missing lock')
+            return original(path)
+        monkeypatch.setattr(Path, 'read_bytes', missing)
+    before = candidate_snapshot(tmp_path) if kind != 'missing' else None
+    monkeypatch.setattr(FC.ruleset, 'check_ruleset', lambda: pytest.fail('ruleset read before lock check'))
+    assert fc_main(args, data=fake_data, retriever_factory=must_not_build, **kwargs) == 2
+    assert capsys.readouterr().out == expected
+    assert not ledger.exists() and not (tmp_path / 'cache').exists()
+    if before is not None:
+        assert candidate_snapshot(tmp_path) == before
+
+
+def test_candidate_completion_records_code_lock_and_global_total(tmp_path, fake_data, monkeypatch):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    FC.append_call_ledger(global_ledger(tmp_path), step='pilot', calls=3, now='FAKE-earlier-attempt')
+    assert fc_main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
+    lock_sha = normalised_sha((tmp_path / L.LOCK_REL).read_bytes())
+    doc = json.loads((ledger.parent / FC.CANDIDATE_RUN_NAME).read_bytes())
+    receipt = json.loads((tmp_path / FC.CANDIDATE_RECEIPT_REL).read_bytes())
+    assert doc['code_lock_sha256_lf'] == receipt['shas']['code_lock_sha256_lf'] == lock_sha
+    assert FC.ledger_total(ledger) == 2 and doc['global_ledger_total'] == 5
+    assert doc['global_ledger_total'] == FC.ledger_total(global_ledger(tmp_path))
+
+
+@pytest.mark.parametrize('option,value,expected', [
+    ('--profiles', 'data/gold/s10/holdout_profiles.yaml', 'forbidden_path'),
+    ('--out', 'data/gold/s10/jid_map.json', 'forbidden_path'),
+    ('--manifest', 'profiles_draft.yaml', 'forbidden_path'),
+    ('--cache-dir', '.env-cache', 'forbidden_path'),
+    ('--profiles', 'OUTSIDE', 'path_boundary'),
+])
+def test_candidate_cli_paths_are_guarded_before_any_read(tmp_path, fake_data, monkeypatch, capsys,
+                                                       option, value, expected):
+    # G-06: refused on the path alone; the target is never opened.
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    target = tmp_path.parent / 'outside-P.yaml' if value == 'OUTSIDE' else tmp_path / value
+    args[args.index(option) + 1] = str(target)
+    original = Path.read_bytes
+    def guarded(path):
+        if Path(path).name.casefold() in L.SEALED_NAMES or not Path(path).resolve().is_relative_to(tmp_path.resolve()):
+            pytest.fail('guarded path was read')
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', guarded)
+    before = candidate_snapshot(tmp_path)
+    assert fc_main(args, data=fake_data, retriever_factory=must_not_build) == 2
+    assert capsys.readouterr().out == f'{expected} count=1\n'
+    assert candidate_snapshot(tmp_path) == before and not ledger.exists()
+
+
+class BrokenCounterRetriever(FakeRetriever):
+    def retrieve(self, query, top_k):
+        result = super().retrieve(query, top_k)
+        self.query_embeddings.embedder.api_requests = 'PRIVATE broken counter'
+        return result
+
+
+def test_candidate_counting_failure_charges_reserve_per_started_query(tmp_path, fake_data, monkeypatch, capsys):
+    # G-08: one started query, reserve 2 * (2 + 1) + 5 = 11, charged to both ledgers; then refuse.
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    made = []
+    def factory(**kwargs):
+        made.append(BrokenCounterRetriever(**kwargs))
+        return made[-1]
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now='FAKE-failure') == 2
+    assert len(made[0].requests) == 1 and made[0].closed
+    assert FC.ledger_total(ledger) == FC.ledger_total(global_ledger(tmp_path)) == 11
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    output = capsys.readouterr().out
+    assert output == 'ERROR: FrozenCandidatesError\n' and 'PRIVATE' not in output
+
+
+def test_candidate_global_ledger_short_refuses_before_factory(tmp_path, fake_data, monkeypatch, capsys):
+    # G-01: folder charges missing from the global ledger (missing or edited global ledger).
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    FC.append_call_ledger(ledger, step='candidates', calls=3, now='FAKE-folder-only')
+    before = candidate_snapshot(tmp_path)
+    assert fc_main(args, data=fake_data, retriever_factory=must_not_build) == 2
+    assert capsys.readouterr().out == 'global_ledger_short count=1\n'
+    assert candidate_snapshot(tmp_path) == before
+
+
+def test_candidate_retrieval_cap_uses_global_total(tmp_path, fake_data, monkeypatch):
+    # G-01: 140 calls of an earlier attempt elsewhere + reserve 11 > 150, with an empty folder ledger.
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    FC.append_call_ledger(global_ledger(tmp_path), step='candidates', calls=140, now='FAKE-earlier-attempt')
+    made = []
+    def factory(**kwargs):
+        made.append(FakeRetriever(**kwargs))
+        return made[-1]
+    assert fc_main(args, data=fake_data, retriever_factory=factory) == 2
+    assert made[0].requests == [] and made[0].query_embeddings.embedder.api_requests == 0
+    assert FC.ledger_total(ledger) == 0 and FC.ledger_total(global_ledger(tmp_path)) == 140
+    assert not (tmp_path / 'C.json').exists()

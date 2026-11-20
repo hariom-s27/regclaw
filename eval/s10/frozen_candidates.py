@@ -20,6 +20,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -35,6 +36,8 @@ MANIFEST_FORMAT = 's10-frozen-candidates-manifest.v1'
 CYPHER_CACHE_NAME = 'cypher_cache.jsonl'
 EMBEDDING_CACHE_NAME = 'query_embedding_cache.jsonl'
 CALL_LEDGER_NAME = 's10c_call_ledger.jsonl'
+# G-01: one fixed append-only ledger across every paid S10c step and attempt.
+GLOBAL_LEDGER_REL = 'data/runs/s10c_global_call_ledger.jsonl'
 CALL_CAP = 150
 CANDIDATE_RUN_NAME = 's10c_candidates_run.json'
 CANDIDATE_RUN_FORMAT = 's10c-candidates-run.v1'
@@ -243,29 +246,48 @@ def append_call_ledger(path, *, step, calls, now=None):
         stream.write(json.dumps(row, sort_keys=True) + '\n')
 
 
+def charge(global_ledger, folder_ledger, *, step, calls, now=None):
+    """G-01: append one charge to the global ledger FIRST, then to the phase folder ledger.
+
+    A crash between the two appends leaves global >= folder, the safe direction
+    for the preflight check that refuses a global total below the folder totals.
+    """
+    stamp = now or datetime.now(timezone.utc).isoformat()
+    append_call_ledger(global_ledger, step=step, calls=calls, now=stamp)
+    append_call_ledger(folder_ledger, step=step, calls=calls, now=stamp)
+
+
 def write_candidate_run_manifest(*, root, run_dir, candidates_path, manifest_path, ledger_start, calls,
-                                 profiles_sha256_lf, provenance_files):
+                                 profiles_sha256_lf, provenance_files, code_lock_sha256_lf):
     """Publish completion only after the request ledger and candidate outputs exist.
 
     The committed receipt anchors the local manifest's LF hash. Consumers verify
     both that hash and the ledger hash before accepting its recorded total.
+    The code-lock sha (G-02) is recorded in both; the global ledger total at
+    completion (G-01) is provenance in the run manifest.
     """
     root, run_dir = Path(root).resolve(), Path(run_dir).resolve()
+    if not isinstance(code_lock_sha256_lf, str) or not re.fullmatch(r'[0-9a-f]{64}', code_lock_sha256_lf):
+        raise FrozenCandidatesError('candidate code-lock sha missing')
     ledger = run_dir / CALL_LEDGER_NAME
     total = ledger_total(ledger)
     if total != ledger_start + calls or total > CALL_CAP:
         raise FrozenCandidatesError('candidate ledger total mismatch or cap exceeded')
+    global_total = ledger_total(root / GLOBAL_LEDGER_REL)
+    if global_total < total or global_total > CALL_CAP:
+        raise FrozenCandidatesError('global ledger total below the folder ledger or over the cap')
     ledger_sha = normalised_sha(ledger.read_bytes())
     counts = dict(ledger_start=ledger_start, http_attempts=calls, ledger_total=total)
     doc = dict(format=CANDIDATE_RUN_FORMAT, phase='candidates', run_dir=run_dir.relative_to(root).as_posix(),
                profiles_sha256_lf=profiles_sha256_lf, provenance_files=provenance_files,
-               counts=counts, ledger_sha256_lf=ledger_sha,
+               counts=counts, ledger_sha256_lf=ledger_sha, code_lock_sha256_lf=code_lock_sha256_lf,
+               global_ledger_total=global_total,
                outputs={name: dict(sha256_lf=normalised_sha(Path(path).read_bytes()))
                         for name, path in (('candidates', candidates_path), ('candidates_manifest', manifest_path))})
     text = json.dumps(doc, indent=2, sort_keys=True) + '\n'
     receipt = dict(format=CANDIDATE_RECEIPT_FORMAT, counts=counts,
                    shas=dict(run_manifest_sha256_lf=normalised_sha(text.encode('utf-8')),
-                             ledger_sha256_lf=ledger_sha))
+                             ledger_sha256_lf=ledger_sha, code_lock_sha256_lf=code_lock_sha256_lf))
     _write_once(run_dir / CANDIDATE_RUN_NAME, text)
     # This final write is the completion anchor. Partial saves never qualify.
     _write_once(root / CANDIDATE_RECEIPT_REL, json.dumps(receipt, indent=2, sort_keys=True) + '\n')
@@ -287,13 +309,18 @@ class RetrievalRequests:
     try plus the embedder's configured attempt budget before retrieval starts.
     """
 
-    def __init__(self, retriever, ledger_path):
+    def __init__(self, retriever, ledger_path, global_path=None):
         self.client = retriever.llm
         self.embedder = retriever.query_embeddings.embedder
         self.embedding_start = self._embedding_count()
         self.cypher_requests = 0
         self.ledger_path = ledger_path
         self.ledger_start = ledger_total(ledger_path)
+        # G-01: with a global ledger, the cap check uses the global total.
+        self.global_path = global_path
+        self.global_start = ledger_total(global_path) if global_path is not None else None
+        # G-08: queries that passed the guard; charged at the reserve if counting fails.
+        self.started = 0
         self.has_http_log = isinstance(getattr(self.client, 'last_http_log', None), list)
         self.has_counter = type(getattr(self.client, 'api_requests', None)) is int
         if not (self.has_http_log or self.has_counter):
@@ -322,8 +349,12 @@ class RetrievalRequests:
         def guarded_retrieve(*args, **kwargs):
             if ledger_total(ledger_path) != self.ledger_start:
                 raise FrozenCandidatesError('call ledger changed during retrieval')
-            if self.ledger_start + self.total() + self.query_reserve > CALL_CAP:
+            if global_path is not None and ledger_total(global_path) != self.global_start:
+                raise FrozenCandidatesError('global call ledger changed during retrieval')
+            base = self.global_start if global_path is not None else self.ledger_start
+            if base + self.total() + self.query_reserve > CALL_CAP:
                 raise FrozenCandidatesError('retrieval call cap')
+            self.started += 1
             return retrieve(*args, **kwargs)
 
         self.client.generate = counted_generate
@@ -345,11 +376,16 @@ class RetrievalRequests:
         return sum(self.counts())
 
 
-def main(argv=None, *, data=None, retriever_factory=None, now=None):
-    """Build dev candidates, charging actual requests; cache rows cross-check only."""
+def main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, locked_files=None):
+    """Build dev candidates, charging actual requests; cache rows cross-check only.
+
+    Every refusal (paths, write-once, environment, code lock, ruleset, profiles,
+    ledgers) happens before any retriever is constructed.
+    """
     from llm import provider
     from standards.data_loader import load_data
     from .split_guard import load_eval_files
+    from . import live
 
     parser = argparse.ArgumentParser(prog='python -m eval.s10.frozen_candidates')
     commands = parser.add_subparsers(dest='command', required=True)
@@ -359,42 +395,54 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
     build.add_argument('--out', required=True)
     build.add_argument('--manifest', required=True)
     args = parser.parse_args(argv)
+    env = os.environ if env is None else env
     try:
-        if any(Path(path).exists() for path in (args.out, args.manifest)):
+        root = Path(provider.ROOT)
+        # G-06: sealed names, root boundary and folder rules before any read.
+        profiles_path, cache_dir, out_path, manifest_path = (
+            live.checked_path(root, value) for value in (args.profiles, args.cache_dir, args.out, args.manifest))
+        if any(path.exists() or path.is_symlink() for path in (out_path, manifest_path)):
             print('REFUSED: candidate output already exists (write-once)')
             return 3
-        cache_dir = check_folder(args.cache_dir, 'cache_dir')
-        check_folder(args.out, 'out_path')
+        cache_dir = check_folder(cache_dir, 'cache_dir')
+        check_folder(out_path, 'out_path')
         folder = provider.run_dir()
         if folder is None:
             raise FrozenCandidatesError('REGCLAW_RUN_DIR required for call accounting')
         folder = check_folder(folder, 'run_dir')
         completion = folder / CANDIDATE_RUN_NAME
-        receipt_path = provider.ROOT / CANDIDATE_RECEIPT_REL
+        receipt_path = root / CANDIDATE_RECEIPT_REL
         if completion.exists() or completion.is_symlink() or receipt_path.exists() or receipt_path.is_symlink():
             print('REFUSED: candidate completion manifest already exists (write-once)')
             return 3
+        # G-02 + G-10: stub/provider/tracing checks, then the code lock.
+        live.check_live_environment(env)
+        lock_sha = live.verify_code_lock(root, locked_files)
         ruleset.check_ruleset()
-        profiles_sha = verify_dev_profiles(provider.ROOT, args.profiles)
-        provenance_files = candidate_provenance(provider.ROOT)
+        profiles_sha = verify_dev_profiles(root, profiles_path)
+        provenance_files = candidate_provenance(root)
         if (folder / 'STOPPED.json').exists():
             raise FrozenCandidatesError('candidate folder stopped')
         ledger_path = folder / CALL_LEDGER_NAME
         ledger_start = ledger_total(ledger_path)
+        # G-01: the global ledger must cover this folder's earlier charges.
+        global_path = live.checked_path(root, GLOBAL_LEDGER_REL)
+        if ledger_total(global_path) < ledger_start:
+            raise CandidateInput('global_ledger_short')
         cache_paths = [cache_dir / name for name in (CYPHER_CACHE_NAME, EMBEDDING_CACHE_NAME)]
-        destinations = [Path(args.out).resolve(), Path(args.manifest).resolve()]
-        reserved = {Path(args.profiles).resolve(), ledger_path, completion, receipt_path, *cache_paths}
+        destinations = [out_path, manifest_path]
+        reserved = {profiles_path, ledger_path, global_path, completion, receipt_path, *cache_paths}
         if len(set(destinations)) != len(destinations) or any(p in reserved for p in destinations):
             raise FrozenCandidatesError('output paths overlap an input, cache or ledger')
         data = load_data() if data is None else data
-        split, profiles, _ = load_eval_files(args.profiles, data=data)
+        split, profiles, _ = load_eval_files(profiles_path, data=data)
         if split != 'dev':
             raise FrozenCandidatesError('dev profiles required')
         before = [cache_row_count(path) for path in cache_paths]
     except ruleset.RulesetChanged:
         print('ruleset_mismatch count=1')
         return 2
-    except CandidateInput as exc:
+    except (CandidateInput, live.LiveCheck) as exc:
         print(f'{exc} count=1')
         return 2
     except Exception as exc:
@@ -406,7 +454,7 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
     def factory(*, cache_file):
         retriever = (retriever_factory or _live_retriever_factory)(cache_file=cache_file)
         made.append(retriever)
-        counters.append(RetrievalRequests(retriever, ledger_path))
+        counters.append(RetrievalRequests(retriever, ledger_path, global_path))
         return retriever
 
     error = None
@@ -418,14 +466,22 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
         logging.disable(logging.CRITICAL)
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             try:
-                manifest = build_candidates(profiles, cache_dir=cache_dir, out_path=args.out,
-                                            manifest_path=args.manifest, retriever_factory=factory, now=now)
-                manifest_sha = normalised_sha(Path(args.manifest).read_bytes())
+                manifest = build_candidates(profiles, cache_dir=cache_dir, out_path=out_path,
+                                            manifest_path=manifest_path, retriever_factory=factory, now=now)
+                manifest_sha = normalised_sha(manifest_path.read_bytes())
             finally:
                 try:
-                    request_counts = [counter.counts() for counter in counters]
-                    calls = sum(sum(pair) for pair in request_counts)
-                    append_call_ledger(ledger_path, step='candidates', calls=calls, now=now)
+                    counting_failed = False
+                    try:
+                        request_counts = [counter.counts() for counter in counters]
+                        calls = sum(sum(pair) for pair in request_counts)
+                    except Exception:
+                        # G-08: charge the reserved maximum for every started query, then refuse.
+                        request_counts, counting_failed = None, True
+                        calls = sum(counter.started * counter.query_reserve for counter in counters)
+                    charge(global_path, ledger_path, step='candidates', calls=calls, now=now)
+                    if counting_failed:
+                        raise FrozenCandidatesError('request counting failed; reserved maximum charged')
                     counts = [cache_row_count(path) - n for path, n in zip(cache_paths, before)]
                     if any(n < 0 for n in counts):
                         raise FrozenCandidatesError('retrieval cache row count decreased')
@@ -434,9 +490,10 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None):
                         close = getattr(retriever, 'close', None)
                         if close is not None:
                             close()
-            receipt = write_candidate_run_manifest(root=provider.ROOT, run_dir=folder,
-                candidates_path=args.out, manifest_path=args.manifest, ledger_start=ledger_start, calls=calls,
-                profiles_sha256_lf=profiles_sha, provenance_files=provenance_files)
+            receipt = write_candidate_run_manifest(root=root, run_dir=folder,
+                candidates_path=out_path, manifest_path=manifest_path, ledger_start=ledger_start, calls=calls,
+                profiles_sha256_lf=profiles_sha, provenance_files=provenance_files,
+                code_lock_sha256_lf=lock_sha)
     except Exception as exc:
         error = type(exc).__name__
     finally:

@@ -24,6 +24,8 @@ M, N, R = 'mandatory', 'not_applicable', 'recommended'
 PARTS = [f'ISO 10993-{i}' for i in range(1, 21)]
 STAMP = '2026-11-19T00:00:00+00:00'
 CHECK_RULESET = E.ruleset.check_ruleset
+# Captured before the fixture neutralises them for fake merge files (G-09).
+APPROVED_MERGE_SHA = (E.MERGE_SHA_PREFIX, E.MERGE_SHA_SUFFIX)
 
 
 @pytest.fixture
@@ -39,6 +41,9 @@ def fake_only(monkeypatch, tmp_path):
     monkeypatch.setenv('LANGFUSE_ENABLED', 'false')
     _netguard.block_network(monkeypatch, 'dev export network forbidden')
     monkeypatch.setattr(E.ruleset, 'check_ruleset', lambda: None)
+    # Fake merge files cannot carry the A2 sha; G-09 tests set real or wrong values explicitly.
+    monkeypatch.setattr(E, 'MERGE_SHA_PREFIX', '')
+    monkeypatch.setattr(E, 'MERGE_SHA_SUFFIX', '')
     repo = Path(__file__).resolve().parents[1]
     attempts = []
 
@@ -206,6 +211,42 @@ def go(root):
     lines = []
     code = E.main(['run'], root=root, out=lines.append)
     return code, lines
+
+
+def test_merge_sha_constants_are_the_approved_a2_value():
+    assert APPROVED_MERGE_SHA == ('08616cf9', 'ad903')
+
+
+def test_merge_sha_mismatch_refuses_before_any_parse_or_write(tmp_path, monkeypatch):
+    root = tmp_path / 'world'
+    write_world(root)
+    monkeypatch.setattr(E, 'MERGE_SHA_PREFIX', APPROVED_MERGE_SHA[0])
+    monkeypatch.setattr(E, 'MERGE_SHA_SUFFIX', APPROVED_MERGE_SHA[1])
+    monkeypatch.setattr(E.JF, 'parse_eval', lambda *a, **k: pytest.fail('dev profiles parsed before merge sha check'))
+    monkeypatch.setattr(E.D, 'load_merge', lambda *a, **k: pytest.fail('merge loaded before merge sha check'))
+    code, lines = go(root)
+    assert (code, lines) == (1, ['merge_sha count=1'])
+    assert exported(root) == []
+
+
+@pytest.mark.parametrize('part', ['prefix', 'suffix'])
+def test_merge_sha_needs_both_prefix_and_suffix(tmp_path, monkeypatch, part):
+    root = tmp_path / 'world'
+    write_world(root)
+    sha = normalised_sha((root / E.D.MERGE_REL).read_bytes())
+    monkeypatch.setattr(E, 'MERGE_SHA_PREFIX', sha[:8] if part == 'suffix' else ('0' if sha[0] != '0' else '1') * 8)
+    monkeypatch.setattr(E, 'MERGE_SHA_SUFFIX', sha[-5:] if part == 'prefix' else ('0' if sha[-1] != '0' else '1') * 5)
+    assert go(root) == (1, ['merge_sha count=1']) and exported(root) == []
+
+
+def test_merge_sha_matching_prefix_and_suffix_is_accepted(tmp_path, monkeypatch):
+    root = tmp_path / 'world'
+    write_world(root)
+    sha = normalised_sha((root / E.D.MERGE_REL).read_bytes())
+    monkeypatch.setattr(E, 'MERGE_SHA_PREFIX', sha[:8])
+    monkeypatch.setattr(E, 'MERGE_SHA_SUFFIX', sha[-5:])
+    code, _ = go(root)
+    assert code == 0 and len(exported(root)) == len(E.OUTPUTS)
 
 
 def test_export_matches_ten_dev_and_twenty_unmatched(tmp_path):

@@ -31,7 +31,8 @@ def offline(monkeypatch, tmp_path_factory):
     monkeypatch.setenv('LLM_PROVIDER', 'azure_openai')
     monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/live-fake')
     monkeypatch.setenv('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', '64000')
-    monkeypatch.setenv('AZURE_OPENAI_S10_TIMEOUT_S', '600')
+    # G-03: the pilot runs at 64000 tokens and 1200 s; main_run_dir() switches to the pilot T.
+    monkeypatch.setenv('AZURE_OPENAI_S10_TIMEOUT_S', '1200')
     monkeypatch.setenv('LANGFUSE_ENABLED', 'false')
     _netguard.block_network(monkeypatch, 'live tests forbid network')
 
@@ -115,7 +116,9 @@ class FakeClient:
 
     def __init__(self, setting, world, *, error=False, sent=1, finish='stop'):
         self.effort, self.world = setting.effort, world
-        self.cap, self.timeout = 64000, 600.0
+        # Same values the adapter reads from the environment for role S10.
+        self.cap = int(os.environ['AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS'])
+        self.timeout = float(os.environ['AZURE_OPENAI_S10_TIMEOUT_S'])
         self.last_http_log = []
         self.error, self.sent, self.finish = error, sent, finish
 
@@ -127,13 +130,29 @@ class FakeClient:
             raise RuntimeError('PRIVATE fake error')
         provenance = dict(provider=self.provider, reasoning_effort=self.effort, max_completion_tokens=self.cap,
                           finish_reason=self.finish, latency_s=100.0, http_attempts=self.sent,
-                          attempts=[dict(max_completion_tokens=self.cap, timeout_s=self.timeout,
+                          attempts=[dict(max_completion_tokens=self.cap, timeout_s=self.timeout, latency_s=100.0,
                                          finish_reason=self.finish, usage=dict(output_tokens=100, input_tokens=20))])
         return LLMResponse(dict(standards=[], notes=[]), model=self.model, provenance=provenance,
                            finish_reason=self.finish)
 
 
-def world(tmp_path_factory, monkeypatch, *, split='dev', lock_kind=None, sidecars='normal', candidate_calls=0):
+def global_ledger(obj_or_root):
+    # A Path has its own `.root` attribute (the drive anchor), so a Path must not go through getattr.
+    root = obj_or_root if isinstance(obj_or_root, Path) else obj_or_root.root
+    return Path(root) / FC.GLOBAL_LEDGER_REL
+
+
+def charge(obj, folder, step, calls):
+    """Charge an earlier request to the global ledger and one folder ledger (G-01)."""
+    FC.charge(global_ledger(obj), folder / FC.CALL_LEDGER_NAME, step=step, calls=calls, now=STAMP)
+
+
+def rows(path):
+    return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+
+
+def world(tmp_path_factory, monkeypatch, *, split='dev', lock_kind=None, sidecars='normal', candidate_calls=0,
+          candidate_lock=None, candidates_via_cli=False):
     root = tmp_path_factory.mktemp('liveworld')
     assert 's8' not in str(root).casefold(), "liveworld root contains 's8'; choose a --basetemp without 's8'"
     data = fake_data()
@@ -155,13 +174,7 @@ def world(tmp_path_factory, monkeypatch, *, split='dev', lock_kind=None, sidecar
         return NS(cypher_cache=NS(path=Path(cache_file)), query_embeddings=NS(cache=NS(
             path=Path(cache_file).with_name(FC.EMBEDDING_CACHE_NAME))), retrieve=lambda *a, **kw: ([], None))
 
-    FC.build_candidates(profiles, cache_dir=root / 'cache', out_path=candidates,
-                        manifest_path=candidate_manifest, retriever_factory=retriever_factory, now=STAMP)
-    candidate_folder = root / 'data/runs/candidates-fake'
-    FC.append_call_ledger(candidate_folder / FC.CALL_LEDGER_NAME, step='candidates', calls=candidate_calls, now=STAMP)
-    FC.write_candidate_run_manifest(root=root, run_dir=candidate_folder, candidates_path=candidates,
-        manifest_path=candidate_manifest, ledger_start=0, calls=candidate_calls,
-        profiles_sha256_lf=normalised_sha(p.read_bytes()), provenance_files=FC.candidate_provenance(root))
+    # The lock comes first: candidates record the lock sha they were built under (G-02).
     code = put(root / FAKE_LOCKED[0], 'FAKE source for hash validation\n')
     lock = dict(format=L.LOCK_FORMAT, files={FAKE_LOCKED[0]: dict(sha256_lf=normalised_sha(code.read_bytes()))})
     if lock_kind == 'format':
@@ -170,8 +183,27 @@ def world(tmp_path_factory, monkeypatch, *, split='dev', lock_kind=None, sidecar
         lock['files'] = {}
     elif lock_kind == 'sha':
         lock['files'][FAKE_LOCKED[0]]['sha256_lf'] = '0' * 64
+    lock_sha = 'c' * 64
     if lock_kind != 'missing':
-        put(root / L.LOCK_REL, dumps(lock))
+        lock_sha = normalised_sha(put(root / L.LOCK_REL, dumps(lock)).read_bytes())
+    candidate_folder = root / 'data/runs/candidates-fake'
+    if candidates_via_cli:
+        # The real candidate CLI charges the global ledger itself (resolved from provider.ROOT).
+        monkeypatch.setattr(provider, 'ROOT', root)
+        monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/candidates-fake')
+        assert fc_main(['build', '--profiles', str(p), '--cache-dir', str(root / 'cache'), '--out', str(candidates),
+                        '--manifest', str(candidate_manifest)], data=data, retriever_factory=CounterRetriever,
+                       now=STAMP) == 0
+        monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/live-fake')
+    else:
+        FC.build_candidates(profiles, cache_dir=root / 'cache', out_path=candidates,
+                            manifest_path=candidate_manifest, retriever_factory=retriever_factory, now=STAMP)
+        FC.charge(root / FC.GLOBAL_LEDGER_REL, candidate_folder / FC.CALL_LEDGER_NAME, step='candidates',
+                  calls=candidate_calls, now=STAMP)
+        FC.write_candidate_run_manifest(root=root, run_dir=candidate_folder, candidates_path=candidates,
+            manifest_path=candidate_manifest, ledger_start=0, calls=candidate_calls,
+            profiles_sha256_lf=normalised_sha(p.read_bytes()), provenance_files=FC.candidate_provenance(root),
+            code_lock_sha256_lf=candidate_lock or lock_sha)
     monkeypatch.setattr(provider, 'ROOT', root)
     obj = NS(root=root, data=data, p=p, g=g, t=t, c=candidates, cm=candidate_manifest,
              candidate_run=candidate_folder / FC.CANDIDATE_RUN_NAME,
@@ -217,6 +249,8 @@ def invoke(obj, phase='pilot', *, out_name=None, **overrides):
 
 def main_run_dir(monkeypatch):
     monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/main-fake')
+    # Pilot T = max(600, 3 x 100 s attempt latency at 64k) = 600 (G-04); main must match it.
+    monkeypatch.setenv('AZURE_OPENAI_S10_TIMEOUT_S', '600')
     return provider.run_dir()
 
 
@@ -265,7 +299,9 @@ def test_main_owns_runner_order_and_scores_only_when_complete(tmp_path_factory, 
     assert summary['note'] == L.SUMMARY_NOTE and summary['label'] == 'provisional (GPT)'
     manifest = json.loads((obj.root / 'main/run_manifest.json').read_bytes())
     assert manifest['counts']['sidecars'] == 100 and manifest['counts']['ledger_total'] == 100
-    assert manifest['counts']['call_totals'] == dict(candidates=0, pilot=4, current_ledger=100, total=104)
+    assert manifest['counts']['call_totals'] == dict(candidates=0, pilot=4, current_ledger=100, total=104,
+                                                     global_start=4, global_end=104)
+    assert FC.ledger_total(global_ledger(obj)) == 104
     assert manifest['outputs']['summary.json']['sha256_lf'] == normalised_sha((obj.root / 'main/summary.json').read_bytes())
     assert main_folder != pilot_folder
     assert len(list((main_folder / 's10').glob('*.json'))) == 100
@@ -275,22 +311,26 @@ def test_main_owns_runner_order_and_scores_only_when_complete(tmp_path_factory, 
 def test_verified_step_totals_are_printed_and_not_double_counted(tmp_path_factory, monkeypatch):
     obj = world(tmp_path_factory, monkeypatch, candidate_calls=7)
     pilot_ledger = provider.run_dir() / FC.CALL_LEDGER_NAME
-    FC.append_call_ledger(pilot_ledger, step='pilot', calls=3, now=STAMP)
+    charge(obj, provider.run_dir(), 'pilot', 3)
     code, lines = invoke(obj)
     assert code == 0
-    assert lines[0] == 'candidates_calls=7 pilot_calls=0 current_ledger_calls=3 total_calls=10'
+    assert lines[0] == 'candidates_calls=7 pilot_calls=0 current_ledger_calls=3 global_calls=10'
     pilot = json.loads((obj.root / 'pilot/run_manifest.json').read_bytes())
     assert pilot['counts']['ledger_total'] == 7
     assert pilot['counts']['call_totals']['total'] == 14
-    main_ledger = main_run_dir(monkeypatch) / FC.CALL_LEDGER_NAME
-    FC.append_call_ledger(main_ledger, step='main', calls=5, now=STAMP)
+    assert pilot['counts']['call_totals']['global_start'] == 10 and pilot['counts']['call_totals']['global_end'] == 14
+    main_folder = main_run_dir(monkeypatch)
+    main_ledger = main_folder / FC.CALL_LEDGER_NAME
+    charge(obj, main_folder, 'main', 5)
     code, lines = invoke(obj, 'main')
     assert code == 0
-    assert lines[0] == 'candidates_calls=7 pilot_calls=7 current_ledger_calls=5 total_calls=19'
+    assert lines[0] == 'candidates_calls=7 pilot_calls=7 current_ledger_calls=5 global_calls=19'
     main = json.loads((obj.root / 'main/run_manifest.json').read_bytes())
     assert main['counts']['ledger_total'] == 105
-    assert main['counts']['call_totals'] == dict(candidates=7, pilot=7, current_ledger=105, total=119)
+    assert main['counts']['call_totals'] == dict(candidates=7, pilot=7, current_ledger=105, total=119,
+                                                 global_start=19, global_end=119)
     assert FC.ledger_total(pilot_ledger) == 7 and FC.ledger_total(main_ledger) == 105
+    assert FC.ledger_total(global_ledger(obj)) == 119
 
 
 @pytest.mark.parametrize('phase,earlier', [('pilot', 'candidates'), ('main', 'candidates'), ('main', 'pilot')])
@@ -330,18 +370,26 @@ def test_earlier_manifest_refusals_write_nothing(tmp_path_factory, monkeypatch, 
     assert snapshot_tree(obj.root) == before and not (obj.root / phase).exists()
 
 
-@pytest.mark.parametrize('phase,own_calls', [('pilot', 31), ('main', 27)])
-def test_starting_total_over_cap_refuses_before_calls_or_writes(tmp_path_factory, monkeypatch, phase, own_calls):
-    obj = world(tmp_path_factory, monkeypatch, candidate_calls=120)
+@pytest.mark.parametrize('phase,global_calls,refused', [('pilot', 140, False), ('pilot', 141, True),
+                                                       ('main', 44, False), ('main', 45, True)])
+def test_phase_headroom_uses_global_total(tmp_path_factory, monkeypatch, phase, global_calls, refused):
+    # G-07: pilot needs global + 4 + 6 <= 150; main needs global + 100 + 6 <= 150.
+    obj = world(tmp_path_factory, monkeypatch)
     if phase == 'main':
         assert invoke(obj)[0] == 0
         main_run_dir(monkeypatch)
-    FC.append_call_ledger(provider.run_dir() / FC.CALL_LEDGER_NAME, step=phase, calls=own_calls, now=STAMP)
+    # Calls of an earlier stopped attempt in another folder exist only in the global ledger.
+    FC.append_call_ledger(global_ledger(obj), step=phase, calls=global_calls - FC.ledger_total(global_ledger(obj)),
+                          now=STAMP)
     before, calls = snapshot_tree(obj.root), len(obj.calls)
     code, lines = invoke(obj, phase)
-    assert code == 2 and lines[-1] == 'call_cap count=1' and lines[0].endswith('total_calls=151')
-    assert len(obj.calls) == calls and snapshot_tree(obj.root) == before
-    assert not (obj.root / phase).exists()
+    assert lines[0].endswith(f'global_calls={global_calls}')
+    if refused:
+        assert code == 2 and lines[-1] == 'call_cap count=1'
+        assert len(obj.calls) == calls and snapshot_tree(obj.root) == before
+        assert not (obj.root / phase).exists()
+    else:
+        assert code == 0 and len(obj.calls) == calls + (4 if phase == 'pilot' else 100)
 
 
 @pytest.mark.parametrize('failure', ['ledger', 'stopped'])
@@ -511,51 +559,62 @@ def test_runs_exclusive_open_survives_creation_race(tmp_path_factory, monkeypatc
     assert not (obj.root / 'pilot/run_manifest.json').exists()
 
 
-@pytest.mark.parametrize('boundary,requests,records', [(145, 1, 0), (144, 6, 1)])
-def test_call_cap_reserves_six(tmp_path_factory, monkeypatch, boundary, requests, records):
+@pytest.mark.parametrize('start,requests,records', [(140, 6, 1), (138, 6, 2)])
+def test_call_cap_reserves_six_on_global_total(tmp_path_factory, monkeypatch, start, requests, records):
+    # Per run: global_start + calls + 6 <= 150 (G-01). 140: 146 then 152 > 150; 138: 144, 150, then 156.
     obj = world(tmp_path_factory, monkeypatch)
     ledger = provider.run_dir() / FC.CALL_LEDGER_NAME
-    FC.append_call_ledger(ledger, step='candidates', calls=boundary, now=STAMP)
+    FC.append_call_ledger(global_ledger(obj), step='candidates', calls=start, now=STAMP)
     code, lines = invoke(obj, client_factory=lambda setting: FakeClient(setting, obj, sent=requests))
     assert code == 4 and lines[-1] == 'call_cap count=1' and len(obj.calls) == records
     stopped = json.loads((obj.root / 'pilot/STOPPED.json').read_bytes())
     assert stopped['counts']['records'] == records
-    assert FC.ledger_total(ledger) == boundary + records * requests
+    assert stopped['counts']['call_totals']['global_start'] == start
+    assert stopped['counts']['call_totals']['global_end'] == start + records * requests
+    assert FC.ledger_total(ledger) == records * requests
+    assert FC.ledger_total(global_ledger(obj)) == start + records * requests
     assert obj.summaries == [] and not (obj.root / 'pilot/run_manifest.json').exists()
 
 
 def test_main_cap_stop_never_calls_summary(tmp_path_factory, monkeypatch):
-    obj = world(tmp_path_factory, monkeypatch)
+    # Global 44 after the pilot; main runs of 6 requests stop once 44 + calls + 6 > 150 (after 17 runs).
+    obj = world(tmp_path_factory, monkeypatch, candidate_calls=40)
     assert invoke(obj)[0] == 0
     main_run_dir(monkeypatch)
     ledger = provider.run_dir() / FC.CALL_LEDGER_NAME
-    FC.append_call_ledger(ledger, step='main', calls=141, now=STAMP)
-    code, lines = invoke(obj, 'main')
+    code, lines = invoke(obj, 'main', client_factory=lambda setting: FakeClient(setting, obj, sent=6))
     assert code == 4 and lines[-1] == 'call_cap count=1'
-    assert len(obj.calls) == 4 and obj.summaries == [] and FC.ledger_total(ledger) == 141
+    assert len(obj.calls) == 4 + 17 and obj.summaries == [] and FC.ledger_total(ledger) == 102
+    assert FC.ledger_total(global_ledger(obj)) == 146
     assert (obj.root / 'main/STOPPED.json').exists() and not (obj.root / 'main/summary.json').exists()
+    assert (provider.run_dir() / 'STOPPED.json').exists()
 
 
 def test_reservation_uses_candidate_total_through_global_boundary(tmp_path_factory, monkeypatch):
-    obj = world(tmp_path_factory, monkeypatch, candidate_calls=140)
+    # 136 candidate calls: 142, 148, then 136 + 12 + 6 > 150.
+    obj = world(tmp_path_factory, monkeypatch, candidate_calls=136)
     ledger = provider.run_dir() / FC.CALL_LEDGER_NAME
-    FC.append_call_ledger(ledger, step='pilot', calls=4, now=STAMP)
     code, lines = invoke(obj, client_factory=lambda setting: FakeClient(setting, obj, sent=6))
-    assert code == 4 and lines[-1] == 'call_cap count=1' and len(obj.calls) == 1
-    assert FC.ledger_total(ledger) == 10
+    assert code == 4 and lines[-1] == 'call_cap count=1' and len(obj.calls) == 2
+    assert FC.ledger_total(ledger) == 12
     stopped = json.loads((obj.root / 'pilot/STOPPED.json').read_bytes())
-    assert stopped['counts']['call_totals']['total'] == 150
+    totals = stopped['counts']['call_totals']
+    assert totals['total'] == 148 and totals['global_start'] == 136 and totals['global_end'] == 148
     assert not (obj.root / 'pilot/run_manifest.json').exists()
 
 
-def test_ledger_avoids_double_counting(tmp_path_factory, monkeypatch):
+def test_ledger_avoids_double_counting_and_charges_both_ledgers(tmp_path_factory, monkeypatch):
     obj = world(tmp_path_factory, monkeypatch)
     ledger = provider.run_dir() / FC.CALL_LEDGER_NAME
-    FC.append_call_ledger(ledger, step='candidates', calls=20, now=STAMP)
+    charge(obj, provider.run_dir(), 'candidates', 20)
     assert invoke(obj)[0] == 0 and FC.ledger_total(ledger) == 24
-    rows = [json.loads(line) for line in ledger.read_text(encoding='utf-8').splitlines()]
-    assert [r['calls'] for r in rows] == [20, 1, 1, 1, 1]
-    assert all(set(row) == {'step', 'calls', 'timestamp'} for row in rows)
+    folder_rows = rows(ledger)
+    assert [r['calls'] for r in folder_rows] == [20, 1, 1, 1, 1]
+    assert all(set(row) == {'step', 'calls', 'timestamp'} for row in folder_rows)
+    # Global = world's zero-call candidate row, then the same rows as the folder (G-01).
+    global_rows = rows(global_ledger(obj))
+    assert global_rows[1:] == folder_rows and global_rows[0]['calls'] == 0
+    assert FC.ledger_total(global_ledger(obj)) == 24
 
 
 def test_three_consecutive_errors_stop_and_charge(tmp_path_factory, monkeypatch):
@@ -657,17 +716,54 @@ def test_main_sidecar_failure_never_calls_summary(tmp_path_factory, monkeypatch)
 @pytest.mark.parametrize('value,expected', [(31999, 64000), (32000, 64000), (40000, 80000), (100000, 128000)])
 @pytest.mark.parametrize('latency,timeout', [(100, 600), (300, 900)])
 def test_pilot_settings_cap_and_timeout(value, expected, latency, timeout):
+    # G-04: T uses only attempts sent at the 64k pilot cap; the slower 2x re-run and the
+    # whole-call latency (re-run + back-off) are excluded.
     records = []
     for arm in ('medium', 'high', 'medium', 'high'):
         records.append(dict(setting=arm, effort_effective=arm, llm_provenance=dict(reasoning_effort=arm,
-            max_completion_tokens=64000, finish_reason='stop', latency_s=latency,
-            attempts=[dict(max_completion_tokens=64000, timeout_s=600, finish_reason='length',
+            max_completion_tokens=128000, finish_reason='stop', latency_s=99999.0,
+            attempts=[dict(max_completion_tokens=64000, timeout_s=1200, finish_reason='length', latency_s=latency,
                            usage=dict(output_tokens=value)),
-                      dict(max_completion_tokens=128000, timeout_s=1200, finish_reason='stop',
-                           usage=dict(output_tokens=1))])))
+                      dict(max_completion_tokens=128000, timeout_s=2400, finish_reason='stop',
+                           latency_s=10 * latency + 1, usage=dict(output_tokens=1))])))
     settings = L.pilot_settings(records)
     assert settings['max_output_tokens'] == value and settings['cap'] == expected
     assert settings['max_latency_s'] == latency and settings['timeout_s'] == timeout
+
+
+def pilot_records(**attempt_overrides):
+    records = []
+    for arm in ('medium', 'high', 'medium', 'high'):
+        attempt = dict(max_completion_tokens=64000, timeout_s=1200, finish_reason='stop', latency_s=100.0,
+                       usage=dict(output_tokens=10))
+        attempt.update(attempt_overrides)
+        attempt = {k: v for k, v in attempt.items() if v is not None}
+        records.append(dict(setting=arm, effort_effective=arm, llm_provenance=dict(
+            reasoning_effort=arm, max_completion_tokens=64000, finish_reason='stop', latency_s=100.0,
+            attempts=[attempt])))
+    return records
+
+
+@pytest.mark.parametrize('overrides', [dict(latency_s=None), dict(latency_s=float('nan')), dict(latency_s=-1.0),
+                                       dict(max_completion_tokens=65000)])
+def test_pilot_gate_needs_attempt_latency_at_the_pilot_cap(overrides):
+    assert L.pilot_settings(pilot_records())['timeout_s'] == 600
+    with pytest.raises(L.PilotGate, match='pilot_gate_failed'):
+        L.pilot_settings(pilot_records(**overrides))
+
+
+@pytest.mark.parametrize('key,value', [('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', '65000'),
+                                     ('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', '32000'),
+                                     ('AZURE_OPENAI_S10_TIMEOUT_S', '600'),
+                                     ('AZURE_OPENAI_S10_TIMEOUT_S', '1200.5')])
+def test_pilot_refuses_other_cap_or_timeout(tmp_path_factory, monkeypatch, key, value):
+    # G-03: pilot only at 64000 tokens and 1200 s.
+    obj = world(tmp_path_factory, monkeypatch)
+    monkeypatch.setenv(key, value)
+    before = snapshot_tree(obj.root)
+    code, lines = invoke(obj)
+    assert (code, lines) == (2, ['pilot_request_settings count=1'])
+    assert obj.calls == [] and obj.clients == [] and snapshot_tree(obj.root) == before
 
 
 def test_pilot_gate_failure_is_unscored(tmp_path_factory, monkeypatch):
@@ -727,9 +823,19 @@ def candidate_case(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(provider, 'ROOT', root)
     p = put(root / 'P.yaml', yaml.safe_dump(dict(format=F.PROFILES_FORMAT, split='dev', profiles=[profile(0)])))
     candidate_inputs(root, p, monkeypatch)
+    code = put(root / FAKE_LOCKED[0], 'FAKE source for hash validation\n')
+    put(root / L.LOCK_REL, dumps(dict(format=L.LOCK_FORMAT, files={
+        FAKE_LOCKED[0]: dict(sha256_lf=normalised_sha(code.read_bytes()))})))
     args = ['build', '--profiles', str(p), '--cache-dir', str(root / 'cache'),
             '--out', str(root / 'C.json'), '--manifest', str(root / 'M.json')]
     return root, args, root / 'data/runs/live-fake' / FC.CALL_LEDGER_NAME
+
+
+def fc_main(args, **kwargs):
+    """Candidate CLI with a synthetic live environment and the fake lock (G-02)."""
+    kwargs.setdefault('env', {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai'})
+    kwargs.setdefault('locked_files', FAKE_LOCKED)
+    return FC.main(args, **kwargs)
 
 
 class CounterRetriever:
@@ -767,7 +873,7 @@ def test_retrieval_charges_requests_not_rows(tmp_path_factory, monkeypatch, caps
     def factory(**kwargs):
         made.append(CounterRetriever(**kwargs, counter_only=counter_only))
         return made[-1]
-    assert FC.main(args, data=fake_data(), retriever_factory=factory, now=STAMP) == 0
+    assert fc_main(args, data=fake_data(), retriever_factory=factory, now=STAMP) == 0
     assert FC.ledger_total(ledger) == 6 and made[0].closed
     text = capsys.readouterr().out
     assert 'cypher_rows=0 embedding_rows=0' in text
@@ -778,11 +884,18 @@ def test_retrieval_charges_requests_not_rows(tmp_path_factory, monkeypatch, caps
     assert manifest['counts']['ledger_total'] == 6
     assert receipt['shas']['run_manifest_sha256_lf'] == normalised_sha(raw)
     assert manifest['ledger_sha256_lf'] == receipt['shas']['ledger_sha256_lf'] == normalised_sha(ledger.read_bytes())
+    lock_sha = normalised_sha((root / L.LOCK_REL).read_bytes())
+    assert manifest['code_lock_sha256_lf'] == receipt['shas']['code_lock_sha256_lf'] == lock_sha
+    # The global ledger lives under the fake repo root, never at the drive root.
+    path = global_ledger(root)
+    assert path == root / 'data/runs/s10c_global_call_ledger.jsonl'
+    assert path.is_file() and path.resolve().is_relative_to(root.resolve())
+    assert manifest['global_ledger_total'] == FC.ledger_total(path) == 6
 
 
 def test_failed_embedding_requests_charged_without_cache_rows(tmp_path_factory, monkeypatch, capsys):
     root, args, ledger = candidate_case(tmp_path_factory, monkeypatch)
-    assert FC.main(args, data=fake_data(), retriever_factory=lambda **kw: CounterRetriever(
+    assert fc_main(args, data=fake_data(), retriever_factory=lambda **kw: CounterRetriever(
         **kw, cypher=0, embeddings=5, fail=True), now=STAMP) == 2
     assert FC.ledger_total(ledger) == 5
     assert 'embedding_rows=0' in capsys.readouterr().out
@@ -792,24 +905,24 @@ def test_failed_embedding_requests_charged_without_cache_rows(tmp_path_factory, 
 
 def test_candidate_completion_receipts_are_write_once(tmp_path_factory, monkeypatch):
     root, args, ledger = candidate_case(tmp_path_factory, monkeypatch)
-    assert FC.main(args, data=fake_data(), retriever_factory=CounterRetriever, now=STAMP) == 0
+    assert fc_main(args, data=fake_data(), retriever_factory=CounterRetriever, now=STAMP) == 0
     before = snapshot_tree(root)
     args[args.index('--out') + 1] = str(root / 'second-C.json')
     args[args.index('--manifest') + 1] = str(root / 'second-M.json')
     def forbidden_factory(**kwargs):
         pytest.fail('existing completion must refuse before constructing a retriever')
-    assert FC.main(args, data=fake_data(), retriever_factory=forbidden_factory, now=STAMP) == 3
+    assert fc_main(args, data=fake_data(), retriever_factory=forbidden_factory, now=STAMP) == 3
     assert snapshot_tree(root) == before and FC.ledger_total(ledger) == 6
 
 
 def test_retrieval_cap_refuses_before_requests(tmp_path_factory, monkeypatch):
     root, args, ledger = candidate_case(tmp_path_factory, monkeypatch)
-    FC.append_call_ledger(ledger, step='pilot', calls=145, now=STAMP)
+    FC.charge(global_ledger(root), ledger, step='pilot', calls=145, now=STAMP)
     made = []
     def factory(**kwargs):
         made.append(CounterRetriever(**kwargs))
         return made[-1]
-    assert FC.main(args, data=fake_data(), retriever_factory=factory, now=STAMP) == 2
+    assert fc_main(args, data=fake_data(), retriever_factory=factory, now=STAMP) == 2
     assert made[0].query_embeddings.embedder.api_requests == 0 and FC.ledger_total(ledger) == 145
     assert not (root / 'C.json').exists()
 
@@ -906,6 +1019,122 @@ def test_main_accepts_reordered_rebuilt_tags_and_crlf_inputs(tmp_path_factory, m
     doc['tags'].reverse()
     obj.t.write_text(json.dumps(doc, separators=(',', ':')), encoding='utf-8')
     assert invoke(obj, 'main')[0] == 0
+
+
+def test_candidate_cli_and_live_resolve_the_same_global_ledger(tmp_path_factory, monkeypatch):
+    # FC.main resolves the global ledger from provider.ROOT; live.preflight from its root argument.
+    # For the same repo root both must be ONE file: the pilot sees the candidates' charges.
+    obj = world(tmp_path_factory, monkeypatch, candidates_via_cli=True)
+    path = obj.root / 'data/runs/s10c_global_call_ledger.jsonl'
+    candidate_doc = json.loads(obj.candidate_run.read_bytes())
+    # 10 distinct queries x (1 Text2Cypher + 5 embedding requests) = 60, charged by the CLI.
+    assert candidate_doc['counts']['ledger_total'] == candidate_doc['global_ledger_total'] == 60
+    assert path.is_file() and FC.ledger_total(path) == 60
+    assert candidate_doc['code_lock_sha256_lf'] == normalised_sha((obj.root / L.LOCK_REL).read_bytes())
+    code, lines = invoke(obj)
+    assert code == 0
+    assert lines[0] == 'candidates_calls=60 pilot_calls=0 current_ledger_calls=0 global_calls=60'
+    totals = json.loads((obj.root / 'pilot/run_manifest.json').read_bytes())['counts']['call_totals']
+    assert totals['global_start'] == 60 and totals['global_end'] == 64
+    assert FC.ledger_total(path) == 64
+    assert [row['step'] for row in rows(path)] == ['candidates'] + ['pilot'] * 4
+    assert not list(obj.root.glob('**/s10c_global_call_ledger.jsonl'))[1:]   # exactly one global ledger file
+
+
+def test_restart_in_new_run_dir_keeps_stopped_attempt_calls(tmp_path_factory, monkeypatch):
+    # G-01: a stopped pilot's 3 calls stay in the global total after a restart elsewhere.
+    obj = world(tmp_path_factory, monkeypatch)
+    code, _ = invoke(obj, client_factory=lambda setting: FakeClient(setting, obj, error=True))
+    assert code == 4 and FC.ledger_total(global_ledger(obj)) == 3
+    monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/live-fake-restart')
+    code, lines = invoke(obj, out_name='pilot-restart')
+    assert code == 0
+    assert lines[0] == 'candidates_calls=0 pilot_calls=0 current_ledger_calls=0 global_calls=3'
+    manifest = json.loads((obj.root / 'pilot-restart/run_manifest.json').read_bytes())
+    assert manifest['counts']['call_totals']['global_start'] == 3
+    assert manifest['counts']['call_totals']['global_end'] == 7
+    assert FC.ledger_total(global_ledger(obj)) == 7
+
+
+def test_global_ledger_short_refuses_before_calls_or_writes(tmp_path_factory, monkeypatch):
+    # G-01: folder charges missing from the global ledger (missing or edited global ledger).
+    obj = world(tmp_path_factory, monkeypatch, candidate_calls=2)
+    FC.append_call_ledger(provider.run_dir() / FC.CALL_LEDGER_NAME, step='pilot', calls=3, now=STAMP)
+    before, clients = snapshot_tree(obj.root), len(obj.clients)
+    code, lines = invoke(obj)
+    assert code == 2 and lines[-1] == 'global_ledger_short count=1'
+    assert lines[0].endswith('current_ledger_calls=3 global_calls=2')
+    assert obj.calls == [] and len(obj.clients) == clients and snapshot_tree(obj.root) == before
+
+
+def test_global_ledger_changed_during_run_stops_before_next_call(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory, monkeypatch)
+    original = R.run_one
+    def foreign_charge(*args, **kwargs):
+        record = original(*args, **kwargs)
+        FC.append_call_ledger(global_ledger(obj), step='FAKE-other-process', calls=1, now=STAMP)
+        return record
+    monkeypatch.setattr(R, 'run_one', foreign_charge)
+    code, lines = invoke(obj)
+    assert code == 4 and lines[-1] == 'global_ledger_changed count=1' and len(obj.calls) == 1
+    assert not (obj.root / 'pilot/run_manifest.json').exists()
+
+
+@pytest.mark.parametrize('kind', ['mismatch', 'missing'])
+def test_candidate_code_lock_must_equal_live_lock(tmp_path_factory, monkeypatch, kind):
+    # G-02: candidates built under another lock (or none recorded) are refused.
+    obj = world(tmp_path_factory, monkeypatch, candidate_lock='0' * 64 if kind == 'mismatch' else None)
+    if kind == 'missing':
+        reanchor_candidates(obj, lambda doc: doc.pop('code_lock_sha256_lf'))
+    before, clients = snapshot_tree(obj.root), len(obj.clients)
+    code, lines = invoke(obj)
+    assert (code, lines) == (2, ['candidate_code_lock count=1'])
+    assert obj.calls == [] and len(obj.clients) == clients and snapshot_tree(obj.root) == before
+
+
+@pytest.mark.parametrize('value', ['true', '1', '', 'False', 'yes'])
+def test_langfuse_must_be_absent_or_false(tmp_path_factory, monkeypatch, value):
+    # G-10
+    obj = world(tmp_path_factory, monkeypatch)
+    env = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai', 'LANGFUSE_ENABLED': value}
+    assert invoke(obj, env=env) == (2, ['langfuse count=1'])
+    assert obj.calls == [] and not (obj.root / 'pilot').exists()
+
+
+def test_langfuse_false_is_accepted(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory, monkeypatch)
+    env = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai', 'LANGFUSE_ENABLED': 'false'}
+    assert invoke(obj, env=env)[0] == 0
+
+
+def test_stop_marker_in_out_dir_and_run_dir_then_run_dir_refused(tmp_path_factory, monkeypatch):
+    # G-11 + run_dir_stopped: same marker in both folders; the stopped run dir cannot be reused.
+    obj = world(tmp_path_factory, monkeypatch)
+    code, lines = invoke(obj, client_factory=lambda setting: FakeClient(setting, obj, error=True))
+    assert code == 4 and lines[-1] == 'consecutive_errors count=1'
+    out_marker = (obj.root / 'pilot/STOPPED.json').read_bytes()
+    run_marker = (provider.run_dir() / 'STOPPED.json').read_bytes()
+    assert out_marker == run_marker and json.loads(run_marker)['reason'] == 'consecutive_errors'
+    before, calls = snapshot_tree(obj.root), len(obj.calls)
+    assert invoke(obj, out_name='pilot-again') == (2, ['run_dir_stopped count=1'])
+    assert len(obj.calls) == calls and snapshot_tree(obj.root) == before
+
+
+def test_stop_before_output_folder_still_marks_run_dir(tmp_path_factory, monkeypatch):
+    # G-11: a stop raised before the output folder exists still marks the phase run dir.
+    obj = world(tmp_path_factory, monkeypatch)
+    original = L.require_empty_sidecars
+    state = dict(calls=0)
+    def second_check_fails(folder):
+        state['calls'] += 1
+        if state['calls'] == 2:   # the execute()-time recheck, before out_dir is created
+            raise L.LiveCheck('sidecar_not_empty')
+        return original(folder)
+    monkeypatch.setattr(L, 'require_empty_sidecars', second_check_fails)
+    code, lines = invoke(obj)
+    assert code == 4 and lines[-1] == 'sidecar_not_empty count=1' and obj.calls == []
+    assert not (obj.root / 'pilot').exists()
+    assert json.loads((provider.run_dir() / 'STOPPED.json').read_bytes())['reason'] == 'sidecar_not_empty'
 
 
 @pytest.mark.parametrize('kind', ['missing', 'malformed', 'format', 'entry', 'sha', 'changed-gold'])

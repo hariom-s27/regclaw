@@ -276,9 +276,17 @@ def effort_decision(records, gold, strata):
     differences, n6 = {}, 0
     for pid in sorted(strata):
         per = {arm: under_fraction([c for c in scored if c['profile_id'] == pid and c['setting'] == arm]) for arm in ARMS}
+        if all(value is None for value in per.values()):
+            # G-05: undefined on both arms (no gold-mandatory cell) is a tie: high <= medium,
+            # difference 0 in the per-profile differences and the sign-flip.
+            differences[pid] = Fraction(0)
+            n6 += 1
+            continue
         defined = all(value is not None for value in per.values())
         differences[pid] = per['high'] - per['medium'] if defined else None
         n6 += defined and per['high'] <= per['medium']  # Exact ties count in high's favour (S10P-14).
+    zero_mandatory = sum(not any(key[0] == pid and row['label'] == 'mandatory' for key, row in gold.items())
+                         for pid in strata)
     d = rates['medium'] - rates['high'] if all(v is not None for v in rates.values()) else None
     failures = {arm: sum(r['setting'] == arm and r['llm_detail'] != 'ok' for r in records) for arm in ARMS}
     fail_gap = failures['medium'] - failures['high']
@@ -288,6 +296,7 @@ def effort_decision(records, gold, strata):
                 high_under_call_rate=rates['high'], high_under_call_rate_fraction=fraction_string(rates['high']),
                 d_pooled_medium_minus_high=d, d_pooled_medium_minus_high_fraction=fraction_string(d),
                 threshold=Fraction(1, 20), threshold_fraction='1/20', high_le_medium_profiles=n6,
+                strata_profiles_zero_gold_mandatory=zero_mandatory,
                 non_ok_all_50_runs=failures, non_ok_medium_minus_high=fail_gap,
                 per_profile_high_minus_medium=differences,
                 per_profile_high_minus_medium_fraction={pid: fraction_string(value) for pid, value in differences.items()})
@@ -373,6 +382,11 @@ def tipping_ranges(cells, gold, export_summary):
                                 lower_undefined=value.lower_undefined, upper_undefined=value.upper_undefined)
         return dict(U=U, P=P, mandatory_cells=len(keys), k=REPEATS, ranges=ranges)
     out = one(cells, base)
+    # G-12: per-profile U and P next to the pooled tipping range.
+    out['per_profile'] = {pid: dict(U=sum(c['gold'] == 'mandatory' and c['final'] != 'mandatory'
+                                          for c in cells if c['profile_id'] == pid),
+                                    P=sum(c['gold'] == 'mandatory' for c in cells if c['profile_id'] == pid))
+                          for pid in sorted({c['profile_id'] for c in cells})}
     out['leave_one_profile_out'] = {pid: one([c for c in cells if c['profile_id'] != pid],
                                              {key for key in base if key[0] != pid})
                                     for pid in sorted({c['profile_id'] for c in cells})}
@@ -549,6 +563,7 @@ def report_lines(result):
                      f'high_rate={number(d["high_under_call_rate"])} '
                      f'd_medium_minus_high={number(d["d_pooled_medium_minus_high"])} threshold={number(d["threshold"])} '
                      f'high_le_medium_profiles={d["high_le_medium_profiles"]} '
+                     f'strata_profiles_zero_gold_mandatory={d["strata_profiles_zero_gold_mandatory"]} '
                      f'medium_non_ok_all_50={d["non_ok_all_50_runs"]["medium"]} '
                      f'high_non_ok_all_50={d["non_ok_all_50_runs"]["high"]} '
                      f'non_ok_medium_minus_high={d["non_ok_medium_minus_high"]} '

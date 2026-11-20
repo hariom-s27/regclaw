@@ -448,6 +448,45 @@ def test_tipping_full_precision_same_strata_base_and_leave_out():
     assert omitted['ranges']['E1']['E_cells'] == 1
 
 
+def test_effort_profile_undefined_on_both_arms_is_tie_with_zero_difference():
+    # G-05: FAKE-7 has no gold-mandatory cell, so both per-arm rates are undefined.
+    records, gold, strata = effort_fixture([1] * 8, [0] * 8)
+    for item in range(4):
+        gold[('FAKE-7', f'i{item}')] = dict(label=REC)
+    value = A.effort_decision(records, gold, strata)
+    assert value['strata_profiles_zero_gold_mandatory'] == 1
+    assert value['per_profile_high_minus_medium']['FAKE-7'] == Fraction(0)
+    assert value['per_profile_high_minus_medium_fraction']['FAKE-7'] == '0/1'
+    assert value['high_le_medium_profiles'] == 8 and value['rule_fired'] == 1 and value['choice'] == 'HIGH'
+    assert value['d_pooled_medium_minus_high'] == Fraction(1, 20)
+    # Seven differences of -1/20 and one 0: only the 2 same-sign patterns of the seven
+    # (times 2 free signs on the zero) reach |mean| = 7/160, so p = 4/256.
+    flip = A.sign_flip(list(value['per_profile_high_minus_medium'].values()))
+    assert flip['undefined'] is False and flip['p'] == Fraction(1, 64)
+    paired = A.paired_comparison(records, gold, strata, value, n_boot=8)
+    assert paired['sign_flip']['p'] == Fraction(1, 64)
+
+
+def test_effort_zero_gold_mandatory_count_is_printed(tmp_path_factory):
+    obj = world(tmp_path_factory)
+    code, lines = invoke(obj)
+    assert code == 0
+    main_line = next(line for line in lines if line.startswith('effort_reference=main '))
+    assert 'strata_profiles_zero_gold_mandatory=0 ' in main_line
+
+
+def test_tipping_reports_per_profile_u_and_p():
+    # G-12: per-profile U and P next to the pooled range.
+    cells = [dict(profile_id=f'FAKE-{i}', item=item, gold=MAND if item == 'm' else REC,
+                  final=REC if (i == 0 and item == 'm') else MAND)
+             for i in range(3) for item in ('m', 'r') for _ in range(5)]
+    gold = {(f'FAKE-{i}', item): dict(label=MAND if item == 'm' else REC) for i in range(3) for item in ('m', 'r')}
+    summary = dict(e1_input=dict(weighted_binary_rate_on_final_mandatory=0.0), e2_pool=dict(x=0, n=10))
+    value = A.tipping_ranges(cells, gold, summary)
+    assert value['per_profile'] == {'FAKE-0': dict(U=5, P=5), 'FAKE-1': dict(U=0, P=5), 'FAKE-2': dict(U=0, P=5)}
+    assert (value['U'], value['P']) == (5, 15)
+
+
 def test_resources_sum_all_attempts_and_mark_missing():
     records = [dict(http_attempts=3, llm_provenance=dict(latency_s=7, attempts=[
         dict(usage=dict(input_tokens=2, output_tokens=5, reasoning_tokens=3, cache_read_input_tokens=1)),
