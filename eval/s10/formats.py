@@ -1,8 +1,8 @@
 """S10 eval-set FILE FORMATS (R23): device-profile sets and gold labels.
 
 Formats only; real profiles and gold are written later by a human. See eval/s10/README.md.
-Gold is keyed by ISO PART (the unit the tool outputs), never by endpoint, and carries a
-source pointer (doc code + clause id) but NO clause text (schema forbids extra fields).
+Gold is keyed by ISO PART (the unit the tool outputs), never by endpoint. V1 carries
+source pointers; v2 carries jury/export reference hashes. Neither permits clause text.
 """
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from standards.profile import DeviceProfile
 
 PROFILES_FORMAT = 's10-eval-profiles.v1'
 GOLD_FORMAT = 's10-eval-gold.v1'
+GOLD_FORMAT_V2 = 's10-eval-gold.v2'
 LABELS = ['not_applicable', 'recommended', 'mandatory']
 STRATA = [f'S{i}' for i in range(1, 9)] + ['trap']
 SPLITS = ['dev', 'holdout']
@@ -48,6 +49,15 @@ GOLD_ENTRY = obj({
 })
 GOLD_SCHEMA = obj({'format': {'const': GOLD_FORMAT}, 'split': {'enum': SPLITS},
                    'labels': {'type': 'array', 'minItems': 1, 'items': GOLD_ENTRY}})
+GOLD_ENTRY_V2 = obj({key: GOLD_ENTRY['properties'][key] for key in ('profile_id', 'item', 'label')})
+GOLD_REFERENCE_V2 = obj({
+    'method': {'const': 'jury median with boundary routing (S10P-04); 0 routed'},
+    'merge_sha256_lf': {'type': 'string', 'minLength': 64, 'maxLength': 64, 'pattern': r'^[0-9a-f]{64}$'},
+    'export_sha256_lf': {'type': 'string', 'minLength': 64, 'maxLength': 64, 'pattern': r'^[0-9a-f]{64}$'},
+})
+GOLD_SCHEMA_V2 = obj({'format': {'const': GOLD_FORMAT_V2}, 'split': {'enum': SPLITS},
+                      'reference': GOLD_REFERENCE_V2,
+                      'labels': {'type': 'array', 'minItems': 1, 'items': GOLD_ENTRY_V2}})
 # S10b-04: practice (decoy) profiles for labeller training. Separate format, split fixed to
 # "practice", no stratum, no comment. The dev/holdout schemas above are unchanged.
 PRACTICE_FORMAT = 's10-practice-profiles.v1'
@@ -161,8 +171,9 @@ def validate_practice_set(doc, data=None):
 
 def validate_gold(doc, profiles, data=None):
     """Schema + referential checks against the profile set. Returns {(profile_id, item): entry}."""
+    v2 = isinstance(doc, dict) and doc.get('format') == GOLD_FORMAT_V2
     try:
-        jsonschema.Draft202012Validator(GOLD_SCHEMA).validate(doc)
+        jsonschema.Draft202012Validator(GOLD_SCHEMA_V2 if v2 else GOLD_SCHEMA).validate(doc)
     except jsonschema.ValidationError as exc:
         raise FormatError(f'gold: {exc.message}') from exc
     data = data or load_data()
@@ -177,9 +188,10 @@ def validate_gold(doc, profiles, data=None):
         allowed = parts | set(profiles[pid]['profile'].get('device_specific_standards', []))
         if item not in allowed:
             raise FormatError(f'{pid}: gold item {item!r} is not an ISO part of the part map or a declared device-specific standard')
-        src = entry['source']
-        if not src['clause_id'].startswith(src['doc'] + ':'):
-            raise FormatError(f"{pid}/{item}: clause_id {src['clause_id']!r} must start with '{src['doc']}:'")
+        if not v2:
+            src = entry['source']
+            if not src['clause_id'].startswith(src['doc'] + ':'):
+                raise FormatError(f"{pid}/{item}: clause_id {src['clause_id']!r} must start with '{src['doc']}:'")
         if (pid, item) in out:
             raise FormatError(f'duplicate gold cell {pid} x {item}')
         out[(pid, item)] = entry

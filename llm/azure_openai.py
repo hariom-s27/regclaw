@@ -92,21 +92,27 @@ class AzureOpenAIAdapter:
         # OpenAI 2.54's own retry policy rejects Retry-After >120s, so leaving
         # SDK retries enabled would subtly change the existing S10 policy.
         # http_log (optional) gets one row per HTTP request sent, failed or not.
-        from openai import APIConnectionError
+        from openai import APIConnectionError, APITimeoutError
         cap = mapped.get('max_completion_tokens')
+        timeout_info = ({'timeout_s': mapped['timeout']}
+                        if self.role == 'S10' and 'timeout' in mapped else {})
         for attempt in range(3 if self.role == 'S10' else 1):
             try:
                 result = self.client.chat.completions.create(**mapped)
                 if http_log is not None:
-                    http_log.append(dict(status='ok', finish_reason=None, max_completion_tokens=cap))
+                    http_log.append(dict(status='ok', finish_reason=None, max_completion_tokens=cap,
+                                         **timeout_info))
                 return result
             except Exception as exc:
-                response = getattr(exc, 'response', None)
-                headers = response.headers if response is not None else {}
                 status = getattr(exc, 'status_code', None)
+                # G3-02: the row is written before any header access can fail.
                 if http_log is not None:
-                    http_log.append(dict(status=status if isinstance(status, int) else type(exc).__name__,
-                                         finish_reason=None, max_completion_tokens=cap))
+                    http_log.append(dict(status=('APITimeoutError' if isinstance(exc, APITimeoutError)
+                                                 else status if isinstance(status, int) else type(exc).__name__),
+                                         finish_reason=None, max_completion_tokens=cap, **timeout_info))
+                headers = getattr(getattr(exc, 'response', None), 'headers', None) or {}
+                if isinstance(exc, APITimeoutError):
+                    raise
                 override = headers.get('x-should-retry')
                 retry = (isinstance(exc, APIConnectionError) or status in (408, 409, 429)
                          or isinstance(status, int) and status >= 500)
@@ -171,6 +177,8 @@ class AzureOpenAIAdapter:
                 attempt_started = time.perf_counter()
                 sent_before = len(http_log)
                 mapped = self.map_request(request, cap=cap)
+                if self.role == 'S10' and self.timeout is not None:
+                    mapped['timeout'] = self.timeout * (2 if attempts else 1)
                 response = self._send(mapped, http_log)
                 choice = response.choices[0]
                 message = choice.message
@@ -189,6 +197,8 @@ class AzureOpenAIAdapter:
                 attempts.append(dict(max_completion_tokens=sent_cap, finish_reason=raw_finish, usage=dict(usage),
                                      latency_s=round(time.perf_counter() - attempt_started, 3),
                                      http_attempts=len(http_log) - sent_before))
+                if self.role == 'S10' and 'timeout' in mapped:
+                    attempts[-1]['timeout_s'] = mapped['timeout']
                 # S10-09 v2 (d): one automatic re-run at 2x the env cap (<= 128000) after a truncation.
                 doubled = min(2 * sent_cap, MAX_COMPLETION_CAP)
                 if (self.role == 'S10' and self.cap is not None and raw_finish == 'length'

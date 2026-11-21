@@ -15,7 +15,9 @@ always_rule parts are the parts whose endpoints are all set to mandatory by engi
 for every contacting component (standards/engine.py, rule_08: Framework, TRA, Chemical, Sample).
 Limit: tags follow the engine's rule encoding; an engine mistake is copied into the tag.
 """
+import argparse
 import json
+import sys
 from pathlib import Path
 
 from standards.data_loader import ENDPOINTS
@@ -166,3 +168,43 @@ def load_tags(path, required=()):
     if missing:
         raise TagError(f'{len(missing)} scored cell(s) have no tag, first: {missing[0][0]} x {missing[0][1]}')
     return out
+
+
+def main(argv=None, *, data=None):
+    """Build dev tags with exclusive output creation; existing callers keep write_tags."""
+    from standards.data_loader import load_data
+    from standards.ruleset import normalised_sha
+    from .split_guard import load_eval_files
+
+    parser = argparse.ArgumentParser(prog='python -m eval.s10.tagger')
+    commands = parser.add_subparsers(dest='command', required=True)
+    build = commands.add_parser('build', help='build dev cell tags (write-once)')
+    build.add_argument('--profiles', required=True)
+    build.add_argument('--out', required=True)
+    args = parser.parse_args(argv)
+    path = Path(args.out)
+    if path.exists():
+        print('REFUSED: tag output already exists (write-once)')
+        return 3
+    try:
+        data = load_data() if data is None else data
+        split, profiles, _ = load_eval_files(args.profiles, data=data)
+        if split != 'dev':
+            raise TagError('dev profiles required')
+        doc = build_tags(profiles, data)
+        text = json.dumps(doc, indent=2, sort_keys=True) + '\n'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('x', encoding='utf-8', newline='\n') as stream:
+            stream.write(text)
+    except FileExistsError:
+        print('REFUSED: tag output already exists (write-once)')
+        return 3
+    except Exception as exc:
+        print(f'ERROR: {type(exc).__name__}')
+        return 2
+    print(f'profiles={len(profiles)} tags={len(doc["tags"])} sha256_lf={normalised_sha(text.encode("utf-8"))}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
