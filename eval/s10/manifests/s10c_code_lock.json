@@ -1,0 +1,359 @@
+{
+  "created_at": "2026-11-21T10:59:07.328466+00:00",
+  "distribution_count": 200,
+  "environment_sha256": "83f2775144e9341c5b528306fd05b0c33f3235e582266358b9d6cec9c8877b17",
+  "files": {
+    "embed/__init__.py": {
+      "bytes_lf": 71,
+      "lines": 1,
+      "sha256_lf": "9c5ef7a0a43211064a942c914d76424ab737ec688cf27b1451c9e6b9e38fbcf4"
+    },
+    "embed/embed.py": {
+      "bytes_lf": 18998,
+      "lines": 419,
+      "sha256_lf": "240fd792ba0fde96774f307abb08e6cec11090079bb3542c024a6844f97fa109"
+    },
+    "embed/store.py": {
+      "bytes_lf": 4134,
+      "lines": 88,
+      "sha256_lf": "da65c3c4be9a28a0ba8e37a4a00a55fb56ca3b1e8ff4f63e91c0eedcc19d34c4"
+    },
+    "embed/token_stats.py": {
+      "bytes_lf": 5739,
+      "lines": 124,
+      "sha256_lf": "1d362641c50fecd440c92aba41ed73b2b556471bddc5dfce8cb6debdb2256877"
+    },
+    "eval/s10/__init__.py": {
+      "bytes_lf": 84,
+      "lines": 1,
+      "sha256_lf": "57518401feac6a56fade730ecd15b6a28b160d35e9a900a6c07c390247e3f20a"
+    },
+    "eval/s10/addendum_freeze.py": {
+      "bytes_lf": 4053,
+      "lines": 97,
+      "sha256_lf": "c2492029d4160da0074d52e481c3f8168a4570d2406462bf4ac9ff2d449aea0a"
+    },
+    "eval/s10/addendum_freeze_n.py": {
+      "bytes_lf": 2552,
+      "lines": 60,
+      "sha256_lf": "968cdf40be3575d9233082d822a65c22cc5bd92692d930ebfd93ca05a2e8b386"
+    },
+    "eval/s10/agreement.py": {
+      "bytes_lf": 5295,
+      "lines": 159,
+      "sha256_lf": "5f03956d3393043fd2e8f7646fa194b4a30f0fdd68df7a01e46ff2e296edcdbf"
+    },
+    "eval/s10/analysis.py": {
+      "bytes_lf": 39390,
+      "lines": 649,
+      "sha256_lf": "d804333305a88f5b83ca59c01695406b9b9e5023a63246eeb8104aaa99028529"
+    },
+    "eval/s10/dev_export.py": {
+      "bytes_lf": 16407,
+      "lines": 338,
+      "sha256_lf": "e659fcea2dcda093d267ac258375ddd868607555e4354f7cdc3f1eb7bf0bec39"
+    },
+    "eval/s10/draws.py": {
+      "bytes_lf": 10679,
+      "lines": 243,
+      "sha256_lf": "7ad3101e70e824ed6d8d32b94629f57375bd40a62b2c81d471fc08260bb61a4a"
+    },
+    "eval/s10/formats.py": {
+      "bytes_lf": 9569,
+      "lines": 198,
+      "sha256_lf": "505da920f94e33a3ef2afac75b05ccb0c7155ac41635c8fcfd451e2a5c2f6141"
+    },
+    "eval/s10/frozen_candidates.py": {
+      "bytes_lf": 33742,
+      "lines": 687,
+      "sha256_lf": "93f346837d560ad568ae32c0ab949aff5f2d9191ede3e2328fc9f0e9da255a62"
+    },
+    "eval/s10/judge_file.py": {
+      "bytes_lf": 11919,
+      "lines": 251,
+      "sha256_lf": "8a9979f3f1208068f37c4b906f160849001f63225993f65ab74861b55e7a9935"
+    },
+    "eval/s10/judge_kit.py": {
+      "bytes_lf": 17563,
+      "lines": 363,
+      "sha256_lf": "80fdbf0ad54043131f80d77efd5b949f1b781173d82a9ca6abe75a01d52e1328"
+    },
+    "eval/s10/judge_output.py": {
+      "bytes_lf": 3235,
+      "lines": 75,
+      "sha256_lf": "731a272e1aec7410048319c47e2711b64f48306d54d8274aceaa031382afb848"
+    },
+    "eval/s10/label_freeze.py": {
+      "bytes_lf": 7416,
+      "lines": 186,
+      "sha256_lf": "9c03ce0f2f490a564fa0a86ec98098f89f7a4dbffaaf58dd03e19c70cc240387"
+    },
+    "eval/s10/label_quality.py": {
+      "bytes_lf": 18221,
+      "lines": 448,
+      "sha256_lf": "583a6472cd25437284102075521f59cab71d1d06c0751886ddde74c695fd0693"
+    },
+    "eval/s10/label_tool.py": {
+      "bytes_lf": 33486,
+      "lines": 573,
+      "sha256_lf": "98431649652dc5a5c9fc307cdf92a8d59419471346d7c3006489236cf529e55b"
+    },
+    "eval/s10/live.py": {
+      "bytes_lf": 31850,
+      "lines": 608,
+      "sha256_lf": "38a2ae580f45f54fd9faf138c665ba053c2b953c8afacc1b85c39ff4220d3dee"
+    },
+    "eval/s10/merge.py": {
+      "bytes_lf": 9761,
+      "lines": 206,
+      "sha256_lf": "e90972745ab3553aeddec448530a93963394828507727587723f8801725bd69d"
+    },
+    "eval/s10/metrics.py": {
+      "bytes_lf": 12378,
+      "lines": 289,
+      "sha256_lf": "c3cef13cd8b1bcfa4e2e7539172bb63ab3b05e7f53fedf066f086fc05c3c2dee"
+    },
+    "eval/s10/paid_lock.py": {
+      "bytes_lf": 1264,
+      "lines": 41,
+      "sha256_lf": "e8df9cf1d3b26187126df2aa69cc682dd9649fa6ac0c067ca48c6ca4a3ba1657"
+    },
+    "eval/s10/prereg_freeze.py": {
+      "bytes_lf": 2839,
+      "lines": 66,
+      "sha256_lf": "c3b64e74f029f1bac4d1a033de3c9397a5719ebcb57b9fb4205e117f16a33171"
+    },
+    "eval/s10/profile_checks.py": {
+      "bytes_lf": 11720,
+      "lines": 249,
+      "sha256_lf": "59e19777a259a972f4ce149b038f5e749fbb32cee01f6829b2b8eefc1bb260fc"
+    },
+    "eval/s10/runner.py": {
+      "bytes_lf": 21174,
+      "lines": 387,
+      "sha256_lf": "6f477d69ac73bef7f111774dd4a105c98a274da4400d7e1205d1a3204b092987"
+    },
+    "eval/s10/s10c_lock.py": {
+      "bytes_lf": 14417,
+      "lines": 338,
+      "sha256_lf": "dc121a946d331ca3ddbb8c332d6757be73a5b33e1c9757de7c505a84480f7db9"
+    },
+    "eval/s10/second_rater.py": {
+      "bytes_lf": 18988,
+      "lines": 405,
+      "sha256_lf": "08f696fcfc6a3c13e0395a46a3b3311d913c6507d2ec4c8327110b129b72dc45"
+    },
+    "eval/s10/split_guard.py": {
+      "bytes_lf": 5463,
+      "lines": 122,
+      "sha256_lf": "3e49959a7518d4f9dfe11e035ec761185229da0f5bb079803225df20acd9d175"
+    },
+    "eval/s10/tagger.py": {
+      "bytes_lf": 8852,
+      "lines": 210,
+      "sha256_lf": "e72dac42cf04a32ff5c88bc6253f65d46c6032518de2e5b50d82655d023acf1d"
+    },
+    "ingest/__init__.py": {
+      "bytes_lf": 52,
+      "lines": 1,
+      "sha256_lf": "ddd9d0694a3cd05d588bd7ac093b44a906df82b31e15f6e222a038a30f232ee4"
+    },
+    "ingest/validate.py": {
+      "bytes_lf": 3530,
+      "lines": 74,
+      "sha256_lf": "99a0d8c79e27cc76e262395d052b0c6181fc31306cb379485d43a5680017ddb7"
+    },
+    "llm/__init__.py": {
+      "bytes_lf": 79,
+      "lines": 1,
+      "sha256_lf": "1a3d7f7d3d6ad910d8f359a79165b5ad760e07e307102fc664d7ad1703716594"
+    },
+    "llm/azure_openai.py": {
+      "bytes_lf": 13584,
+      "lines": 246,
+      "sha256_lf": "2eb095420e544baf536a1d195537da5830f87603df36b7c1a45beae58a7f8460"
+    },
+    "llm/cypher.py": {
+      "bytes_lf": 2568,
+      "lines": 65,
+      "sha256_lf": "dc32b24b1e325346cff67f0aae0196c0c792f62451ae2988a3914d0467276444"
+    },
+    "llm/provider.py": {
+      "bytes_lf": 3485,
+      "lines": 84,
+      "sha256_lf": "c50affa15be2b2d7224d1f288c25a5eab2b2e9a7c87ce73cef9a518591a47ee9"
+    },
+    "ner/__init__.py": {
+      "bytes_lf": 86,
+      "lines": 1,
+      "sha256_lf": "dfef50108a5f2b387cb72c117a6a97dba1126786cd2106d083fb6be597606a7e"
+    },
+    "ner/checks.py": {
+      "bytes_lf": 4219,
+      "lines": 85,
+      "sha256_lf": "a3c3eed0f4f9a7e9c747930e83974eb4774b86daac39dca3b8decc64ce6caa8d"
+    },
+    "ner/client.py": {
+      "bytes_lf": 5105,
+      "lines": 115,
+      "sha256_lf": "a010b10d4ac62d78ff9c3538437555fb213f36f509735cf6081dd360e6743635"
+    },
+    "ner/normalise.py": {
+      "bytes_lf": 6233,
+      "lines": 136,
+      "sha256_lf": "3c80bd1e5cae0b9e432b874d09feab3ce07cba351db399d81350878c37333bbb"
+    },
+    "ner/prompt.py": {
+      "bytes_lf": 4157,
+      "lines": 61,
+      "sha256_lf": "fd4d5ecd66e06375e7f3840f0645e4d768417e3f8f5f5b3f19905d599e4183c4"
+    },
+    "ner/stdref.py": {
+      "bytes_lf": 2872,
+      "lines": 71,
+      "sha256_lf": "339ddf6869f88519d34943d0760b3dcaf22076187dc8edcad75f24dd991cb9dc"
+    },
+    "observability/tracing.py": {
+      "bytes_lf": 2026,
+      "lines": 59,
+      "sha256_lf": "f9e1d5aa50ac5ae8def47772567f906889dfed6a8f42da2397c227062d115cf3"
+    },
+    "retrieval/cypher_cache.py": {
+      "bytes_lf": 2713,
+      "lines": 64,
+      "sha256_lf": "cb5e3cf85229948a89c8178e3198e8643e0947f5ad95184edfc6c580b4247176"
+    },
+    "retrieval/hybrid_retriever.py": {
+      "bytes_lf": 37291,
+      "lines": 684,
+      "sha256_lf": "2e212bb2fd7161e8d2b2654376aa5623426ca1c9ffbc88716fad8bb9f18fe529"
+    },
+    "retrieval/query_embeddings.py": {
+      "bytes_lf": 6341,
+      "lines": 114,
+      "sha256_lf": "a6b7a07bf90bec83ccc4fe06e8abb17a4a4992a05219367b3913fcc1e0423add"
+    },
+    "retrieval/setup.py": {
+      "bytes_lf": 941,
+      "lines": 26,
+      "sha256_lf": "5211997ba7060ebf2a8f726133d6a974ab482656f9852408464b2ef7b4809f9c"
+    },
+    "standards/__init__.py": {
+      "bytes_lf": 107,
+      "lines": 2,
+      "sha256_lf": "4be0cab4ec1d514266da0e8284c8093f98fb66230af05710bed6adcc8765169f"
+    },
+    "standards/assemble.py": {
+      "bytes_lf": 1687,
+      "lines": 28,
+      "sha256_lf": "4ab80f29c983bf711516dea5640a9c6d0a3caed2198a9d390afaf8a8c63754b4"
+    },
+    "standards/classifier.py": {
+      "bytes_lf": 4850,
+      "lines": 104,
+      "sha256_lf": "8b06b98216c94a6162b73f77237ee6aca3b83b6173a45773c9b8d59d0f9ecdf7"
+    },
+    "standards/data_loader.py": {
+      "bytes_lf": 4884,
+      "lines": 86,
+      "sha256_lf": "1dd80d028f366db6a31e2193b9b274dbcbe16e7c6b72ad67b5d00ae3d17f5212"
+    },
+    "standards/demo.py": {
+      "bytes_lf": 2104,
+      "lines": 42,
+      "sha256_lf": "cc38d74ebc71f09cd8a217ded1a1a7c9ecddcc490bccb5558914db3cd155e6dd"
+    },
+    "standards/engine.py": {
+      "bytes_lf": 14409,
+      "lines": 285,
+      "sha256_lf": "d83bdf0bd99db20e4c7b7c3c28bff08f650e985c7d58129e036453275438bc0b"
+    },
+    "standards/guard.py": {
+      "bytes_lf": 4707,
+      "lines": 95,
+      "sha256_lf": "27423a00b50ccb7e7f7c46dd099cbea9611b2b28e133ceac969af61eaa207e13"
+    },
+    "standards/overclaim.py": {
+      "bytes_lf": 3283,
+      "lines": 72,
+      "sha256_lf": "e14c4c1eb3b2f676000adb44f5cf68ae72e893cd2b1e6e17863bc71e6f1ba26f"
+    },
+    "standards/profile.py": {
+      "bytes_lf": 3569,
+      "lines": 81,
+      "sha256_lf": "634d410e38b510849034b45cac548850b419fa7371b57388161ecf50e0edc811"
+    },
+    "standards/ruleset.py": {
+      "bytes_lf": 6425,
+      "lines": 119,
+      "sha256_lf": "44be38f227e19382e37f82f5d9b194d19fec990119bba509089340e4e69c43d5"
+    },
+    "standards/tool.py": {
+      "bytes_lf": 2741,
+      "lines": 56,
+      "sha256_lf": "826a29f5b871a97e3da2116a632bf6d857824ac65797263d4b536bc913fc36ff"
+    }
+  },
+  "format": "s10c-code-lock.v1",
+  "installed_versions": {
+    "numpy": "2.4.6",
+    "openai": "2.54.0",
+    "ppi-python": "not installed",
+    "scipy": "1.17.1",
+    "tiktoken": "0.14.0"
+  },
+  "listing_sha256": "c3eae25aec15a4c6381924e250f3c1a2914d7b7ff99587dfe18e9eb799f37161",
+  "provenance_tests": {
+    "tests/_netguard.py": {
+      "bytes_lf": 3170,
+      "lines": 76,
+      "sha256_lf": "f248f5e61683d3c9221bc5685e8fcfab06b2df2cb71ff42f30ab0ea98462763f"
+    },
+    "tests/conftest.py": {
+      "bytes_lf": 626,
+      "lines": 13,
+      "sha256_lf": "1d8fc98dbb4374be4c43292331de641d8748ea58abe40f7057125970b0c6456b"
+    },
+    "tests/test_s10c1_addendum_freeze_n.py": {
+      "bytes_lf": 7145,
+      "lines": 165,
+      "sha256_lf": "6750e2e94ed3c3fbcd936005fec8c7c82f24382d4e39fd12536e5ea923f77fde"
+    },
+    "tests/test_s10c1_analysis.py": {
+      "bytes_lf": 46325,
+      "lines": 870,
+      "sha256_lf": "24250cee1d0fb837f252859ee4ff8d31d696909c201d362cffbac897cbe3ea1e"
+    },
+    "tests/test_s10c1_dev_export.py": {
+      "bytes_lf": 29640,
+      "lines": 638,
+      "sha256_lf": "c34ba59fe23511003a7d16f246acfb9f68579b70d7fbb48c1f6db3ae65a76f06"
+    },
+    "tests/test_s10c1_g3.py": {
+      "bytes_lf": 9423,
+      "lines": 202,
+      "sha256_lf": "c8cf83f4c9f50a111c31e7b98c34eb07b043da56070a3ff3fe9ec5999af04dc0"
+    },
+    "tests/test_s10c1_live.py": {
+      "bytes_lf": 77833,
+      "lines": 1544,
+      "sha256_lf": "f17688860c9fe3c69ebbf23190de428d72efc2cd1d396bb326cbbf65f864446e"
+    },
+    "tests/test_s10c1_lock.py": {
+      "bytes_lf": 24124,
+      "lines": 562,
+      "sha256_lf": "7fc3a5a997d8abaa5ed71ec694bb0260b74bf81bb9f189076483c36afa8bdfe0"
+    },
+    "tests/test_s10c1_paid_lock.py": {
+      "bytes_lf": 6097,
+      "lines": 158,
+      "sha256_lf": "9d43c75edd959b7e58c4c88eb19e1e82e976bd1f41c4efc9d003e25ca1518f4d"
+    },
+    "tests/test_s10c1_part_a.py": {
+      "bytes_lf": 65589,
+      "lines": 1368,
+      "sha256_lf": "66db1b6d6352bffcf4af828bfa1f998c96307284bf36b4d391a507fa1b8c06ce"
+    }
+  },
+  "python_version": "3.11.17"
+}
