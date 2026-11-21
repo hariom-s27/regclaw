@@ -39,7 +39,9 @@ LOCK_FORMAT = 's10c-code-lock.v1'
 PILOT_SEED = 'S10c-v1|pilot'
 SEED = 0
 CALL_CAP = 150
-RUN_RESERVE = 6
+# G3-04 F4: reserves come from frozen_candidates.RESERVES[phase]; this alias is compatibility only.
+RUN_RESERVE = FC.RESERVES['main']
+STOP_NOTICE = b'stop requested: finishing the current run; press Ctrl+C again to abort now\n'
 # G-03: the pilot runs at the pre-registered 64k cap with a fixed 1200 s timeout.
 PILOT_CAP = 64000
 PILOT_TIMEOUT_S = 1200.0
@@ -76,9 +78,13 @@ def graceful_sigint(*, out=print):
     state = StopState()
 
     def handler(signum, frame):
+        # G3-04 F8: flag and default handler first; buffered print() is not reentrant-safe here.
         state.requested = True
         signal.signal(signal.SIGINT, signal.default_int_handler)
-        out('stop requested: finishing the current run; press Ctrl+C again to abort now')
+        try:
+            os.write(2, STOP_NOTICE)
+        except OSError:
+            pass
 
     try:
         signal.signal(signal.SIGINT, handler)
@@ -373,7 +379,7 @@ def preflight(args, *, root=ROOT, data=None, client_factory=None, retriever_fact
     # G-01: a missing or edited global ledger cannot cover the verified totals.
     require(global_start >= sum(prior_calls.values()) + starting_ledger, 'global_ledger_short')
     # G-07: the whole phase plus one run reserve must fit under the cap.
-    require(global_start + PHASE_HEADROOM[args.phase] + RUN_RESERVE <= CALL_CAP, 'call_cap')
+    require(global_start + PHASE_HEADROOM[args.phase] + FC.RESERVES[args.phase] <= CALL_CAP, 'call_cap')
     data = load_data() if data is None else data
     split, profiles, gold = load_eval_files(files[0], gold_path, data=data)
     require(split == 'dev', 'dev_split')
@@ -526,7 +532,7 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
                 require(FC.ledger_total(ledger) == ledger_start + calls, 'ledger_changed')
                 require(FC.ledger_total(plan.global_path) == plan.global_start + calls, 'global_ledger_changed')
                 # G-01: the reserve check uses the global total (all steps and attempts).
-                require(plan.global_start + calls + RUN_RESERVE <= CALL_CAP, 'call_cap')
+                require(plan.global_start + calls + FC.RESERVES[plan.phase] <= CALL_CAP, 'call_cap')
                 client = plan.clients[setting.name]
                 require(client.effort == setting.effort, 'client_effort')
                 client.last_http_log = []
@@ -535,7 +541,7 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
                 FC.reserve_unit(plan.global_path, ledger, step=plan.phase, unit=unit, now=now)
                 record = R.run_one(plan.profiles[pid], setting, repeat, client, plan.retriever, plan.data)
                 sent = len(client.last_http_log)
-                require(0 <= sent <= RUN_RESERVE and record['http_attempts'] == sent, 'http_attempts')
+                require(0 <= sent <= FC.RESERVES[plan.phase] and record['http_attempts'] == sent, 'http_attempts')
                 record = dict(call_index=index, **record)
                 stream.write(json.dumps(record, sort_keys=True, allow_nan=False) + '\n')
                 stream.flush()

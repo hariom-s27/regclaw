@@ -731,6 +731,13 @@ def test_analysis_global_accounting_bounds_refuse(tmp_path_factory, field, value
     assert not (obj.root / 'A.json').exists()
 
 
+def test_analysis_global_delta_mismatch_refuses(tmp_path_factory):
+    # G3-04 F10: bounds, prefix sha and total stay valid; main's ledger delta is 1 short of its runs.
+    obj = world(tmp_path_factory, manifest_change=lambda doc: doc.update(global_start=1))
+    assert invoke(obj) == (2, ['global_delta_mismatch count=1'])
+    assert not (obj.root / 'A.json').exists()
+
+
 @pytest.mark.parametrize('field,value,reason', [
     ('global_ledger_last_seq', 'MISSING', 'global_ledger_seq'),
     ('global_ledger_last_seq', True, 'global_ledger_seq'),

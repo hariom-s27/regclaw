@@ -108,7 +108,7 @@ def holding_child(root):
             stream.close()
 
 
-def test_paid_lock_contender_refuses_before_ledger_access(root, monkeypatch):
+def test_paid_lock_contender_refuses_before_ledger_access(root, monkeypatch, capsys):
     with holding_child(root):
         before = time.monotonic()
         with pytest.raises(PaidLockHeld, match='another paid S10c process is running'):
@@ -127,7 +127,10 @@ def test_paid_lock_contender_refuses_before_ledger_access(root, monkeypatch):
                 '--candidates-run-manifest', 'CR.json', '--out-dir', 'pilot']
         assert L.main(args, root=root, out=lines.append) == 2
         assert lines == ['another paid S10c process is running']
+        capsys.readouterr()
         assert FC.main(['build']) == 2
+        # G3-04 F5: exit 2 also comes from argparse; the refusal line proves the lock path.
+        assert 'another paid S10c process is running' in capsys.readouterr().out
         assert not list(root.rglob('*.jsonl'))
         assert root / 'data/runs/s10c_paid.lock' == next(root.rglob('*.lock'))
     # The first child was terminated while holding the lock.

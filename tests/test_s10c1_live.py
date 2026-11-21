@@ -639,6 +639,73 @@ def test_three_consecutive_errors_stop_and_charge(tmp_path_factory, monkeypatch)
     assert obj.summaries == [] and not (obj.root / 'pilot/pilot_settings.json').exists()
 
 
+def test_classify_error_after_two_requests_settles_at_two(tmp_path_factory, monkeypatch):
+    # G3-01: the tool swallows the classify error; the run settles at its 2 logged HTTP requests.
+    obj = world(tmp_path_factory, monkeypatch)
+    code, lines = invoke(obj, client_factory=lambda setting: FakeClient(setting, obj, error=True, sent=2))
+    assert code == 4 and lines[-1] == 'consecutive_errors count=1' and len(obj.calls) == 3
+    events = FC.read_call_ledger(global_ledger(obj))
+    by_unit = {}
+    for row in events:
+        if row['step'] == 'pilot':
+            by_unit.setdefault(row['unit'], []).append((row['kind'], row['amount']))
+    first, second, third = (by_unit[unit] for unit in sorted(by_unit, key=lambda u: int(u.rsplit(':', 1)[1])))
+    assert first == second == [('reserve', 6), ('settle', 2 - 6)]
+    assert sum(amount for _, amount in first) == 2
+    # The third error stops before its settle, so its reserve is retained.
+    assert third == [('reserve', 6)]
+    assert FC.ledger_total(global_ledger(obj)) == 2 + 2 + 6
+
+
+@pytest.mark.parametrize('scenario', ['sent_seven', 'preflight_cap'])
+def test_run_reserve_comes_from_frozen_candidates_reserves(tmp_path_factory, monkeypatch, scenario):
+    # G3-04 F4: one source of truth; a pilot reserve of 7 must drive reserve rows, the bound and the cap.
+    obj = world(tmp_path_factory, monkeypatch, candidate_calls=140 if scenario == 'preflight_cap' else 0)
+    monkeypatch.setattr(FC, 'RESERVES', dict(FC.RESERVES, pilot=7))
+    assert L.RUN_RESERVE == 6
+    if scenario == 'sent_seven':
+        code, lines = invoke(obj, client_factory=lambda setting: FakeClient(setting, obj, sent=7))
+        assert code == 0 and len(obj.calls) == 4
+        pilot = [(r['kind'], r['amount']) for r in FC.read_call_ledger(global_ledger(obj)) if r['step'] == 'pilot']
+        assert pilot == [('reserve', 7), ('settle', 0)] * 4
+    else:
+        # 140 + 4 + 7 = 151 > 150 refuses; the old fixed 6 would give exactly 150 and pass.
+        code, lines = invoke(obj)
+        assert code == 2 and lines[-1] == 'call_cap count=1' and obj.calls == []
+        assert all(r['step'] == 'candidates' for r in FC.read_call_ledger(global_ledger(obj)))
+
+
+def test_sigint_handler_uses_os_write_only(monkeypatch):
+    # G3-04 F8: the handler is called directly; no real signal is sent.
+    writes = []
+
+    def no_print(*args, **kwargs):
+        raise AssertionError('print called in the SIGINT handler')
+
+    monkeypatch.setattr(os, 'write', lambda fd, data: writes.append((fd, data)) or len(data))
+    monkeypatch.setattr(builtins, 'print', no_print)
+    original = signal.getsignal(signal.SIGINT)
+    with L.graceful_sigint(out=no_print) as state:
+        handler = signal.getsignal(signal.SIGINT)
+        handler(signal.SIGINT, None)
+        assert state.requested is True
+        assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    assert writes == [(2, b'stop requested: finishing the current run; press Ctrl+C again to abort now\n')]
+    assert signal.getsignal(signal.SIGINT) is original
+
+
+def test_sigint_handler_write_failure_still_sets_flag_and_default(monkeypatch):
+    # The flag and the default handler are set before the write, so an OSError cannot skip them.
+    def broken(fd, data):
+        raise OSError('FAKE closed stderr')
+
+    monkeypatch.setattr(os, 'write', broken)
+    with L.graceful_sigint() as state:
+        signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+        assert state.requested is True
+        assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
 def test_non_error_resets_consecutive_count(tmp_path_factory, monkeypatch):
     obj = world(tmp_path_factory, monkeypatch)
     original = R.run_one
@@ -1234,10 +1301,14 @@ def test_live_sigint_finishes_or_keeps_reserve_and_restores_handler(tmp_path_fac
             signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
         return record
 
+    writes = []
     monkeypatch.setattr(R, 'run_one', run)
+    monkeypatch.setattr(os, 'write', lambda fd, data: writes.append((fd, data)) or len(data))
     code, lines = invoke(obj)
     assert code == 4 and len(obj.calls) == 1
-    assert lines.count('stop requested: finishing the current run; press Ctrl+C again to abort now') == 1
+    # G3-04 F8: the notice goes to fd 2 via os.write, never through out/print.
+    assert writes == [(2, L.STOP_NOTICE)]
+    assert not any('stop requested' in line for line in lines)
     assert signal.getsignal(signal.SIGINT) is original_handler
     events = FC.read_call_ledger(global_ledger(obj))
     assert [r['kind'] for r in events] == (['reserve'] if second else ['reserve', 'settle'])

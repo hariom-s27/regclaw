@@ -925,10 +925,14 @@ def test_candidate_sigint_finishes_or_keeps_reserve_and_restores_handler(tmp_pat
         made.append(Retriever(**kwargs))
         return made[-1]
 
+    writes = []
+    monkeypatch.setattr(os, 'write', lambda fd, data: writes.append((fd, data)) or len(data))
     assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 2
     assert signal.getsignal(signal.SIGINT) is original
     assert len(made[0].requests) == 1 and made[0].closed
-    assert capsys.readouterr().out.count('stop requested: finishing the current run; press Ctrl+C again to abort now') == 1
+    # G3-04 F8: the notice goes to fd 2 via os.write, not to stdout.
+    assert writes == [(2, b'stop requested: finishing the current run; press Ctrl+C again to abort now\n')]
+    assert 'stop requested' not in capsys.readouterr().out
     assert [r['kind'] for r in FC.read_call_ledger(ledger)] == (['reserve'] if second else ['reserve', 'settle'])
     assert FC.ledger_total(global_ledger(tmp_path)) == (FC.CANDIDATE_RESERVE if second else 2)
     assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
@@ -1252,6 +1256,47 @@ def test_candidate_lock_or_input_change_refuses_before_query_three(tmp_path, fak
     assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
     assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
     assert not list(tmp_path.rglob('STOPPED.json'))
+
+
+@pytest.mark.parametrize('variant,relative,reason', [
+    ('corrupt_json', L.LOCK_REL, 'input_invalid'),
+    ('bad_utf8', L.LOCK_REL, 'input_invalid'),
+    ('code_lock_sha', 'fake_module.py', 'code_lock_sha'),
+])
+def test_candidate_lock_manifest_reread_reason(tmp_path, fake_data, monkeypatch, capsys, variant, relative, reason):
+    # G3-04 F6: a corrupt lock manifest between queries 2 and 3 refuses as input_invalid with no
+    # reservation for query 3; a fixed LiveCheck refusal (code_lock_sha) keeps its own reason.
+    args, ledger = candidate_args(tmp_path, monkeypatch, profile_count=10)
+    target = tmp_path / relative
+    changed, made = [False], []
+    read = Path.read_bytes
+    replacement = {'corrupt_json': b'{corrupt', 'bad_utf8': b'\xff\xfe'}.get(variant)
+
+    def changed_read(path):
+        raw = read(path)
+        if path != target or not changed[0]:
+            return raw
+        return replacement if replacement is not None else raw + b' FAKE edit'
+
+    def change(index):
+        changed[0] = index >= 2
+
+    def factory(**kwargs):
+        made.append(GuardRetriever(**kwargs, after_query=change))
+        return made[-1]
+
+    monkeypatch.setattr(Path, 'read_bytes', changed_read)
+    assert fc_main(args, data=fake_data, retriever_factory=factory) == 2
+    out = capsys.readouterr().out
+    assert out.splitlines()[-1] == f'ERROR: {reason}'
+    assert 'Decode' not in out and 'Expecting' not in out and str(tmp_path) not in out
+    assert len(made[0].requests) == 2 and made[0].closed
+    for path in (ledger, global_ledger(tmp_path)):
+        rows = FC.read_call_ledger(path)
+        assert [r['unit'] for r in rows] == ['q01', 'q01', 'q02', 'q02']
+        assert FC.ledger_total(path) == 4
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
 
 
 @pytest.mark.parametrize('stage', ['after_query', 'after_outputs'])

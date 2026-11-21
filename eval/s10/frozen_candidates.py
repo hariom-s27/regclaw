@@ -93,15 +93,20 @@ def candidate_provenance(root):
 
 
 def check_candidate_inputs(root, *, input_shas, lock_sha, locked_files=None):
-    from .live import checked_path, verify_code_lock
+    from .live import LiveCheck, checked_path, verify_code_lock
     try:
         if verify_code_lock(root, locked_files) != lock_sha:
             raise CandidateInput('code_lock_changed')
         for relative, expected in input_shas.items():
             if normalised_sha(checked_path(root, relative).read_bytes()) != expected:
                 raise CandidateInput('input_changed')
+    except (CandidateInput, LiveCheck):
+        # G3-04 F6: fixed refusals keep their own reason (LiveCheck is a ValueError).
+        raise
     except OSError as exc:
         raise CandidateInput('input_unreadable') from exc
+    except (ValueError, KeyError, TypeError):
+        raise CandidateInput('input_invalid') from None
 
 
 def tool_query(device_name):

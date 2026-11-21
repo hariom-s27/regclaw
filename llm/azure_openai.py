@@ -104,13 +104,13 @@ class AzureOpenAIAdapter:
                                          **timeout_info))
                 return result
             except Exception as exc:
-                response = getattr(exc, 'response', None)
-                headers = response.headers if response is not None else {}
                 status = getattr(exc, 'status_code', None)
+                # G3-02: the row is written before any header access can fail.
                 if http_log is not None:
                     http_log.append(dict(status=('APITimeoutError' if isinstance(exc, APITimeoutError)
                                                  else status if isinstance(status, int) else type(exc).__name__),
                                          finish_reason=None, max_completion_tokens=cap, **timeout_info))
+                headers = getattr(getattr(exc, 'response', None), 'headers', None) or {}
                 if isinstance(exc, APITimeoutError):
                     raise
                 override = headers.get('x-should-retry')

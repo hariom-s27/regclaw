@@ -193,7 +193,7 @@ def load_inputs(args, *, root=ROOT, locked_files=None):
         require(pid in roster and record['stratum'] == roster[pid] and record['split'] == 'dev', 'record_profile')
         require(record['setting'] in ARMS and record['effort_effective'] == record['setting'] and
                 record['llm_detail'] in R.LLM_DETAILS and type(record['repeat']) is int, 'record_setting')
-        require(type(record['http_attempts']) is int and 0 <= record['http_attempts'] <= L.RUN_RESERVE,
+        require(type(record['http_attempts']) is int and 0 <= record['http_attempts'] <= FC.RESERVES['main'],
                 'record_attempts')
         require(all(isinstance(record[k], dict) and all(v in M.RANK for v in record[k].values())
                     for k in ('final', 'rule')), 'record_labels')
@@ -205,6 +205,9 @@ def load_inputs(args, *, root=ROOT, locked_files=None):
         actual.append((record['setting'], record['repeat'], pid))
     require(len(records) == 100 and len(set(actual)) == 100 and set(actual) == expected, 'main_completion')
     require(sum(r['http_attempts'] for r in records) == counts['http_attempts'], 'record_attempts')
+    # G3-04 F10: main's global ledger delta must equal its own runs' HTTP attempts.
+    require(global_accounting['global_end'] - global_accounting['global_start'] ==
+            sum(r['http_attempts'] for r in records), 'global_delta_mismatch')
     tags = load_tags(paths['tags'], required=list(gold))
     require(set(tags) == set(gold), 'tag_coverage')
     return dict(root=root, dest=dest, paths=paths, shas=sha, records=records, cells=cells, gold=gold,
