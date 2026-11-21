@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import signal
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -28,6 +29,7 @@ from standards.ruleset import normalised_sha
 CHECK_RULESET = FC.ruleset.check_ruleset
 FAKE_LOCKED = ('fake_module.py',)
 LIVE_ENV = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai'}
+STAMP = '2026-11-19T00:00:00+00:00'
 
 
 @pytest.fixture
@@ -119,6 +121,40 @@ def write_new(path, text):
     with path.open('x', encoding='utf-8', newline='\n') as stream:
         stream.write(text)
     return path
+
+
+def seed_ledger(path, *, step, calls, now=STAMP):
+    """Invent earlier v2 events; never use an aggregate reserve."""
+    if not path.exists():
+        write_new(path, '')
+    remaining = calls
+    reserve = FC.RESERVES[step]
+    while remaining:
+        count = min(reserve, remaining - reserve) if remaining > reserve else remaining
+        index = sum(row['kind'] == 'reserve' for row in FC.read_call_ledger(path)) + 1
+        unit = f'q{index:02d}' if step == 'candidates' else f'seed-{step}-{index}'
+        FC.append_call_ledger(path, step=step, kind='reserve', unit=unit, amount=reserve, now=now)
+        FC.append_call_ledger(path, step=step, kind='settle', unit=unit, amount=count - reserve, now=now)
+        remaining -= count
+
+
+def seed_pair(global_path, folder_path, *, step, calls, now=STAMP):
+    for path in (global_path, folder_path):
+        if not path.exists():
+            write_new(path, '')
+    remaining, reserve = calls, FC.RESERVES[step]
+    while remaining:
+        count = min(reserve, remaining - reserve) if remaining > reserve else remaining
+        rows = FC.read_call_ledger(global_path)
+        if step == 'candidates':
+            index = max((int(r['unit'][1:]) for r in rows if r['step'] == step
+                         and r['unit'].startswith('q') and r['unit'][1:].isdigit()), default=0) + 1
+            unit = f'q{index:02d}'
+        else:
+            unit = f'seed-{step}-{sum(r["kind"] == "reserve" for r in rows) + 1}'
+        FC.charge(global_path, folder_path, step=step, kind='reserve', unit=unit, amount=reserve, now=now)
+        FC.charge(global_path, folder_path, step=step, kind='settle', unit=unit, amount=count - reserve, now=now)
+        remaining -= count
 
 
 def write_profiles(tmp_path, split='dev'):
@@ -424,10 +460,20 @@ class FakeRetriever:
         self.closed = True
 
 
-def candidate_args(tmp_path, monkeypatch, split='dev', cache_parts=('cache',)):
+def candidate_args(tmp_path, monkeypatch, split='dev', cache_parts=('cache',), profile_count=1):
     monkeypatch.setattr(provider, 'ROOT', tmp_path)
     monkeypatch.setenv('REGCLAW_RUN_DIR', 'data/runs/s10c1-fake')
-    p = write_profiles(tmp_path, split)
+    write_new(tmp_path / 'data/runs/s10c_paid.lock', '')
+    doc = profile_doc(split)
+    if profile_count != 1:
+        entry = doc['profiles'][0]
+        doc['profiles'] = []
+        for index in range(profile_count):
+            row = copy.deepcopy(entry)
+            row['id'] = f'FAKE-{index}'
+            row['profile']['device_name'] = f'FAKE device {index}'
+            doc['profiles'].append(row)
+    p = write_new(tmp_path / 'P.yaml', yaml.safe_dump(doc))
     write_new(tmp_path / FC.PROFILES_MANIFEST_REL, json.dumps(dict(
         format='s10-profiles-manifest.v1', files={'dev_profiles.yaml': dict(
             sha256_lf=normalised_sha(p.read_bytes()))})))
@@ -501,7 +547,7 @@ def test_candidates_cli_outputs_are_write_once(tmp_path, fake_data, monkeypatch,
 @pytest.mark.parametrize('append', [False, True])
 def test_candidates_cli_counts_cache_deltas_and_ledger(tmp_path, fake_data, monkeypatch, capsys, append):
     args, ledger = candidate_args(tmp_path, monkeypatch)
-    FC.charge(global_ledger(tmp_path), ledger, step='pilot', calls=4, now='FAKE-before')
+    seed_pair(global_ledger(tmp_path), ledger, step='pilot', calls=4)
     ledger_before = ledger.read_bytes()
     cache_before = {}
     for name in (FC.CYPHER_CACHE_NAME, FC.EMBEDDING_CACHE_NAME):
@@ -513,12 +559,13 @@ def test_candidates_cli_counts_cache_deltas_and_ledger(tmp_path, fake_data, monk
         made.append(FakeRetriever(**kwargs, append=append))
         return made[-1]
 
-    assert fc_main(args, data=fake_data, retriever_factory=factory, now='FAKE-after') == 0
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 0
     expected = 2 if append else 0
     assert FC.ledger_total(ledger) == FC.ledger_total(global_ledger(tmp_path)) == 4 + expected
     assert ledger.read_bytes().startswith(ledger_before)
     rows = [json.loads(line) for line in ledger.read_text(encoding='utf-8').splitlines()]
-    assert rows[-1] == dict(step='candidates', calls=expected, timestamp='FAKE-after')
+    assert rows[-1] == dict(format=FC.LEDGER_FORMAT, seq=4, step='candidates', kind='settle',
+                           unit='q01', amount=expected - FC.CANDIDATE_RESERVE, ts=STAMP)
     global_rows = [json.loads(line) for line in global_ledger(tmp_path).read_text(encoding='utf-8').splitlines()]
     assert global_rows == rows
     assert made[0].closed and made[0].requests == [(FC.tool_query('FAKE device from this test'), 30)]
@@ -543,8 +590,8 @@ def test_candidates_cli_accounts_for_failed_build(tmp_path, fake_data, monkeypat
         made.append(FakeRetriever(**kwargs, fail=True))
         return made[-1]
 
-    assert fc_main(args, data=fake_data, retriever_factory=factory, now='FAKE-failure') == 2
-    assert FC.ledger_total(ledger) == 2 and made[0].closed
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 2
+    assert FC.ledger_total(ledger) == FC.CANDIDATE_RESERVE and made[0].closed
     assert not (tmp_path / 'C.json').exists() and not (tmp_path / 'M.json').exists()
     output = capsys.readouterr().out
     assert 'retrieval_calls=2' in output and 'RuntimeError' in output and 'private' not in output
@@ -563,7 +610,8 @@ def test_candidates_cli_prints_only_counts_and_shas(tmp_path, fake_data, monkeyp
 
 def test_candidates_cli_rejects_invalid_ledger_before_factory(tmp_path, fake_data, monkeypatch):
     args, ledger = candidate_args(tmp_path, monkeypatch)
-    write_new(ledger, json.dumps(dict(step='FAKE', calls=True, timestamp='FAKE')) + '\n')
+    write_new(ledger, json.dumps(dict(format=FC.LEDGER_FORMAT, seq=1, ts=STAMP,
+        step='candidates', kind='reserve', unit='q01', amount=True)) + '\n')
     made = []
     assert fc_main(args, data=fake_data, retriever_factory=lambda **kw: made.append(kw)) == 2
     assert made == [] and not (tmp_path / 'cache').exists()
@@ -735,7 +783,7 @@ def test_candidate_code_lock_refuses_before_factory(tmp_path, fake_data, monkeyp
 
 def test_candidate_completion_records_code_lock_and_global_total(tmp_path, fake_data, monkeypatch):
     args, ledger = candidate_args(tmp_path, monkeypatch)
-    FC.append_call_ledger(global_ledger(tmp_path), step='pilot', calls=3, now='FAKE-earlier-attempt')
+    seed_ledger(global_ledger(tmp_path), step='pilot', calls=3)
     assert fc_main(args, data=fake_data, retriever_factory=FakeRetriever) == 0
     lock_sha = normalised_sha((tmp_path / L.LOCK_REL).read_bytes())
     doc = json.loads((ledger.parent / FC.CANDIDATE_RUN_NAME).read_bytes())
@@ -784,7 +832,7 @@ def test_candidate_counting_failure_charges_reserve_per_started_query(tmp_path, 
     def factory(**kwargs):
         made.append(BrokenCounterRetriever(**kwargs))
         return made[-1]
-    assert fc_main(args, data=fake_data, retriever_factory=factory, now='FAKE-failure') == 2
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 2
     assert len(made[0].requests) == 1 and made[0].closed
     assert FC.ledger_total(ledger) == FC.ledger_total(global_ledger(tmp_path)) == 11
     assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
@@ -796,7 +844,7 @@ def test_candidate_counting_failure_charges_reserve_per_started_query(tmp_path, 
 def test_candidate_global_ledger_short_refuses_before_factory(tmp_path, fake_data, monkeypatch, capsys):
     # G-01: folder charges missing from the global ledger (missing or edited global ledger).
     args, ledger = candidate_args(tmp_path, monkeypatch)
-    FC.append_call_ledger(ledger, step='candidates', calls=3, now='FAKE-folder-only')
+    seed_ledger(ledger, step='candidates', calls=3)
     before = candidate_snapshot(tmp_path)
     assert fc_main(args, data=fake_data, retriever_factory=must_not_build) == 2
     assert capsys.readouterr().out == 'global_ledger_short count=1\n'
@@ -806,7 +854,7 @@ def test_candidate_global_ledger_short_refuses_before_factory(tmp_path, fake_dat
 def test_candidate_retrieval_cap_uses_global_total(tmp_path, fake_data, monkeypatch):
     # G-01: 140 calls of an earlier attempt elsewhere + reserve 11 > 150, with an empty folder ledger.
     args, ledger = candidate_args(tmp_path, monkeypatch)
-    FC.append_call_ledger(global_ledger(tmp_path), step='candidates', calls=140, now='FAKE-earlier-attempt')
+    seed_ledger(global_ledger(tmp_path), step='candidates', calls=140)
     made = []
     def factory(**kwargs):
         made.append(FakeRetriever(**kwargs))
@@ -815,3 +863,287 @@ def test_candidate_retrieval_cap_uses_global_total(tmp_path, fake_data, monkeypa
     assert made[0].requests == [] and made[0].query_embeddings.embedder.api_requests == 0
     assert FC.ledger_total(ledger) == 0 and FC.ledger_total(global_ledger(tmp_path)) == 140
     assert not (tmp_path / 'C.json').exists()
+
+
+@pytest.mark.parametrize('point', ['before_reserve', 'after_reserve', 'during_call', 'before_settle'])
+def test_candidate_interrupt_keeps_unsettled_reserve(tmp_path, fake_data, monkeypatch, point):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    reserve = FC.reserve_unit
+    sent = []
+
+    def interrupted_reserve(*args, **kwargs):
+        if point == 'before_reserve':
+            raise KeyboardInterrupt
+        reserve(*args, **kwargs)
+        if point == 'after_reserve':
+            raise KeyboardInterrupt
+
+    def interrupted_settle(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    class Retriever(FakeRetriever):
+        def generate(self, request):
+            sent.append('cypher')
+            if point == 'during_call':
+                raise KeyboardInterrupt
+            return super().generate(request)
+
+        def retrieve(self, *args, **kwargs):
+            result = super().retrieve(*args, **kwargs)
+            sent.append('embedding')
+            return result
+
+    monkeypatch.setattr(FC, 'reserve_unit', interrupted_reserve)
+    if point == 'before_settle':
+        monkeypatch.setattr(FC, 'settle_unit', interrupted_settle)
+    original = signal.getsignal(signal.SIGINT)
+    assert fc_main(args, data=fake_data, retriever_factory=Retriever, now=STAMP) == 2
+    assert signal.getsignal(signal.SIGINT) is original
+    assert FC.ledger_total(global_ledger(tmp_path)) >= len(sent)
+    for path in (global_ledger(tmp_path), ledger):
+        assert not any(row['kind'] == 'settle' for row in FC.read_call_ledger(path))
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    assert not list(tmp_path.rglob('STOPPED.json'))
+
+
+@pytest.mark.parametrize('second', [False, True])
+def test_candidate_sigint_finishes_or_keeps_reserve_and_restores_handler(tmp_path, fake_data, monkeypatch, capsys, second):
+    args, ledger = candidate_args(tmp_path, monkeypatch, profile_count=10)
+    made = []
+    original = signal.getsignal(signal.SIGINT)
+
+    class Retriever(FakeRetriever):
+        def retrieve(self, *args, **kwargs):
+            result = super().retrieve(*args, **kwargs)
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            if second:
+                signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            return result
+
+    def factory(**kwargs):
+        made.append(Retriever(**kwargs))
+        return made[-1]
+
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 2
+    assert signal.getsignal(signal.SIGINT) is original
+    assert len(made[0].requests) == 1 and made[0].closed
+    assert capsys.readouterr().out.count('stop requested: finishing the current run; press Ctrl+C again to abort now') == 1
+    assert [r['kind'] for r in FC.read_call_ledger(ledger)] == (['reserve'] if second else ['reserve', 'settle'])
+    assert FC.ledger_total(global_ledger(tmp_path)) == (FC.CANDIDATE_RESERVE if second else 2)
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    assert not list(tmp_path.rglob('STOPPED.json'))
+
+
+@pytest.mark.parametrize('counter', ['cypher', 'embedding'])
+def test_candidate_query_three_counting_failure_keeps_reserve(tmp_path, fake_data, monkeypatch, counter):
+    args, ledger = candidate_args(tmp_path, monkeypatch, profile_count=10)
+    sent = []
+    made = []
+
+    class Counter:
+        attempts = 5
+
+        def __init__(self, kind):
+            self.kind, self.value, self.broken = kind, 0, False
+
+        @property
+        def api_requests(self):
+            if self.broken:
+                raise RuntimeError('FAKE counter unreadable')
+            return self.value
+
+        def send(self):
+            self.value += 1
+            sent.append(self.kind)
+            if self.kind == counter and self.value == 3:
+                self.broken = True
+
+        def generate(self, request):
+            self.send()
+            return {}
+
+    class Retriever:
+        max_retries = 2
+
+        def __init__(self, cache_file):
+            self.llm = Counter('cypher')
+            self.embedder = Counter('embedding')
+            self.cypher_cache = NS(path=Path(cache_file))
+            self.query_embeddings = NS(cache=NS(path=Path(cache_file).with_name(FC.EMBEDDING_CACHE_NAME)),
+                                       embedder=self.embedder)
+            self.requests, self.closed = [], False
+
+        def retrieve(self, query, top_k):
+            self.requests.append(query)
+            self.llm.generate({})
+            self.embedder.send()
+            return [], None
+
+        def close(self):
+            self.closed = True
+
+    def factory(**kwargs):
+        made.append(Retriever(**kwargs))
+        return made[-1]
+
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 2
+    assert len(made[0].requests) == 3 and made[0].closed
+    rows = FC.read_call_ledger(ledger)
+    assert [(r['unit'], r['kind']) for r in rows] == [
+        ('q01', 'reserve'), ('q01', 'settle'), ('q02', 'reserve'), ('q02', 'settle'), ('q03', 'reserve')]
+    assert FC.ledger_total(global_ledger(tmp_path)) == FC.ledger_total(ledger) == 4 + FC.CANDIDATE_RESERVE
+    assert FC.ledger_total(ledger) >= len(sent)
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+
+
+def test_candidate_reserve_fsync_precedes_paid_call(tmp_path, fake_data, monkeypatch):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    original_handler = signal.getsignal(signal.SIGINT)
+    events = []
+    monkeypatch.setattr(FC.os, 'fsync', lambda fd: events.append('fsync'))
+
+    class Retriever(FakeRetriever):
+        def retrieve(self, *args, **kwargs):
+            assert events == ['fsync', 'fsync']
+            assert FC.read_call_ledger(ledger)[-1]['kind'] == 'reserve'
+            assert FC.read_call_ledger(global_ledger(tmp_path))[-1]['kind'] == 'reserve'
+            events.append('call')
+            return super().retrieve(*args, **kwargs)
+
+    assert fc_main(args, data=fake_data, retriever_factory=Retriever, now=STAMP) == 0
+    assert signal.getsignal(signal.SIGINT) is original_handler
+    assert events[:3] == ['fsync', 'fsync', 'call']
+
+
+@pytest.mark.parametrize('location', ['global', 'folder'])
+@pytest.mark.parametrize('variant', ['settle_only', 'duplicate_settle', 'positive_settle', 'out_of_range',
+                                    'bad_format', 'bad_seq', 'bool_amount', 'duplicate_reserve', 'bad_timestamp'])
+def test_ledger_rejects_invalid_v2_rows(tmp_path, fake_data, monkeypatch, location, variant):
+    args, folder = candidate_args(tmp_path, monkeypatch)
+    reserve = dict(format=FC.LEDGER_FORMAT, seq=1, ts=STAMP, step='candidates', kind='reserve', unit='q01', amount=11)
+    settle = dict(reserve, seq=2, kind='settle', amount=-9)
+    rows = [reserve, settle]
+    if variant == 'settle_only':
+        rows = [dict(settle, seq=1)]
+    elif variant == 'duplicate_settle':
+        rows.append(dict(settle, seq=3))
+    elif variant == 'positive_settle':
+        settle['amount'] = 1
+    elif variant == 'out_of_range':
+        settle['amount'] = -12
+    elif variant == 'bad_format':
+        reserve['format'] = 'FAKE-invalid'
+    elif variant == 'bad_seq':
+        reserve['seq'] = 2
+    elif variant == 'bool_amount':
+        reserve['amount'] = True
+    elif variant == 'duplicate_reserve':
+        rows = [reserve, dict(reserve, seq=2)]
+    else:
+        reserve['ts'] = '2026-11-19T00:00:00'
+    path = global_ledger(tmp_path) if location == 'global' else folder
+    raw = ''.join(json.dumps(row) + '\n' for row in rows)
+    write_new(path, raw)
+    assert fc_main(args, data=fake_data, retriever_factory=must_not_build) == 2
+    assert path.read_text(encoding='utf-8') == raw
+    with pytest.raises(FC.LedgerError):
+        FC.read_call_ledger(path)
+
+
+@pytest.mark.parametrize('raw', ['{"format": "partial"}', '{broken\n', 'NaN\n'])
+def test_ledger_torn_line_refuses_without_repair(tmp_path, fake_data, monkeypatch, capsys, raw):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    write_new(ledger, raw)
+    assert fc_main(args, data=fake_data, retriever_factory=must_not_build) == 2
+    assert capsys.readouterr().out == 'ledger_torn_line count=1\n'
+    assert ledger.read_text(encoding='utf-8') == raw
+
+
+def test_classify_reserve_matches_maximum_http_requests(monkeypatch):
+    monkeypatch.setenv('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', '64000')
+    transport, calls = sdk(status_error(429), status_error(503), 'length',
+                           status_error(429), status_error(503), 'stop')
+    response = AzureOpenAIAdapter('S10', sdk_client=transport).classify(request())
+    assert len(calls) == len(response.provenance['http_log']) == L.RUN_RESERVE == 6
+
+
+def test_candidate_reserve_matches_maximum_http_requests(tmp_path, fake_data, monkeypatch):
+    monkeypatch.setattr('dotenv.load_dotenv', lambda *args, **kwargs: False)
+    from retrieval.hybrid_retriever import HybridRetriever, RunLog, SCHEMA_FALLBACK
+    from retrieval.query_embeddings import QueryEmbeddings
+    from embed.embed import AzureOpenAIEmbedder, EmbeddingConfig, MODEL
+
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    chat_calls, embedding_calls = [], []
+
+    def chat(**kwargs):
+        chat_calls.append(kwargs)
+        finish = 'length' if len(chat_calls) % 2 else 'stop'
+        return NS(model='FAKE-retriever', choices=[NS(finish_reason=finish, message=NS(
+            content=json.dumps(dict(cypher='MATCH (c:Clause) RETURN c.id AS clause_id', params=[])), refusal=None))],
+            usage=NS(prompt_tokens=1, completion_tokens=1))
+
+    def embed(**kwargs):
+        embedding_calls.append(kwargs)
+        if len(embedding_calls) < 5:
+            raise status_error(429)
+        return NS(model=MODEL, data=[NS(index=0, embedding=[1.0] + [0.0] * 1535)], usage=NS(prompt_tokens=1))
+
+    def factory(cache_file):
+        inner = HybridRetriever.__new__(HybridRetriever)
+        inner.llm = AzureOpenAIAdapter('s8_cypher', sdk_client=NS(chat=NS(completions=NS(create=chat))))
+        inner.max_retries, inner.fresh, inner.schema = 2, True, SCHEMA_FALLBACK
+        inner.labels, inner.rels = {'Clause'}, set()
+        inner.cypher_cache = NS(path=Path(cache_file), append=lambda row: None)
+        inner._explain_is_read_only = lambda *args: None
+        inner._run_ids = lambda *args: []
+        inner.driver = NS(execute_query=lambda *args, **kwargs: ([], None, None))
+        inner.db = 'FAKE'
+        embedder = AzureOpenAIEmbedder(client=NS(embeddings=NS(create=embed)),
+            config=EmbeddingConfig(provider='azure_openai', deployment=MODEL, model_version='1'),
+            encoding=NS(encode=lambda text, **kwargs: [1]), sleep=lambda seconds: None)
+        inner.query_embeddings = QueryEmbeddings(Path(cache_file).with_name(FC.EMBEDDING_CACHE_NAME), embedder)
+
+        def retrieve(question, top_k):
+            inner.stage1_filter(question, RunLog(question), None)
+            inner.query_embeddings.get(question)
+            return [], None
+
+        inner.retrieve, inner.close = retrieve, lambda: None
+        return inner
+
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 0
+    assert len(chat_calls) == 6 and len(embedding_calls) == 5
+    assert FC.CANDIDATE_RESERVE == len(chat_calls) + len(embedding_calls) == 11
+    assert FC.ledger_total(ledger) == 11
+    manifest = json.loads((ledger.parent / FC.CANDIDATE_RUN_NAME).read_bytes())
+    receipt = json.loads((tmp_path / FC.CANDIDATE_RECEIPT_REL).read_bytes())
+    for doc in (manifest, receipt):
+        assert doc['global_start'] == 0 and doc['global_end'] == 11
+        assert doc['global_ledger_last_seq'] == 2
+        assert doc['global_ledger_prefix_sha256_lf'] == normalised_sha(global_ledger(tmp_path).read_bytes())
+
+
+def test_candidate_duplicate_global_reserve_refuses_before_writes(tmp_path, fake_data, monkeypatch, capsys):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    path = global_ledger(tmp_path)
+    FC.append_call_ledger(path, step='candidates', kind='reserve', unit='q01', amount=11, now=STAMP)
+    original = FC.reserve_unit
+    before = path.read_bytes()
+    made = []
+
+    def duplicate(global_path, folder_path, **kwargs):
+        return original(global_path, folder_path, **{**kwargs, 'unit': 'q01'})
+
+    def factory(**kwargs):
+        made.append(FakeRetriever(**kwargs))
+        return made[-1]
+
+    monkeypatch.setattr(FC, 'reserve_unit', duplicate)
+    assert fc_main(args, data=fake_data, retriever_factory=factory, now=STAMP) == 2
+    assert 'ledger_duplicate_reserve' in capsys.readouterr().out
+    assert path.read_bytes() == before and not ledger.exists()
+    assert made[0].requests == [] and made[0].closed

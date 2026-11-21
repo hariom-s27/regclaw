@@ -1,4 +1,5 @@
 """S10c v4 lock tests: invented source/metadata, offline, write-once fixtures."""
+import ast
 import builtins
 import hashlib
 import io
@@ -22,6 +23,7 @@ TEST_NAMES = (
     'tests/conftest.py', 'tests/_netguard.py', 'tests/test_s10c1_part_a.py',
     'tests/test_s10c1_dev_export.py', 'tests/test_s10c1_live.py',
     'tests/test_s10c1_analysis.py', 'tests/test_s10c1_lock.py',
+    'tests/test_s10c1_paid_lock.py',
     'tests/test_s10c1_addendum_freeze_n.py',
 )
 
@@ -128,7 +130,7 @@ def file_set(w):
 
 
 def test_locked_exact_source_inventory_and_provenance_separation(world):
-    assert len(K.LOCKED) == 57
+    assert len(K.LOCKED) == 58
     assert 'eval/s10/addendum_freeze_n.py' in K.LOCKED
     assert tuple(sorted(set(K.LOCKED))) == K.LOCKED
     assert all(rel.endswith('.py') and not rel.startswith('tests/') for rel in K.LOCKED)
@@ -137,6 +139,56 @@ def test_locked_exact_source_inventory_and_provenance_separation(world):
             'ingest/__init__.py', 'ingest/validate.py'} <= set(K.LOCKED)
     w = world(extra_test=True)
     assert set(K.provenance_test_stats(w.root)) == set(TEST_NAMES) | {'tests/test_s10c1_future.py'}
+
+
+def test_locked_equals_static_repo_import_closure():
+    root = Path(__file__).resolve().parents[1]
+    seeds = ('eval/s10/live.py', 'eval/s10/frozen_candidates.py', 'eval/s10/analysis.py',
+             'eval/s10/dev_export.py', 'eval/s10/s10c_lock.py', 'eval/s10/addendum_freeze_n.py')
+
+    def checked_source(path):
+        resolved = path.resolve()
+        assert resolved.is_relative_to(root)
+        relative = resolved.relative_to(root)
+        assert not any(p.casefold() == 'data' or p.casefold().startswith('.env')
+                       or any(word in p.casefold() for word in ('holdout', 'jid_map', 'profiles_draft'))
+                       for p in relative.parts)
+        return resolved
+
+    def sources(parts):
+        paths = [root.joinpath(*parts[:i], '__init__.py') for i in range(1, len(parts) + 1)]
+        if parts:
+            paths.append(root.joinpath(*parts).with_suffix('.py'))
+        result = []
+        for path in paths:
+            if not path.is_file():
+                continue
+            resolved = checked_source(path)
+            relative = resolved.relative_to(root)
+            result.append(relative.as_posix())
+        return result
+
+    pending, closure = list(seeds), set()
+    while pending:
+        relative = pending.pop()
+        if relative in closure:
+            continue
+        closure.add(relative)
+        package = list(Path(relative).parent.parts)
+        pending.extend(sources(list(Path(relative).with_suffix('').parts)))
+        tree = ast.parse(checked_source(root / relative).read_text(encoding='utf-8'), filename=relative)
+        for node in ast.walk(tree):
+            targets = []
+            if isinstance(node, ast.Import):
+                targets = [alias.name.split('.') for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = package[:len(package) - node.level + 1] if node.level else []
+                base += node.module.split('.') if node.module else []
+                targets = [base] + [base + [alias.name] for alias in node.names if alias.name != '*']
+            for target in targets:
+                pending.extend(sources(target))
+    assert closure == set(K.LOCKED)
+    assert 'eval/s10/paid_lock.py' in closure
 
 
 def test_show_is_read_only_sorted_and_has_exact_listing_hash(world):

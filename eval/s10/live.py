@@ -1,26 +1,23 @@
 """Guarded S10c pilot/main driver. Real execution requires the Part E code lock.
 
-The driver owns interleaving, charges completed HTTP attempts to the existing
-append-only ledger in each phase's run directory, and never scores a stopped
-folder. Every charge is also appended to the fixed global ledger
-(FC.GLOBAL_LEDGER_REL); cap, headroom and reserve checks use the global total,
-which must cover the verified earlier totals plus the current folder ledger.
-With one sequential
-writer, a process crash before the after-run ledger append can under-count at
-most 6 classification requests (one in-flight pilot/main run). This bound does
-not describe a separate candidate-build process. There is no automatic resume
-or ledger repair; partial artifacts are retained for reconciliation.
+The driver owns interleaving and reserves each run durably before calling it.
+Normal counted returns settle the reservation; failures keep it. A phase holds
+the paid-process lock through preflight, execution and completion. Global-first
+reserves and folder-first settlements preserve conservative global accounting.
+Stopped folders are never scored; partial artifacts are retained without repair.
 
 Pilot selection seed source: the approved S10c pilot-selection specification
 supplied with this task, which explicitly fixes "S10c-v1|pilot".
 """
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import math
 import os
 from pathlib import Path
 import random
+import signal
 import sys
 
 from llm import provider
@@ -34,6 +31,7 @@ from . import dev_export as E
 from .tagger import build_tags
 from .split_guard import load_eval_files
 from .tagger import load_tags
+from .paid_lock import paid_lock, PaidLockHeld
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCK_REL = 'eval/s10/manifests/s10c_code_lock.json'
@@ -65,6 +63,28 @@ class PilotGate(LiveCheck):
 def require(condition, check):
     if not condition:
         raise LiveCheck(check)
+
+
+@dataclass
+class StopState:
+    requested: bool = False
+
+
+@contextmanager
+def graceful_sigint(*, out=print):
+    original = signal.getsignal(signal.SIGINT)
+    state = StopState()
+
+    def handler(signum, frame):
+        state.requested = True
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        out('stop requested: finishing the current run; press Ctrl+C again to abort now')
+
+    try:
+        signal.signal(signal.SIGINT, handler)
+        yield state
+    finally:
+        signal.signal(signal.SIGINT, original)
 
 
 def checked_path(root, value):
@@ -199,13 +219,14 @@ class Plan:
     earlier_dirs: tuple
     global_path: Path
     global_start: int
+    stop_state: StopState | None = None
 
 
 def completed_step(root, phase, path, lock_sha=None):
     """Accept earlier totals only from a receipt-anchored, completed manifest.
 
-    Ledger rows retain their existing schema. Their sum verifies the manifest's
-    own-folder total; it never supplies an unanchored replacement total.
+    Validated v2 ledger sums verify the manifest's own-folder total; they never
+    supply an unanchored replacement total.
     """
     path = checked_path(root, path)
     require(not (path.parent / 'STOPPED.json').exists(), 'earlier_stopped')
@@ -398,14 +419,19 @@ def _global_end(plan):
 
 
 def _counts(plan, records, calls, ledger_start):
+    try:
+        folder_total = FC.ledger_total(plan.run_dir / FC.CALL_LEDGER_NAME)
+    except Exception:
+        folder_total = ledger_start + calls
     return dict(records=len(records), planned_records=len(plan.profiles) * len(SETTINGS) * plan.repeats,
-                http_attempts=calls, ledger_start=ledger_start, ledger_total=ledger_start + calls,
-                call_totals=dict(**plan.prior_calls, current_ledger=ledger_start + calls,
-                                 total=sum(plan.prior_calls.values()) + ledger_start + calls,
+                http_attempts=calls, ledger_start=ledger_start, ledger_total=folder_total,
+                call_totals=dict(**plan.prior_calls, current_ledger=folder_total,
+                                 total=sum(plan.prior_calls.values()) + folder_total,
                                  global_start=plan.global_start, global_end=_global_end(plan)))
 
 
 def finalize(plan, records, calls, ledger_start, *, summary_factory=None, now=None):
+    require(not (plan.stop_state and plan.stop_state.requested), 'interrupted')
     counts = _counts(plan, records, calls, ledger_start)
     require(counts['records'] == counts['planned_records'], 'incomplete_run')
     _guards(plan)
@@ -428,7 +454,10 @@ def finalize(plan, records, calls, ledger_start, *, summary_factory=None, now=No
     artifact_text = _json_text(artifact)
     outputs[artifact_name] = dict(sha256_lf=normalised_sha(artifact_text.encode('utf-8')))
     ledger_sha = normalised_sha((plan.run_dir / FC.CALL_LEDGER_NAME).read_bytes())
+    snapshot = FC.ledger_snapshot(plan.global_path)
+    global_end = snapshot.pop('total')
     manifest = dict(format=RUN_FORMAT, phase=plan.phase, label='provisional (GPT)', counts=counts,
+                    global_start=plan.global_start, global_end=global_end, **snapshot,
                     run_dir=plan.run_dir.relative_to(plan.root).as_posix(), ledger_sha256_lf=ledger_sha,
                     settings=[dict(name=s.name, effort=s.effort, max_completion_tokens=plan.cap,
                                    timeout_s=plan.timeout) for s in SETTINGS], repeats=plan.repeats, seed=SEED,
@@ -438,9 +467,12 @@ def finalize(plan, records, calls, ledger_start, *, summary_factory=None, now=No
                    shas=dict(runs_sha256_lf=outputs['runs.jsonl']['sha256_lf'],
                              ledger_sha256_lf=ledger_sha,
                              run_manifest_sha256_lf=normalised_sha(manifest_text.encode('utf-8'))))
+    require(not (plan.stop_state and plan.stop_state.requested), 'interrupted')
     write_once(plan.out_dir / 'run_manifest.json', manifest_text)
+    require(not (plan.stop_state and plan.stop_state.requested), 'interrupted')
     write_once(plan.committed, _json_text(receipt))
     # Completion requires this last exclusive write too; any failure marks STOPPED.
+    require(not (plan.stop_state and plan.stop_state.requested), 'interrupted')
     write_once(plan.out_dir / artifact_name, artifact_text)
     return manifest
 
@@ -458,6 +490,7 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
         consecutive = 0
         with (plan.out_dir / 'runs.jsonl').open('x', encoding='utf-8', newline='\n') as stream:
             for index, (repeat, pid, setting) in enumerate(R.plan_order(plan.profiles, SETTINGS, plan.repeats, SEED)):
+                require(not (plan.stop_state and plan.stop_state.requested), 'interrupted')
                 _guards(plan)
                 require(FC.ledger_total(ledger) == ledger_start + calls, 'ledger_changed')
                 require(FC.ledger_total(plan.global_path) == plan.global_start + calls, 'global_ledger_changed')
@@ -466,12 +499,11 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
                 client = plan.clients[setting.name]
                 require(client.effort == setting.effort, 'client_effort')
                 client.last_http_log = []
-                try:
-                    record = R.run_one(plan.profiles[pid], setting, repeat, client, plan.retriever, plan.data)
-                finally:
-                    sent = len(client.last_http_log)
-                    calls += sent
-                    FC.charge(plan.global_path, ledger, step=plan.phase, calls=sent, now=now)
+                unit = f'{plan.run_dir.relative_to(plan.root).as_posix()}:{index}'
+                require(not (plan.stop_state and plan.stop_state.requested), 'interrupted')
+                FC.reserve_unit(plan.global_path, ledger, step=plan.phase, unit=unit, now=now)
+                record = R.run_one(plan.profiles[pid], setting, repeat, client, plan.retriever, plan.data)
+                sent = len(client.last_http_log)
                 require(0 <= sent <= RUN_RESERVE and record['http_attempts'] == sent, 'http_attempts')
                 record = dict(call_index=index, **record)
                 stream.write(json.dumps(record, sort_keys=True, allow_nan=False) + '\n')
@@ -482,9 +514,12 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
                 require(not getattr(plan.retriever, 'misses', ()), 'frozen_miss')
                 consecutive = consecutive + 1 if record['llm_detail'] == 'error' else 0
                 require(consecutive < 3, 'consecutive_errors')
+                FC.settle_unit(plan.global_path, ledger, step=plan.phase, unit=unit, actual=sent, now=now)
+                calls += sent
         manifest = finalize(plan, records, calls, ledger_start, summary_factory=summary_factory, now=now)
     except (Exception, SystemExit, KeyboardInterrupt) as exc:
-        reason = str(exc) if isinstance(exc, LiveCheck) else 'run_validation'
+        reason = ('interrupted' if isinstance(exc, KeyboardInterrupt) else str(exc)
+                  if isinstance(exc, (LiveCheck, FC.LedgerError)) else 'run_validation')
         try:
             marker = _json_text(dict(reason=reason, counts=_counts(plan, records, calls, ledger_start)))
             # G-11: the marker goes to the output folder (if created) and the phase run dir.
@@ -498,7 +533,7 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
             except (Exception, SystemExit):
                 out('stopped_marker_write count=1')
         out('pilot gate failed' if isinstance(exc, PilotGate) else f'{reason} count=1')
-        return 1 if isinstance(exc, PilotGate) else 4
+        return 2 if isinstance(exc, FC.LedgerError) else 1 if isinstance(exc, PilotGate) else 4
     out(f'records={len(records)} http_attempts={calls} '
         f'runs_sha256_lf={manifest["outputs"]["runs.jsonl"]["sha256_lf"]}')
     return 0
@@ -517,13 +552,18 @@ def main(argv=None, *, root=ROOT, data=None, client_factory=None, retriever_fact
                 command.add_argument('--' + name, required=True)
     args = parser.parse_args(argv)
     try:
-        plan = preflight(args, root=root, data=data, client_factory=client_factory,
-                         retriever_factory=retriever_factory, locked_files=locked_files,
-                         lock_checks=lock_checks, env=env, out=out)
-    except (Exception, SystemExit) as exc:
-        out(f'{str(exc) if isinstance(exc, LiveCheck) else "preflight_validation"} count=1')
+        with paid_lock(root), graceful_sigint(out=out) as state:
+            plan = preflight(args, root=root, data=data, client_factory=client_factory,
+                             retriever_factory=retriever_factory, locked_files=locked_files,
+                             lock_checks=lock_checks, env=env, out=out)
+            plan.stop_state = state
+            return execute(plan, summary_factory=summary_factory, now=now, out=out)
+    except PaidLockHeld as exc:
+        out(str(exc))
         return 2
-    return execute(plan, summary_factory=summary_factory, now=now, out=out)
+    except (Exception, SystemExit) as exc:
+        out(f'{str(exc) if isinstance(exc, (LiveCheck, FC.LedgerError)) else "preflight_validation"} count=1')
+        return 2
 
 
 if __name__ == '__main__':

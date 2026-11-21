@@ -59,6 +59,7 @@ LOCKED = (
     'eval/s10/live.py',
     'eval/s10/merge.py',
     'eval/s10/metrics.py',
+    'eval/s10/paid_lock.py',
     'eval/s10/prereg_freeze.py',
     'eval/s10/profile_checks.py',
     'eval/s10/runner.py',

@@ -130,7 +130,10 @@ def world(tmp_path_factory, *, omit=(), corrupt=None, mutate=None):
     lock = dict(format=A.L.LOCK_FORMAT, files={LOCKED[0]: dict(sha256_lf=normalised_sha(code.read_bytes()))})
     text = dict(gold=yaml.safe_dump(gold), cells=dumps(cells), tags=dumps(tags), export_summary=dumps(export_summary),
                 runs=''.join(json.dumps(r) + '\n' for r in records), summary=dumps(summary), lock=dumps(lock),
-                ledger=json.dumps(dict(step='main', calls=sum(r['http_attempts'] for r in records), timestamp=STAMP)) + '\n')
+                ledger=''.join(json.dumps(dict(format=A.FC.LEDGER_FORMAT, seq=2 * i + j + 1, ts=STAMP,
+                    step='main', kind=kind, unit=f'fake-run-{i}', amount=amount)) + '\n'
+                    for i, record in enumerate(records) for j, (kind, amount) in enumerate((
+                        ('reserve', A.L.RUN_RESERVE), ('settle', record['http_attempts'] - A.L.RUN_RESERVE)))))
     sha = {name: normalised_sha(value.encode()) for name, value in text.items()}
     export_manifest = dict(format=A.E.MANIFEST_FORMAT, input_shas=export_summary['input_shas'], counts=export_counts,
         outputs={rel: dict(sha256_lf=sha[name]) for name, rel in
