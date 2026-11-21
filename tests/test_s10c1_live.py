@@ -1,4 +1,5 @@
 """S10c live orchestration and request accounting with in-test fakes only."""
+import ast
 import builtins
 import io
 import json
@@ -244,10 +245,21 @@ def invoke(obj, phase='pilot', *, out_name=None, **overrides):
     lines = []
     kwargs = dict(root=obj.root, data=obj.data, client_factory=obj.factory, summary_factory=obj.summarize,
                   locked_files=FAKE_LOCKED, lock_checks=(),
-                  env={'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai'}, now=STAMP, out=lines.append)
+                  env={'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai', 'LANGFUSE_ENABLED': 'false',
+                       **phase_environment()},
+                  now=STAMP, out=lines.append)
     kwargs.update(overrides)
     code = L.main(args, **kwargs)
     return code, lines
+
+
+def phase_environment():
+    return {key: os.environ.get(key) for key in (
+        'AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', 'AZURE_OPENAI_S10_TIMEOUT_S')}
+
+
+def effective_environment():
+    return dict(REGCLAW_STUB='0', LLM_PROVIDER='azure_openai', LANGFUSE_ENABLED='false', **phase_environment())
 
 
 def main_run_dir(monkeypatch):
@@ -422,7 +434,7 @@ def test_environment_refuses_before_calls_or_writes(tmp_path_factory, monkeypatc
 
 def test_production_environment_has_no_stub_bypass(tmp_path_factory, monkeypatch):
     obj = world(tmp_path_factory, monkeypatch)
-    assert invoke(obj, env=None)[0] == 2
+    assert invoke(obj, env=None) == (2, ['stub_mode count=1'])
     assert os.environ['REGCLAW_STUB'] == '1' and obj.calls == []
 
 
@@ -836,7 +848,7 @@ def candidate_case(tmp_path_factory, monkeypatch):
 
 def fc_main(args, **kwargs):
     """Candidate CLI with a synthetic live environment and the fake lock (G-02)."""
-    kwargs.setdefault('env', {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai'})
+    kwargs.setdefault('env', {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai', 'LANGFUSE_ENABLED': 'false'})
     kwargs.setdefault('locked_files', FAKE_LOCKED)
     return FC.main(args, **kwargs)
 
@@ -1096,7 +1108,7 @@ def test_candidate_code_lock_must_equal_live_lock(tmp_path_factory, monkeypatch,
 
 
 @pytest.mark.parametrize('value', ['true', '1', '', 'False', 'yes'])
-def test_langfuse_must_be_absent_or_false(tmp_path_factory, monkeypatch, value):
+def test_langfuse_must_be_explicitly_false(tmp_path_factory, monkeypatch, value):
     # G-10
     obj = world(tmp_path_factory, monkeypatch)
     env = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai', 'LANGFUSE_ENABLED': value}
@@ -1106,7 +1118,7 @@ def test_langfuse_must_be_absent_or_false(tmp_path_factory, monkeypatch, value):
 
 def test_langfuse_false_is_accepted(tmp_path_factory, monkeypatch):
     obj = world(tmp_path_factory, monkeypatch)
-    env = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai', 'LANGFUSE_ENABLED': 'false'}
+    env = effective_environment()
     assert invoke(obj, env=env)[0] == 0
 
 
@@ -1337,3 +1349,125 @@ def test_live_ledger_torn_line_refuses_without_repair(tmp_path_factory, monkeypa
     code, lines = invoke(obj)
     assert code == 2 and lines == ['ledger_torn_line count=1']
     assert ledger.read_text(encoding='utf-8') == raw and obj.calls == []
+
+
+def test_live_refuses_absent_langfuse(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory, monkeypatch)
+    env = effective_environment()
+    env.pop('LANGFUSE_ENABLED')
+    assert invoke(obj, env=env) == (2, ['langfuse count=1'])
+    assert obj.calls == [] and not (obj.root / 'pilot').exists()
+
+
+ENV_DRIFT = [
+    ('REGCLAW_STUB', '1', 'stub_mode'), ('LLM_PROVIDER', 'anthropic', 'provider'),
+    ('LANGFUSE_ENABLED', 'true', 'langfuse'),
+    ('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', '64001', 'effective_cap'),
+    ('AZURE_OPENAI_S10_TIMEOUT_S', '1201', 'effective_timeout'),
+]
+
+
+@pytest.mark.parametrize('key,value,reason', ENV_DRIFT)
+def test_live_effective_environment_after_load_refuses(tmp_path_factory, monkeypatch, key, value, reason):
+    obj = world(tmp_path_factory, monkeypatch)
+    env = effective_environment()
+
+    def load(setting):
+        client = obj.factory(setting)
+        env[key] = value
+        if key == 'AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS':
+            client.cap = int(value)
+        elif key == 'AZURE_OPENAI_S10_TIMEOUT_S':
+            client.timeout = float(value)
+        return client
+
+    code, lines = invoke(obj, env=env, client_factory=load)
+    assert code == 4 and lines[-1] == f'{reason} count=1'
+    assert obj.calls == [] and FC.ledger_total(global_ledger(obj)) == 0
+    for folder in (obj.root / 'pilot', provider.run_dir()):
+        assert json.loads((folder / 'STOPPED.json').read_bytes())['reason'] == reason
+    assert os.environ['REGCLAW_STUB'] == '1'
+
+
+@pytest.mark.parametrize('key,value,reason', ENV_DRIFT)
+def test_live_effective_environment_change_stops_before_next_run(tmp_path_factory, monkeypatch, key, value, reason):
+    obj = world(tmp_path_factory, monkeypatch)
+    env = effective_environment()
+    original = R.run_one
+
+    def change(*args, **kwargs):
+        record = original(*args, **kwargs)
+        env[key] = value
+        return record
+
+    monkeypatch.setattr(R, 'run_one', change)
+    code, lines = invoke(obj, env=env)
+    assert code == 4 and lines[-1] == f'{reason} count=1'
+    assert len(obj.calls) == 1
+    assert [r['kind'] for r in FC.read_call_ledger(global_ledger(obj))] == ['reserve', 'settle']
+    for folder in (obj.root / 'pilot', provider.run_dir()):
+        assert json.loads((folder / 'STOPPED.json').read_bytes())['reason'] == reason
+
+
+@pytest.mark.parametrize('key,value,reason', [
+    ('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', '64001', 'effective_cap'),
+    ('AZURE_OPENAI_S10_TIMEOUT_S', '1200', 'effective_timeout'),
+])
+def test_main_effective_environment_uses_pilot_settings(tmp_path_factory, monkeypatch, key, value, reason):
+    obj = world(tmp_path_factory, monkeypatch)
+    assert invoke(obj)[0] == 0
+    folder = main_run_dir(monkeypatch)
+    env = effective_environment()
+    original = R.run_one
+
+    def change(*args, **kwargs):
+        record = original(*args, **kwargs)
+        env[key] = value
+        return record
+
+    monkeypatch.setattr(R, 'run_one', change)
+    code, lines = invoke(obj, 'main', env=env)
+    assert code == 4 and lines[-1] == f'{reason} count=1'
+    assert len(obj.calls) == 5 and obj.summaries == []
+    assert json.loads((folder / 'STOPPED.json').read_bytes())['reason'] == reason
+    assert not (obj.root / 'main/run_manifest.json').exists()
+
+
+def test_main_records_export_manifest_sha(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory, monkeypatch)
+    assert invoke(obj)[0] == 0
+    main_run_dir(monkeypatch)
+    assert invoke(obj, 'main')[0] == 0
+    manifest = json.loads((obj.root / 'main/run_manifest.json').read_bytes())
+    assert manifest['export_manifest_sha256_lf'] == normalised_sha((obj.root / L.E.MANIFEST_REL).read_bytes())
+
+
+def test_cli_entry_points_pass_process_environment(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory, monkeypatch)
+    seen = []
+
+    def preflight(*args, **kwargs):
+        seen.append(kwargs['env'])
+        return NS()
+
+    def candidate(*args, **kwargs):
+        seen.append(kwargs['env'])
+        return 0
+
+    monkeypatch.setattr(L, 'preflight', preflight)
+    monkeypatch.setattr(L, 'execute', lambda *args, **kwargs: 0)
+    monkeypatch.setattr(FC, '_main', candidate)
+    args = ['pilot', '--profiles', str(obj.p), '--candidates', str(obj.c), '--candidates-manifest', str(obj.cm),
+            '--candidates-run-manifest', str(obj.candidate_run), '--out-dir', str(obj.root / 'pilot')]
+    assert L.main(args, root=obj.root) == 0
+    assert FC.main(['build']) == 0
+    assert len(seen) == 2 and all(env is os.environ for env in seen)
+    assert os.environ['REGCLAW_STUB'] == '1'
+    for module in (L, FC):
+        tree = ast.parse(Path(module.__file__).read_text(encoding='utf-8'))
+        entry = next(node for node in tree.body if isinstance(node, ast.If)
+                     and ast.unparse(node.test) == "__name__ == '__main__'")
+        call = next(node for node in ast.walk(entry) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == 'main')
+        assert any(keyword.arg == 'env' and ast.unparse(keyword.value) == 'os.environ'
+                   for keyword in call.keywords)

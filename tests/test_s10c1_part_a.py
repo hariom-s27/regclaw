@@ -28,7 +28,7 @@ from standards.ruleset import normalised_sha
 
 CHECK_RULESET = FC.ruleset.check_ruleset
 FAKE_LOCKED = ('fake_module.py',)
-LIVE_ENV = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai'}
+LIVE_ENV = {'REGCLAW_STUB': '0', 'LLM_PROVIDER': 'azure_openai', 'LANGFUSE_ENABLED': 'false'}
 STAMP = '2026-11-19T00:00:00+00:00'
 
 
@@ -498,7 +498,7 @@ def write_fake_lock(root):
 
 def fc_main(args, **kwargs):
     """Candidate CLI with a synthetic live environment and the fake lock (G-02)."""
-    kwargs.setdefault('env', LIVE_ENV)
+    kwargs.setdefault('env', {**LIVE_ENV, 'LANGFUSE_ENABLED': 'false'})
     kwargs.setdefault('locked_files', FAKE_LOCKED)
     return FC.main(args, **kwargs)
 
@@ -1147,3 +1147,177 @@ def test_candidate_duplicate_global_reserve_refuses_before_writes(tmp_path, fake
     assert 'ledger_duplicate_reserve' in capsys.readouterr().out
     assert path.read_bytes() == before and not ledger.exists()
     assert made[0].requests == [] and made[0].closed
+
+
+class GuardRetriever(FakeRetriever):
+    """Counters in memory; frozen-input changes are simulated by read hooks."""
+
+    def __init__(self, cache_file, *, after_query=None):
+        super().__init__(cache_file, append=False)
+        self.after_query = after_query
+
+    def retrieve(self, query, top_k):
+        self.requests.append((query, top_k))
+        self.llm.generate({})
+        self.query_embeddings.embedder.api_requests += 1
+        if self.after_query:
+            self.after_query(len(self.requests))
+        return [], None
+
+
+def test_candidate_refuses_absent_langfuse(tmp_path, fake_data, monkeypatch, capsys):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    env = {key: value for key, value in LIVE_ENV.items() if key != 'LANGFUSE_ENABLED'}
+    assert fc_main(args, env=env, data=fake_data, retriever_factory=must_not_build) == 2
+    assert capsys.readouterr().out == 'langfuse count=1\n'
+    assert not ledger.exists()
+
+
+@pytest.mark.parametrize('key,value,reason', [
+    ('REGCLAW_STUB', '1', 'stub_mode'), ('LLM_PROVIDER', 'anthropic', 'provider'),
+    ('LANGFUSE_ENABLED', 'true', 'langfuse'),
+])
+def test_candidate_effective_environment_after_load_refuses(tmp_path, fake_data, monkeypatch, capsys,
+                                                         key, value, reason):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    env, made = dict(LIVE_ENV), []
+
+    def load(**kwargs):
+        retriever = GuardRetriever(**kwargs)
+        made.append(retriever)
+        env[key] = value
+        return retriever
+
+    monkeypatch.setattr(FC, '_live_retriever_factory', load)
+    assert fc_main(args, env=env, data=fake_data) == 2
+    assert capsys.readouterr().out.splitlines()[-1] == f'ERROR: {reason}'
+    assert made[0].requests == [] and made[0].closed
+    assert not ledger.exists() and not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    assert not list(tmp_path.rglob('STOPPED.json'))
+    assert os.environ['REGCLAW_STUB'] == '1'
+
+
+def test_candidate_effective_environment_change_refuses_before_next_query(tmp_path, fake_data, monkeypatch, capsys):
+    args, ledger = candidate_args(tmp_path, monkeypatch, profile_count=10)
+    env, made = dict(LIVE_ENV), []
+
+    def change(index):
+        env['LANGFUSE_ENABLED'] = 'true'
+
+    def factory(**kwargs):
+        made.append(GuardRetriever(**kwargs, after_query=change))
+        return made[-1]
+
+    assert fc_main(args, env=env, data=fake_data, retriever_factory=factory) == 2
+    assert capsys.readouterr().out.splitlines()[-1] == 'ERROR: langfuse'
+    assert len(made[0].requests) == 1 and made[0].closed
+    assert [r['kind'] for r in FC.read_call_ledger(ledger)] == ['reserve', 'settle']
+    assert FC.ledger_total(global_ledger(tmp_path)) == 2
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    assert not list(tmp_path.rglob('STOPPED.json'))
+
+
+@pytest.mark.parametrize('relative,reason', [
+    ('fake_module.py', 'code_lock_sha'), (L.LOCK_REL, 'code_lock_changed'),
+    ('P.yaml', 'input_changed'), (FC.PROFILES_MANIFEST_REL, 'input_changed'),
+    *((relative, 'input_changed') for relative in FC.PROVENANCE_FILES),
+])
+def test_candidate_lock_or_input_change_refuses_before_query_three(tmp_path, fake_data, monkeypatch, capsys,
+                                                                 relative, reason):
+    args, ledger = candidate_args(tmp_path, monkeypatch, profile_count=10)
+    target = tmp_path / relative
+    changed, made = [False], []
+    read = Path.read_bytes
+
+    def changed_read(path):
+        raw = read(path)
+        return raw + b' ' if path == target and changed[0] else raw
+
+    def change(index):
+        changed[0] = index >= 2
+
+    def factory(**kwargs):
+        made.append(GuardRetriever(**kwargs, after_query=change))
+        return made[-1]
+
+    monkeypatch.setattr(Path, 'read_bytes', changed_read)
+    assert fc_main(args, data=fake_data, retriever_factory=factory) == 2
+    assert capsys.readouterr().out.splitlines()[-1] == f'ERROR: {reason}'
+    assert len(made[0].requests) == 2 and made[0].closed
+    for path in (ledger, global_ledger(tmp_path)):
+        rows = FC.read_call_ledger(path)
+        assert [r['unit'] for r in rows] == ['q01', 'q01', 'q02', 'q02']
+        assert FC.ledger_total(path) == 4
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    assert not list(tmp_path.rglob('STOPPED.json'))
+
+
+@pytest.mark.parametrize('stage', ['after_query', 'after_outputs'])
+@pytest.mark.parametrize('relative,reason', [('P.yaml', 'input_changed'), ('fake_module.py', 'code_lock_sha')])
+def test_candidate_input_change_before_completion_refuses(tmp_path, fake_data, monkeypatch, capsys,
+                                                       stage, relative, reason):
+    args, ledger = candidate_args(tmp_path, monkeypatch)
+    target = tmp_path / relative
+    changed = [False]
+    read, write = Path.read_bytes, FC._write_once
+
+    def changed_read(path):
+        raw = read(path)
+        return raw + b' ' if changed[0] and path == target else raw
+
+    def change(index):
+        if stage == 'after_query':
+            changed[0] = True
+
+    def after_write(path, text):
+        write(path, text)
+        if stage == 'after_outputs' and Path(path) == tmp_path / 'M.json':
+            changed[0] = True
+
+    monkeypatch.setattr(Path, 'read_bytes', changed_read)
+    monkeypatch.setattr(FC, '_write_once', after_write)
+    assert fc_main(args, data=fake_data,
+                   retriever_factory=lambda **kwargs: GuardRetriever(**kwargs, after_query=change)) == 2
+    assert capsys.readouterr().out.splitlines()[-1] == f'ERROR: {reason}'
+    assert FC.ledger_total(global_ledger(tmp_path)) == 2
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    assert not list(tmp_path.rglob('STOPPED.json'))
+
+
+@pytest.mark.parametrize('error_type', [FileNotFoundError, PermissionError])
+@pytest.mark.parametrize('relative', ['P.yaml', FC.PROFILES_MANIFEST_REL, *FC.PROVENANCE_FILES,
+                                    'fake_module.py', L.LOCK_REL])
+def test_candidate_missing_input_refuses_before_query_three(tmp_path, fake_data, monkeypatch, capsys,
+                                                          relative, error_type):
+    args, ledger = candidate_args(tmp_path, monkeypatch, profile_count=10)
+    target = tmp_path / relative
+    unavailable, made = [False], []
+    read = Path.read_bytes
+
+    def missing(path):
+        if path == target and unavailable[0]:
+            raise error_type('PRIVATE simulated unavailable input')
+        return read(path)
+
+    def change(index):
+        unavailable[0] = index >= 2
+
+    def factory(**kwargs):
+        made.append(GuardRetriever(**kwargs, after_query=change))
+        return made[-1]
+
+    monkeypatch.setattr(Path, 'read_bytes', missing)
+    assert fc_main(args, data=fake_data, retriever_factory=factory) == 2
+    output = capsys.readouterr().out
+    assert output.splitlines()[-1] == 'ERROR: input_unreadable'
+    assert 'PRIVATE' not in output and str(target) not in output
+    assert len(made[0].requests) == 2 and made[0].closed
+    for path in (ledger, global_ledger(tmp_path)):
+        assert [row['unit'] for row in FC.read_call_ledger(path)] == ['q01', 'q01', 'q02', 'q02']
+        assert FC.ledger_total(path) == 4
+    assert not (ledger.parent / FC.CANDIDATE_RUN_NAME).exists()
+    assert not (tmp_path / FC.CANDIDATE_RECEIPT_REL).exists()
+    assert not list(tmp_path.rglob('STOPPED.json'))

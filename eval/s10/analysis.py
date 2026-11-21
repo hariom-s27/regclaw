@@ -78,6 +78,24 @@ def fraction_string(value):
     return None if value is None else f'{value.numerator}/{value.denominator}'
 
 
+def validate_global_accounting(manifest, path):
+    start, end = manifest.get('global_start'), manifest.get('global_end')
+    require(type(start) is int and type(end) is int and 0 <= start <= end <= L.CALL_CAP,
+            'global_accounting_bounds')
+    last_seq = manifest.get('global_ledger_last_seq')
+    require(type(last_seq) is int and last_seq > 0, 'global_ledger_seq')
+    try:
+        snapshot = FC.ledger_prefix_snapshot(path, last_seq)
+    except OSError as exc:
+        raise AnalysisError('global_ledger_input') from exc
+    require(snapshot['global_ledger_prefix_sha256_lf'] == manifest.get('global_ledger_prefix_sha256_lf'),
+            'global_ledger_prefix_sha')
+    require(snapshot['total'] == end, 'global_ledger_total')
+    return dict(global_start=start, global_end=end,
+                global_ledger_last_seq=snapshot['global_ledger_last_seq'],
+                global_ledger_prefix_sha256_lf=snapshot['global_ledger_prefix_sha256_lf'])
+
+
 def load_inputs(args, *, root=ROOT, locked_files=None):
     root = Path(root).resolve()
     dest = L.checked_path(root, args.out)
@@ -97,6 +115,7 @@ def load_inputs(args, *, root=ROOT, locked_files=None):
     require(manifest['format'] == L.RUN_FORMAT and manifest['phase'] == 'main', 'main_manifest')
     require(receipt['format'] == L.RECEIPT_FORMAT and receipt['counts'] == manifest['counts'], 'main_receipt')
     require(receipt['shas']['run_manifest_sha256_lf'] == sha['manifest'], 'manifest_sha')
+    require(manifest.get('export_manifest_sha256_lf') == sha['export_manifest'], 'export_manifest_sha')
     require(manifest['repeats'] == REPEATS and manifest['seed'] == SEED, 'main_settings')
     require(len(manifest['settings']) == 2 and
             {s['name'] for s in manifest['settings']} == set(ARMS) and
@@ -127,6 +146,9 @@ def load_inputs(args, *, root=ROOT, locked_files=None):
             and totals['current_ledger'] == counts['ledger_total'] and
             totals['total'] == totals['candidates'] + totals['pilot'] + totals['current_ledger'] <= L.CALL_CAP,
             'call_totals')
+    global_path = L.checked_path(root, FC.GLOBAL_LEDGER_REL)
+    global_accounting = validate_global_accounting(manifest, global_path)
+    sha['global_ledger_prefix'] = global_accounting['global_ledger_prefix_sha256_lf']
     gold_doc = yaml.safe_load(raw['gold'])
     jsonschema.Draft202012Validator(F.GOLD_SCHEMA_V2).validate(gold_doc)
     require(gold_doc['split'] == 'dev', 'dev_gold')
@@ -186,7 +208,8 @@ def load_inputs(args, *, root=ROOT, locked_files=None):
     tags = load_tags(paths['tags'], required=list(gold))
     require(set(tags) == set(gold), 'tag_coverage')
     return dict(root=root, dest=dest, paths=paths, shas=sha, records=records, cells=cells, gold=gold,
-                tags=tags, export_summary=export_summary, roster=roster, stop_dirs=(directory, folder))
+                tags=tags, export_summary=export_summary, roster=roster, stop_dirs=(directory, folder),
+                global_ledger_path=global_path, global_accounting=global_accounting)
 
 
 def under_fraction(cells, pred='final'):
@@ -476,6 +499,9 @@ def build_analysis(inputs, *, n_boot=N_BOOT, ppi=None):
     result = dict(format=FORMAT, label='provisional (GPT)', structural_note=STRUCTURAL_NOTE,
                   input_shas=inputs['shas'], metric_scopes=dict(primary='all runs', secondary='llm_detail == ok'),
                   primary={}, secondary={}, traps={}, family_overlap={}, split_sensitivity={}, tipping={}, ppi={})
+    accounting = inputs['global_accounting']
+    result['paid_requests_global_ledger'] = (
+        f'paid requests (global ledger): {accounting["global_start"]} -> {accounting["global_end"]} (cap 150)')
     decision = effort_decision(records, gold, strata)
     result['effort_decision'] = decision
     result['paired_comparison'] = paired_comparison(records, gold, strata, decision, n_boot=n_boot)
@@ -582,6 +608,7 @@ def report_lines(result):
                          f'denominator_mean={number(value["denominator_mean"])} '
                          f'numerator_correction={number(correction["mean_numerator_correction_term"])} '
                          f'denominator_correction={number(correction["mean_denominator_correction_term"])} {correction["note"]}')
+    lines.append(result['paid_requests_global_ledger'])
     return lines
 
 
@@ -598,6 +625,7 @@ def main(argv=None, *, root=ROOT, locked_files=None, n_boot=N_BOOT, ppi=None, ou
         require(L.verify_code_lock(inputs['root'], locked_files) == inputs['shas']['lock'], 'run_lock_sha')
         for name, path in inputs['paths'].items():
             require(normalised_sha(path.read_bytes()) == inputs['shas'][name], 'input_changed')
+        validate_global_accounting(inputs['global_accounting'], inputs['global_ledger_path'])
         lines = report_lines(result)
         inputs['dest'].parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -606,7 +634,7 @@ def main(argv=None, *, root=ROOT, locked_files=None, n_boot=N_BOOT, ppi=None, ou
         except FileExistsError as exc:
             raise AnalysisError('output_exists') from exc
     except (Exception, SystemExit) as exc:
-        check = str(exc) if isinstance(exc, AnalysisError) else 'input_or_output_validation'
+        check = str(exc) if isinstance(exc, (AnalysisError, FC.LedgerError)) else 'input_or_output_validation'
         out(check + ' count=1')
         return 3 if check == 'output_exists' else 2
     for line in lines:

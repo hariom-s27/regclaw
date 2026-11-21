@@ -92,6 +92,18 @@ def candidate_provenance(root):
         raise CandidateInput('candidate_provenance') from exc
 
 
+def check_candidate_inputs(root, *, input_shas, lock_sha, locked_files=None):
+    from .live import checked_path, verify_code_lock
+    try:
+        if verify_code_lock(root, locked_files) != lock_sha:
+            raise CandidateInput('code_lock_changed')
+        for relative, expected in input_shas.items():
+            if normalised_sha(checked_path(root, relative).read_bytes()) != expected:
+                raise CandidateInput('input_changed')
+    except OSError as exc:
+        raise CandidateInput('input_unreadable') from exc
+
+
 def tool_query(device_name):
     return device_name + QUERY_SUFFIX
 
@@ -288,6 +300,17 @@ def ledger_snapshot(path):
                 global_ledger_prefix_sha256_lf=normalised_sha(raw))
 
 
+def ledger_prefix_snapshot(path, last_seq):
+    """Validate the entire ledger, then describe the recorded completion prefix."""
+    raw = Path(path).read_bytes()
+    rows = _parse_ledger(raw)
+    if type(last_seq) is not int or not 0 <= last_seq <= len(rows):
+        raise LedgerError('global_ledger_seq')
+    prefix = b'\n'.join(raw.split(b'\n')[:last_seq]) + (b'\n' if last_seq else b'')
+    return dict(total=sum(row['amount'] for row in rows[:last_seq]), global_ledger_last_seq=last_seq,
+                global_ledger_prefix_sha256_lf=normalised_sha(prefix))
+
+
 def append_ledger_line(path, row):
     """The reserve is durable before this function returns to the paid caller."""
     path = Path(path)
@@ -390,7 +413,7 @@ class RetrievalRequests:
     queries and counting failures retain their individual reservations.
     """
 
-    def __init__(self, retriever, ledger_path, global_path, *, stop_state=None, now=None):
+    def __init__(self, retriever, ledger_path, global_path, *, stop_state=None, now=None, before_query=None):
         self.client = retriever.llm
         self.embedder = retriever.query_embeddings.embedder
         self.embedding_start = self._embedding_count()
@@ -435,6 +458,8 @@ class RetrievalRequests:
 
         def guarded_retrieve(*args, **kwargs):
             check_candidate_stop(stop_state)
+            if before_query is not None:
+                before_query()
             if ledger_total(ledger_path) != self.folder_expected:
                 raise FrozenCandidatesError('call ledger changed during retrieval')
             if ledger_total(global_path) != self.global_expected:
@@ -483,8 +508,8 @@ def check_candidate_stop(state):
 def _main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, locked_files=None, stop_state=None):
     """Build dev candidates, charging actual requests; cache rows cross-check only.
 
-    Every refusal (paths, write-once, environment, code lock, ruleset, profiles,
-    ledgers) happens before any retriever is constructed.
+    Initial checks precede construction. Effective environment and frozen inputs
+    are checked again after loading, before each query and before publication.
     """
     from llm import provider
     from standards.data_loader import load_data
@@ -525,6 +550,14 @@ def _main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, l
         ruleset.check_ruleset()
         profiles_sha = verify_dev_profiles(root, profiles_path)
         provenance_files = candidate_provenance(root)
+        profiles_manifest = live.checked_path(root, PROFILES_MANIFEST_REL)
+        try:
+            profiles_manifest_sha = normalised_sha(profiles_manifest.read_bytes())
+        except OSError as exc:
+            raise CandidateInput('profiles_manifest') from exc
+        input_shas = {profiles_path.relative_to(root.resolve()).as_posix(): profiles_sha,
+                      PROFILES_MANIFEST_REL: profiles_manifest_sha,
+                      **{relative: info['sha256_lf'] for relative, info in provenance_files.items()}}
         if (folder / 'STOPPED.json').exists():
             raise FrozenCandidatesError('candidate folder stopped')
         ledger_path = folder / CALL_LEDGER_NAME
@@ -556,10 +589,17 @@ def _main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, l
 
     made, counters = [], []
 
+    def guard():
+        check_candidate_stop(stop_state)
+        live.check_effective_environment(env)
+        check_candidate_inputs(root, input_shas=input_shas, lock_sha=lock_sha, locked_files=locked_files)
+
     def factory(*, cache_file):
         retriever = (retriever_factory or _live_retriever_factory)(cache_file=cache_file)
         made.append(retriever)
-        counters.append(RetrievalRequests(retriever, ledger_path, global_path, stop_state=stop_state, now=now))
+        guard()
+        counters.append(RetrievalRequests(retriever, ledger_path, global_path, stop_state=stop_state, now=now,
+                                          before_query=guard))
         return retriever
 
     error = None
@@ -574,7 +614,7 @@ def _main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, l
             try:
                 manifest = build_candidates(profiles, cache_dir=cache_dir, out_path=out_path,
                                             manifest_path=manifest_path, retriever_factory=factory, now=now,
-                                            before_publish=lambda: check_candidate_stop(stop_state))
+                                            before_publish=guard)
                 manifest_sha = normalised_sha(manifest_path.read_bytes())
             finally:
                 try:
@@ -592,14 +632,14 @@ def _main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, l
                         close = getattr(retriever, 'close', None)
                         if close is not None:
                             close()
-            check_candidate_stop(stop_state)
+            guard()
             receipt = write_candidate_run_manifest(root=root, run_dir=folder,
                 candidates_path=out_path, manifest_path=manifest_path, ledger_start=ledger_start, calls=calls,
                 profiles_sha256_lf=profiles_sha, provenance_files=provenance_files,
                 code_lock_sha256_lf=lock_sha, global_start=global_start,
-                before_publish=lambda: check_candidate_stop(stop_state))
+                before_publish=guard)
     except (Exception, SystemExit, KeyboardInterrupt) as exc:
-        error = str(exc) if isinstance(exc, LedgerError) else type(exc).__name__
+        error = str(exc) if isinstance(exc, (CandidateInput, live.LiveCheck)) else type(exc).__name__
     finally:
         logging.disable(disabled)
     if counts is not None and request_counts is not None:
@@ -624,6 +664,7 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, lo
     from .live import graceful_sigint
     from .paid_lock import paid_lock, PaidLockHeld
 
+    env = os.environ if env is None else env
     console = sys.stdout
     try:
         with paid_lock(provider.ROOT), graceful_sigint(out=lambda message: print(message, file=console)) as state:
@@ -638,4 +679,4 @@ def main(argv=None, *, data=None, retriever_factory=None, now=None, env=None, lo
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(env=os.environ))

@@ -104,7 +104,24 @@ def check_live_environment(env):
     require(env.get('REGCLAW_STUB') != '1', 'stub_mode')
     require(env.get('LLM_PROVIDER') == 'azure_openai', 'provider')
     # G-10: no external tracing of prompts during paid S10c steps.
-    require(env.get('LANGFUSE_ENABLED') in (None, 'false'), 'langfuse')
+    require(env.get('LANGFUSE_ENABLED') == 'false', 'langfuse')
+
+
+def check_effective_environment(env=None, *, phase=None, cap=None, timeout=None):
+    """The CLI uses the process mapping; explicit mappings are a test seam."""
+    env = os.environ if env is None else env
+    check_live_environment(env)
+    if phase is not None:
+        try:
+            actual_cap = int(env.get('AZURE_OPENAI_S10_MAX_COMPLETION_TOKENS', ''))
+        except (ValueError, TypeError):
+            raise LiveCheck('effective_cap') from None
+        require(actual_cap == cap, 'effective_cap')
+        try:
+            actual_timeout = float(env.get('AZURE_OPENAI_S10_TIMEOUT_S', ''))
+        except (ValueError, TypeError):
+            raise LiveCheck('effective_timeout') from None
+        require(actual_timeout == timeout, 'effective_timeout')
 
 
 def verify_code_lock(root, locked_files=None):
@@ -220,6 +237,7 @@ class Plan:
     global_path: Path
     global_start: int
     stop_state: StopState | None = None
+    environment_error: str | None = None
 
 
 def completed_step(root, phase, path, lock_sha=None):
@@ -372,7 +390,13 @@ def preflight(args, *, root=ROOT, data=None, client_factory=None, retriever_fact
     files.append(checked_path(root, LOCK_REL))
     shas = {path.relative_to(root).as_posix(): normalised_sha(path.read_bytes()) for path in files}
     clients = {setting.name: (client_factory or R.azure_client_factory)(setting) for setting in SETTINGS}
-    for setting in SETTINGS:
+    environment_error = None
+    try:
+        check_effective_environment(env, phase=args.phase, cap=cap, timeout=timeout)
+    except LiveCheck as exc:
+        # Route post-load drift through execute's normal STOPPED path.
+        environment_error = str(exc)
+    for setting in (() if environment_error else SETTINGS):
         client = clients[setting.name]
         require(getattr(client, 'provider', None) == 'azure_openai' and getattr(client, 'role', None) == 'S10',
                 'client_role')
@@ -383,13 +407,15 @@ def preflight(args, *, root=ROOT, data=None, client_factory=None, retriever_fact
     if args.phase == 'pilot':
         pid = choose_pilot(profiles)
         profiles = {pid: profiles[pid]}
-    return Plan(args.phase, root, out_dir, folder, committed, profiles, gold, tags, retriever, clients, data,
+    plan = Plan(args.phase, root, out_dir, folder, committed, profiles, gold, tags, retriever, clients, data,
                 cap, timeout, 2 if args.phase == 'pilot' else 5, shas, files, lock_sha, locked_files, checks, env,
                 prior_calls, starting_ledger, tuple(earlier_dirs), global_path, global_start)
+    plan.environment_error = environment_error
+    return plan
 
 
 def _guards(plan):
-    check_live_environment(plan.env)
+    check_effective_environment(plan.env, phase=plan.phase, cap=plan.cap, timeout=plan.timeout)
     require(provider.run_dir() == plan.run_dir, 'run_dir_changed')
     require(verify_code_lock(plan.root, plan.locked_files) == plan.lock_sha, 'code_lock_changed')
     for check in plan.lock_checks:
@@ -462,6 +488,9 @@ def finalize(plan, records, calls, ledger_start, *, summary_factory=None, now=No
                     settings=[dict(name=s.name, effort=s.effort, max_completion_tokens=plan.cap,
                                    timeout_s=plan.timeout) for s in SETTINGS], repeats=plan.repeats, seed=SEED,
                     input_shas=plan.input_shas, outputs=outputs)
+    if plan.phase == 'main':
+        export_relative = checked_path(plan.root, E.MANIFEST_REL).relative_to(plan.root).as_posix()
+        manifest['export_manifest_sha256_lf'] = plan.input_shas[export_relative]
     manifest_text = _json_text(manifest)
     receipt = dict(format=RECEIPT_FORMAT, counts=counts,
                    shas=dict(runs_sha256_lf=outputs['runs.jsonl']['sha256_lf'],
@@ -487,6 +516,8 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
         require_empty_sidecars(plan.run_dir / 's10')
         require(not plan.out_dir.exists() or not any(plan.out_dir.iterdir()), 'output_not_empty')
         plan.out_dir.mkdir(parents=True, exist_ok=True)
+        require(plan.environment_error is None, plan.environment_error or 'effective_environment')
+        check_effective_environment(plan.env, phase=plan.phase, cap=plan.cap, timeout=plan.timeout)
         consecutive = 0
         with (plan.out_dir / 'runs.jsonl').open('x', encoding='utf-8', newline='\n') as stream:
             for index, (repeat, pid, setting) in enumerate(R.plan_order(plan.profiles, SETTINGS, plan.repeats, SEED)):
@@ -541,6 +572,7 @@ def execute(plan, *, summary_factory=None, now=None, out=print):
 
 def main(argv=None, *, root=ROOT, data=None, client_factory=None, retriever_factory=None,
          summary_factory=None, locked_files=None, lock_checks=None, env=None, now=None, out=print):
+    env = os.environ if env is None else env
     parser = argparse.ArgumentParser(prog='python -m eval.s10.live')
     commands = parser.add_subparsers(dest='phase', required=True)
     for phase in ('pilot', 'main'):
@@ -567,4 +599,4 @@ def main(argv=None, *, root=ROOT, data=None, client_factory=None, retriever_fact
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(env=os.environ))

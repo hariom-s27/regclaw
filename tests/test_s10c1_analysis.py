@@ -101,7 +101,7 @@ def fake_records(cells):
     return records
 
 
-def world(tmp_path_factory, *, omit=(), corrupt=None, mutate=None):
+def world(tmp_path_factory, *, omit=(), corrupt=None, mutate=None, manifest_change=None, global_transform=None):
     root = tmp_path_factory.mktemp('analysisworld')
     assert 's8' not in str(root).casefold(), "analysisworld contains 's8'; choose a --basetemp without 's8'"
     cells = fake_cells()
@@ -125,7 +125,8 @@ def world(tmp_path_factory, *, omit=(), corrupt=None, mutate=None):
         export_summary=root / A.E.SUMMARY_REL, export_manifest=root / A.E.MANIFEST_REL,
         manifest=root / 'main/run_manifest.json', receipt=root / 'eval/s10/manifests/s10c_main_run.json',
         runs=root / 'main/runs.jsonl', summary=root / 'main/summary.json', lock=root / A.L.LOCK_REL,
-        ledger=root / 'data/runs/main-fake' / A.FC.CALL_LEDGER_NAME)
+        ledger=root / 'data/runs/main-fake' / A.FC.CALL_LEDGER_NAME,
+        global_ledger=root / A.FC.GLOBAL_LEDGER_REL)
     code = put(root / LOCKED[0], 'FAKE locked source\n')
     lock = dict(format=A.L.LOCK_FORMAT, files={LOCKED[0]: dict(sha256_lf=normalised_sha(code.read_bytes()))})
     text = dict(gold=yaml.safe_dump(gold), cells=dumps(cells), tags=dumps(tags), export_summary=dumps(export_summary),
@@ -134,6 +135,7 @@ def world(tmp_path_factory, *, omit=(), corrupt=None, mutate=None):
                     step='main', kind=kind, unit=f'fake-run-{i}', amount=amount)) + '\n'
                     for i, record in enumerate(records) for j, (kind, amount) in enumerate((
                         ('reserve', A.L.RUN_RESERVE), ('settle', record['http_attempts'] - A.L.RUN_RESERVE)))))
+    text['global_ledger'] = global_transform(text['ledger']) if global_transform else text['ledger']
     sha = {name: normalised_sha(value.encode()) for name, value in text.items()}
     export_manifest = dict(format=A.E.MANIFEST_FORMAT, input_shas=export_summary['input_shas'], counts=export_counts,
         outputs={rel: dict(sha256_lf=sha[name]) for name, rel in
@@ -142,6 +144,8 @@ def world(tmp_path_factory, *, omit=(), corrupt=None, mutate=None):
     counts = dict(records=100, planned_records=100, sidecars=100, http_attempts=http, ledger_start=0, ledger_total=http,
                   call_totals=dict(candidates=0, pilot=0, current_ledger=http, total=http))
     manifest = dict(format=A.L.RUN_FORMAT, phase='main', label='provisional (GPT)', counts=counts,
+        global_start=0, global_end=http, global_ledger_last_seq=2 * len(records),
+        global_ledger_prefix_sha256_lf=sha['ledger'],
         run_dir='data/runs/main-fake', ledger_sha256_lf=sha['ledger'], repeats=5, seed=0,
         settings=[dict(name=arm, effort=arm, max_completion_tokens=64000, timeout_s=600) for arm in A.ARMS],
         outputs={name: dict(sha256_lf=sha[key]) for name, key in (('runs.jsonl', 'runs'), ('summary.json', 'summary'))},
@@ -162,7 +166,11 @@ def world(tmp_path_factory, *, omit=(), corrupt=None, mutate=None):
     if corrupt == 'split_flag':
         cells[0]['split_cell'] = True
         text['cells'] = dumps(cells)
-    text['export_manifest'], text['manifest'] = dumps(export_manifest), dumps(manifest)
+    text['export_manifest'] = dumps(export_manifest)
+    manifest['export_manifest_sha256_lf'] = normalised_sha(text['export_manifest'].encode())
+    if manifest_change:
+        manifest_change(manifest)
+    text['manifest'] = dumps(manifest)
     receipt = dict(format=A.L.RECEIPT_FORMAT, counts=counts, shas=dict(
         run_manifest_sha256_lf=normalised_sha(text['manifest'].encode()),
         runs_sha256_lf=sha['runs'], ledger_sha256_lf=sha['ledger']))
@@ -690,3 +698,166 @@ def test_exclusive_output_race_preserves_existing_file(tmp_path_factory, monkeyp
     monkeypatch.setattr(Path, 'open', opened)
     assert invoke(obj) == (3, ['output_exists count=1'])
     assert target.read_text(encoding='utf-8') == 'FAKE competing output\n'
+
+
+@pytest.mark.parametrize('missing', [False, True])
+def test_analysis_export_manifest_sha_mismatch_refuses(tmp_path_factory, missing):
+    def change(doc):
+        if missing:
+            doc.pop('export_manifest_sha256_lf')
+        else:
+            doc['export_manifest_sha256_lf'] = '0' * 64
+
+    obj = world(tmp_path_factory, manifest_change=change)
+    assert invoke(obj) == (2, ['export_manifest_sha count=1'])
+    assert not (obj.root / 'A.json').exists()
+
+
+@pytest.mark.parametrize('field,value', [
+    ('global_start', 'MISSING'), ('global_end', 'MISSING'),
+    ('global_start', -1), ('global_end', -1), ('global_start', True), ('global_end', True),
+    ('global_start', 0.0), ('global_end', 100.0), ('global_end', '100'),
+    ('global_start', 101), ('global_end', 151),
+])
+def test_analysis_global_accounting_bounds_refuse(tmp_path_factory, field, value):
+    def change(doc):
+        if value == 'MISSING':
+            doc.pop(field)
+        else:
+            doc[field] = value
+
+    obj = world(tmp_path_factory, manifest_change=change)
+    assert invoke(obj) == (2, ['global_accounting_bounds count=1'])
+    assert not (obj.root / 'A.json').exists()
+
+
+@pytest.mark.parametrize('field,value,reason', [
+    ('global_ledger_last_seq', 'MISSING', 'global_ledger_seq'),
+    ('global_ledger_last_seq', True, 'global_ledger_seq'),
+    ('global_ledger_last_seq', 0, 'global_ledger_seq'),
+    ('global_ledger_last_seq', -1, 'global_ledger_seq'),
+    ('global_ledger_last_seq', 201, 'global_ledger_seq'),
+    ('global_ledger_last_seq', 199, 'global_ledger_prefix_sha'),
+    ('global_ledger_prefix_sha256_lf', 'MISSING', 'global_ledger_prefix_sha'),
+    ('global_ledger_prefix_sha256_lf', '0' * 64, 'global_ledger_prefix_sha'),
+    ('global_end', 101, 'global_ledger_total'),
+])
+def test_analysis_global_ledger_prefix_refusals(tmp_path_factory, field, value, reason):
+    def change(doc):
+        if value == 'MISSING':
+            doc.pop(field)
+        else:
+            doc[field] = value
+
+    obj = world(tmp_path_factory, manifest_change=change)
+    assert invoke(obj) == (2, [f'{reason} count=1'])
+    assert not (obj.root / 'A.json').exists()
+
+
+@pytest.mark.parametrize('variant,reason', [
+    ('settle_without_reserve', 'ledger_settle'), ('out_of_range', 'ledger_settle'),
+    ('duplicate_settle_after_main', 'ledger_settle'), ('torn_json', 'ledger_torn_line'),
+    ('no_newline', 'ledger_torn_line'),
+])
+def test_analysis_invalid_global_ledger_refuses(tmp_path_factory, variant, reason):
+    def change(raw):
+        if variant == 'torn_json':
+            return raw + '{broken\n'
+        if variant == 'no_newline':
+            return raw.rstrip('\n')
+        rows = [json.loads(line) for line in raw.splitlines()]
+        if variant == 'settle_without_reserve':
+            rows[0].update(kind='settle', amount=-5)
+        elif variant == 'out_of_range':
+            rows[1]['amount'] = -7
+        else:
+            rows.append(dict(rows[-1], seq=len(rows) + 1))
+        return ''.join(json.dumps(row) + '\n' for row in rows)
+
+    obj = world(tmp_path_factory, global_transform=change)
+    before = obj.paths['global_ledger'].read_bytes()
+    assert invoke(obj) == (2, [f'{reason} count=1'])
+    assert obj.paths['global_ledger'].read_bytes() == before
+    assert not (obj.root / 'A.json').exists()
+
+
+def later_global_rows(raw):
+    seq = len(raw.splitlines())
+    reserve = dict(format=A.FC.LEDGER_FORMAT, seq=seq + 1, ts=STAMP, step='pilot',
+                   kind='reserve', unit='fake-later-pilot', amount=A.L.RUN_RESERVE)
+    settle = dict(reserve, seq=seq + 2, kind='settle', amount=1 - A.L.RUN_RESERVE)
+    return raw + json.dumps(reserve) + '\n' + json.dumps(settle) + '\n'
+
+
+@pytest.mark.parametrize('timing', ['before_load', 'before_save'])
+def test_analysis_accepts_later_valid_global_rows(tmp_path_factory, monkeypatch, timing):
+    obj = world(tmp_path_factory, global_transform=later_global_rows if timing == 'before_load' else None)
+    if timing == 'before_save':
+        ready = [False]
+        original, read = A.build_analysis, Path.read_bytes
+
+        def build(*args, **kwargs):
+            result = original(*args, **kwargs)
+            ready[0] = True
+            return result
+
+        def appended(path):
+            raw = read(path)
+            return later_global_rows(raw.decode()).encode() if ready[0] and path == obj.paths['global_ledger'] else raw
+
+        monkeypatch.setattr(A, 'build_analysis', build)
+        monkeypatch.setattr(Path, 'read_bytes', appended)
+    code, lines = invoke(obj)
+    assert code == 0
+    assert 'paid requests (global ledger): 0 -> 100 (cap 150)' in lines
+    assert json.loads((obj.root / 'A.json').read_bytes())['paid_requests_global_ledger'] == (
+        'paid requests (global ledger): 0 -> 100 (cap 150)')
+
+
+def test_analysis_prints_and_stores_paid_request_range(tmp_path_factory):
+    obj = world(tmp_path_factory)
+    code, lines = invoke(obj)
+    expected = 'paid requests (global ledger): 0 -> 100 (cap 150)'
+    assert code == 0 and lines.count(expected) == 1
+    assert json.loads((obj.root / 'A.json').read_bytes())['paid_requests_global_ledger'] == expected
+
+
+def test_analysis_rechecks_global_prefix_before_save(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory)
+    ready = [False]
+    original, read = A.build_analysis, Path.read_bytes
+
+    def build(*args, **kwargs):
+        result = original(*args, **kwargs)
+        ready[0] = True
+        return result
+
+    def changed(path):
+        raw = read(path)
+        if ready[0] and path == obj.paths['global_ledger']:
+            rows = [json.loads(line) for line in raw.splitlines()]
+            rows[1]['amount'] = -4
+            return ''.join(json.dumps(row) + '\n' for row in rows).encode()
+        return raw
+
+    monkeypatch.setattr(A, 'build_analysis', build)
+    monkeypatch.setattr(Path, 'read_bytes', changed)
+    assert invoke(obj) == (2, ['global_ledger_prefix_sha count=1'])
+    assert not (obj.root / 'A.json').exists()
+
+
+def test_analysis_does_not_take_paid_lock(tmp_path_factory, monkeypatch):
+    obj = world(tmp_path_factory)
+
+    def denied(*args, **kwargs):
+        pytest.fail('analysis acquired paid lock')
+
+    monkeypatch.setattr(A.L, 'paid_lock', denied)
+    assert invoke(obj)[0] == 0
+    assert not (obj.root / 'data/runs/s10c_paid.lock').exists()
+
+
+def test_analysis_missing_global_ledger_refuses(tmp_path_factory):
+    obj = world(tmp_path_factory, omit={'global_ledger'})
+    assert invoke(obj) == (2, ['global_ledger_input count=1'])
+    assert not (obj.root / 'A.json').exists()
