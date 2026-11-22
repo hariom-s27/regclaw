@@ -1,0 +1,37 @@
+{
+  "counts": {
+    "audit_cells": 150,
+    "dev_cells": 200,
+    "dev_profiles": 10,
+    "friend_cells": 150,
+    "matched_entries": 10,
+    "unmatched_entries": 20
+  },
+  "format": "s10c-dev-export-manifest.v1",
+  "input_shas": {
+    "data/gold/s10/audit_a_list.csv": "d8c30a5723c00050fe026157223393c64901a4fed9c461c6d630be42922336a0",
+    "data/gold/s10/dev_profiles.yaml": "e03a043f717b0a0d0458e3c77a30841df840fcc5230d523a1cc993a61979e24f",
+    "data/gold/s10/draws/friend_set.json": "b652454d05afac6cec6e9a061098eb5f16585d42786f65030307d7a7b5e8be29",
+    "data/gold/s10/judge_file_v1.yaml": "83b4519c0c057175510d51620a64f6e17ef540eb19f990851b413f49c87bdba6",
+    "data/gold/s10/labels_hariom_auditA.csv": "f5ba78e5c925d81bcc9de5e32e5bc8ffa58b3a5a44ae18400bab8d99ad5f0ff2",
+    "data/gold/s10/merge_v1.json": "08616cf972fc9d3f3c9ce889f14b584578d4dd38f7eaf4e5a00ed2c0e59ad903",
+    "data/gold/s10/sheets/friend_labels.csv": "66c33b7dcfc28267508369564099c2354224523fcf7a9737a7745e20888581a8",
+    "data/gold/s10/sheets/friend_sheet.md": "d444ce763c398ecd26afa8cb070ccb8ec15800dafe630ae7c6dd9d6cec593e08",
+    "eval/s10/manifests/auditA_labels_hariom_150.json": "ea147fdc15c0d6f5f65248cc822cd90bad7cd642985450df22f04cdd6480d696",
+    "eval/s10/manifests/friend_labels_v1.json": "d689a09973a7202ea7f4a7f56928d16a0066830f42a1e2a6deb3e4c49a6d3231",
+    "eval/s10/manifests/profiles_v1.json": "bf01d7ab8affe772dde92f9a0d7b8b261a81e789572b82ed7a3fa021eb70d597",
+    "eval/s10/manifests/s10b1_build.json": "7be78b6cc99c5a6f102cd481f62c8929f0e122faae8d3e4757438a9e43bfa6e2",
+    "standards/data/endpoint_to_part.v1.yaml": "7116f8f427f0b093cd7c3231ad674318020f81d1d851294a9b7a61c5802cb56f"
+  },
+  "outputs": {
+    "data/gold/s10/dev/dev_cells.json": {
+      "sha256_lf": "a5b045f1615ad8ade51c339d7933baf9fdf5169723a1aa01635c3a43072e474b"
+    },
+    "data/gold/s10/dev/export_summary.json": {
+      "sha256_lf": "d4a5b7d32a7e5b797fe9a2f0fbc5ddeefb6f42436fecdb3f22a66fa43cfd9451"
+    },
+    "data/gold/s10/dev/gold_dev_v2.yaml": {
+      "sha256_lf": "67fb3b552ba8335e100a67c37c3831c3ce2aea2fe35506515e0b817539dca1a3"
+    }
+  }
+}
