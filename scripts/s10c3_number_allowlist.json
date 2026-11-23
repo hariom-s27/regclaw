@@ -1,0 +1,272 @@
+[
+  {
+    "context": "about 15 packages",
+    "pattern": "about 15",
+    "source": "Decision D35 citing ppi-python dependency package count"
+  },
+  {
+    "context": "ISO 10993-1",
+    "pattern": "10993-1",
+    "source": "Standard designation ISO 10993-1"
+  },
+  {
+    "context": "ISO 10993",
+    "pattern": "10993",
+    "source": "Standard family designation ISO 10993"
+  },
+  {
+    "context": "2025 edition",
+    "pattern": "2025",
+    "source": "ISO 10993-1 2025 edition standard reference"
+  },
+  {
+    "context": "2023 guidance",
+    "pattern": "2023",
+    "source": "FDA 2023 guidance reference"
+  },
+  {
+    "context": "2019 guideline",
+    "pattern": "2019",
+    "source": "ICMR GTP 2019 guideline reference"
+  },
+  {
+    "context": "2026-11-23",
+    "pattern": "2026-11-23",
+    "source": "Evaluation run and reporting date"
+  },
+  {
+    "context": "2026-11-22",
+    "pattern": "2026-11-22",
+    "source": "Decision D35 date"
+  },
+  {
+    "context": "2026-11-21",
+    "pattern": "2026-11-21",
+    "source": "Manifest date"
+  },
+  {
+    "context": "2026-11-20",
+    "pattern": "2026-11-20",
+    "source": "Freeze date"
+  },
+  {
+    "context": "2026-11-17",
+    "pattern": "2026-11-17",
+    "source": "Addendum A2/A3 date"
+  },
+  {
+    "context": "2026-11-16",
+    "pattern": "2026-11-16",
+    "source": "Audit A date"
+  },
+  {
+    "context": "2026-11-14",
+    "pattern": "2026-11-14",
+    "source": "Pre-registration date"
+  },
+  {
+    "context": "2026-10-18",
+    "pattern": "2026-10-18",
+    "source": "Historical rebuild results date"
+  },
+  {
+    "context": "2026-10-16",
+    "pattern": "2026-10-16",
+    "source": "Historical rebuild results date"
+  },
+  {
+    "context": "2026-10-15",
+    "pattern": "2026-10-15",
+    "source": "Historical rebuild results date"
+  },
+  {
+    "context": "2026-10-08",
+    "pattern": "2026-10-08",
+    "source": "Historical rebuild results date"
+  },
+  {
+    "context": "PR-49",
+    "pattern": "PR-49",
+    "source": "Issue ID PR-49 candidate fallback tracking"
+  },
+  {
+    "context": "PR-52",
+    "pattern": "PR-52",
+    "source": "Issue ID PR-52 stop rule fragility"
+  },
+  {
+    "context": "D35",
+    "pattern": "D35",
+    "source": "Decision D35 ppi-python dependency and A3 filler follow-up"
+  },
+  {
+    "context": "D36",
+    "pattern": "D36",
+    "source": "Decision D36 pilot network blip investigation"
+  },
+  {
+    "context": "S10",
+    "pattern": "S10",
+    "source": "Evaluation milestone ID S10"
+  },
+  {
+    "context": "S10c",
+    "pattern": "S10c",
+    "source": "Phase ID S10c"
+  },
+  {
+    "context": "S10c-2",
+    "pattern": "S10c-2",
+    "source": "Phase ID S10c-2 dev run"
+  },
+  {
+    "context": "S10c-3",
+    "pattern": "S10c-3",
+    "source": "Phase ID S10c-3 reporting"
+  },
+  {
+    "context": "S10c3",
+    "pattern": "S10c3",
+    "source": "Task ID S10c3"
+  },
+  {
+    "context": "S10c3-03",
+    "pattern": "S10c3-03",
+    "source": "Task ID S10c3-03 body order specification"
+  },
+  {
+    "context": "S10c3-04",
+    "pattern": "S10c3-04",
+    "source": "Task ID S10c3-04 headline specification"
+  },
+  {
+    "context": "S10c3-05",
+    "pattern": "S10c3-05",
+    "source": "Task ID S10c3-05 disagreement reading specification"
+  },
+  {
+    "context": "S10c3-08",
+    "pattern": "S10c3-08",
+    "source": "Task ID S10c3-08 failure limits and engineering journal"
+  },
+  {
+    "context": "S10P-14",
+    "pattern": "S10P-14",
+    "source": "Pre-registration item S10P-14 effort decision rule"
+  },
+  {
+    "context": "S10P-27",
+    "pattern": "S10P-27",
+    "source": "Pre-registration item S10P-27 referee label rule"
+  },
+  {
+    "context": "A1",
+    "pattern": "A1",
+    "source": "Pre-registration addendum A1"
+  },
+  {
+    "context": "A2",
+    "pattern": "A2",
+    "source": "Pre-registration addendum A2"
+  },
+  {
+    "context": "A3",
+    "pattern": "A3",
+    "source": "Pre-registration addendum A3"
+  },
+  {
+    "context": "A4",
+    "pattern": "A4",
+    "source": "Pre-registration addendum A4"
+  },
+  {
+    "context": "E0",
+    "pattern": "E0",
+    "source": "Tipping error count E0"
+  },
+  {
+    "context": "E1",
+    "pattern": "E1",
+    "source": "Tipping error count E1"
+  },
+  {
+    "context": "E2",
+    "pattern": "E2",
+    "source": "Tipping error count E2"
+  },
+  {
+    "context": "RS2",
+    "pattern": "RS2",
+    "source": "Pre-registration reporting rule RS2 wording"
+  },
+  {
+    "context": "3 consecutive error runs",
+    "pattern": "3 consecutive error runs",
+    "source": "PR-52 stop rule condition"
+  },
+  {
+    "context": "scripts/s10c3_render_results.py from docs/results_s10c_dev.numbers.json",
+    "pattern": "s10c3_render_results.py from docs/results_s10c_dev.numbers.json",
+    "source": "Script and document path header"
+  },
+  {
+    "context": "rows 1-19",
+    "pattern": "1-19",
+    "source": "Addendum A4 Tables A-C rows 1-19"
+  },
+  {
+    "context": "rows 1–19",
+    "pattern": "1–19",
+    "source": "Addendum A4 Tables A-C rows 1-19 with en-dash"
+  },
+  {
+    "context": "1.",
+    "pattern": "\\b1\\.",
+    "source": "Ordered list item 1"
+  },
+  {
+    "context": "2.",
+    "pattern": "\\b2\\.",
+    "source": "Ordered list item 2"
+  },
+  {
+    "context": "3.",
+    "pattern": "\\b3\\.",
+    "source": "Ordered list item 3"
+  },
+  {
+    "context": "4.",
+    "pattern": "\\b4\\.",
+    "source": "Ordered list item 4"
+  },
+  {
+    "context": "5.",
+    "pattern": "\\b5\\.",
+    "source": "Ordered list item 5"
+  },
+  {
+    "context": "6.",
+    "pattern": "\\b6\\.",
+    "source": "Ordered list item 6"
+  },
+  {
+    "context": "7.",
+    "pattern": "\\b7\\.",
+    "source": "Ordered list item 7"
+  },
+  {
+    "context": "8.",
+    "pattern": "\\b8\\.",
+    "source": "Ordered list item 8"
+  },
+  {
+    "context": "9.",
+    "pattern": "\\b9\\.",
+    "source": "Ordered list item 9"
+  },
+  {
+    "context": "10.",
+    "pattern": "\\b10\\.",
+    "source": "Ordered list item 10"
+  }
+]

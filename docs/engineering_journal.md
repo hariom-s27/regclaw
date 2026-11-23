@@ -111,3 +111,14 @@ Scope and licence text now follow the agreed templates. Citations point to track
 implementation, tests, and reproducing commands. The journal includes the confirmed
 setup chronology and Preface correction. No private notes or original-system
 measurements are published. Synthetic fixture timings stay out of reported results.
+
+## 2026-11-23: S10c-2 operational diagnostics and run integrity
+
+The S10c-2 run completed dev profile evaluation across medium and high reasoning efforts on Azure OpenAI gpt-5-mini.
+These operational issues occurred:
+- Candidate fallback was not recorded per query (PR-49); cause not investigated.
+- The pilot run hit rare short network blips (D36); no code change was made, and a network gate and watchdog probe were added before main.
+- The stop rule (PR-52), which halts on three consecutive error runs with no wait, is fragile to outages of a few seconds.
+- Azure Monitor counts each embedding request under two operation names; ledger accounting remains the enforcement.
+- Environment and key handling issues preceded main: a stale key existed in a permanent Windows variable, and a key shown in a screenshot was rotated; keys are now loaded exclusively from .env per session.
+
