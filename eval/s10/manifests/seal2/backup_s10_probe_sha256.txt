@@ -1,0 +1,2 @@
+14ecd76e4a2613be1f5d69e98db54517d4e40eca27237e391a9f32f3b4cfbb64  canary/AGENTS.md
+14ecd76e4a2613be1f5d69e98db54517d4e40eca27237e391a9f32f3b4cfbb64  canary/CLAUDE.md

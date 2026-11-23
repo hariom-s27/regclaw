@@ -1,0 +1,24 @@
+{
+  "counts": {
+    "call_totals": {
+      "candidates": 23,
+      "current_ledger": 100,
+      "global_end": 129,
+      "global_start": 29,
+      "pilot": 6,
+      "total": 129
+    },
+    "http_attempts": 100,
+    "ledger_start": 0,
+    "ledger_total": 100,
+    "planned_records": 100,
+    "records": 100,
+    "sidecars": 100
+  },
+  "format": "s10c-run-receipt.v1",
+  "shas": {
+    "ledger_sha256_lf": "ffa79d069fb4a90a11ec3855c567fd703d2f78018c9cc5895f1428637007ad8c",
+    "run_manifest_sha256_lf": "1f8218996b178c945acae13e30cfccaa7ed8bd46d7e59aee6662f5e4c690cc11",
+    "runs_sha256_lf": "face62934f81cb4ec9a348c520c95ce531bc327a1dce149cfbb0e980a52c3a2b"
+  }
+}

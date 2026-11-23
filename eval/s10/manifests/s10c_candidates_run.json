@@ -1,0 +1,17 @@
+{
+  "counts": {
+    "http_attempts": 23,
+    "ledger_start": 0,
+    "ledger_total": 23
+  },
+  "format": "s10c-candidates-receipt.v1",
+  "global_end": 23,
+  "global_ledger_last_seq": 20,
+  "global_ledger_prefix_sha256_lf": "64c626d8f6e21bb152ea1a0f302a7bc9d6f814e437b131cb34c3ada101c4bed8",
+  "global_start": 0,
+  "shas": {
+    "code_lock_sha256_lf": "5e4b8525be9a20d51598348274288562725bb6547f86eae06d48634015b6136a",
+    "ledger_sha256_lf": "64c626d8f6e21bb152ea1a0f302a7bc9d6f814e437b131cb34c3ada101c4bed8",
+    "run_manifest_sha256_lf": "ede4ce053f9cd1b125de1482b7a4e36944787dc49399551cae361c6762c2e8a3"
+  }
+}
