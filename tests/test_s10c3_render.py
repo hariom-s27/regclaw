@@ -280,6 +280,50 @@ def test_checker_catches_stray(fake_env):
     ) != 0
 
 
+def test_checker_list_marker_vs_stray_number(fake_env):
+    """The checker fails on a stray '3.5' inside a sentence, and passes on a line starting '3. text'."""
+    numbers_file = fake_env["test_dir"] / "numbers.json"
+    assert R.extract_cmd(
+        str(fake_env["analysis_file"]),
+        fake_env["analysis_sha"],
+        str(fake_env["receipts_dir"]),
+        str(numbers_file),
+    ) == 0
+
+    rendered_out = fake_env["test_dir"] / "results_s10c_dev.md"
+    results_md = fake_env["test_dir"] / "results.md"
+
+    assert R.render_cmd(
+        str(numbers_file),
+        str(fake_env["template"]),
+        str(fake_env["block_template"]),
+        str(rendered_out),
+        str(results_md),
+    ) == 0
+
+    base_rendered = rendered_out.read_text(encoding="utf-8")
+
+    # 1. Passes on a line starting with '3. text'
+    valid_file = fake_env["test_dir"] / "results_valid_list.md"
+    valid_file.write_text(base_rendered + "\n\n3. text\n", encoding="utf-8")
+    assert R.check_cmd(
+        str(valid_file),
+        str(results_md),
+        str(numbers_file),
+        str(fake_env["allowlist"]),
+    ) == 0
+
+    # 2. Fails on a stray '3.5' inside a sentence
+    invalid_file = fake_env["test_dir"] / "results_stray_float.md"
+    invalid_file.write_text(base_rendered + "\n\nHere is a stray 3.5 inside a sentence.\n", encoding="utf-8")
+    assert R.check_cmd(
+        str(invalid_file),
+        str(results_md),
+        str(numbers_file),
+        str(fake_env["allowlist"]),
+    ) != 0
+
+
 def test_template_keys_resolve(fake_env):
     """Verify that every template field resolves on fake analysis numbers."""
     out_file = fake_env["test_dir"] / "numbers.json"

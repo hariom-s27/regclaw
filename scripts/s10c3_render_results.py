@@ -709,7 +709,7 @@ def check_cmd(rendered_path_str: str, results_md_str: str, numbers_path_str: str
     for item in allowlist_items:
         p = item.get("pattern")
         if p:
-            allowlist_patterns.append(re.compile(p, re.IGNORECASE))
+            allowlist_patterns.append(re.compile(p, re.IGNORECASE | re.MULTILINE))
 
     # Texts to check
     full_rendered = rendered_path.read_text(encoding="utf-8")
@@ -741,8 +741,7 @@ def check_cmd(rendered_path_str: str, results_md_str: str, numbers_path_str: str
             digit_str = m.group(0)
             start_pos, end_pos = m.start(), m.end()
 
-            # Check 1: Is this digit sequence part of an allowed formatted value occurring at this position?
-            # Find the enclosing token/word at this position
+            # Find the enclosing line at this position
             line_start = text.rfind("\n", 0, start_pos)
             line_start = 0 if line_start == -1 else line_start + 1
             line_end = text.find("\n", end_pos)
@@ -758,15 +757,20 @@ def check_cmd(rendered_path_str: str, results_md_str: str, numbers_path_str: str
                 t_end += 1
             token = text[t_start:t_end].strip(".,()[]")
 
-            if digit_str in expanded_allowed or token in expanded_allowed:
+            # Check 1: Allowed formatted value or number from numbers.json
+            if token in expanded_allowed or (not ("." in token or "/" in token) and digit_str in expanded_allowed):
                 continue
 
-            # Check 2: Does it match an allowlist context pattern?
-            context_window = text[max(0, start_pos - 40):min(len(text), end_pos + 40)]
+            # Check 2: Does it match an allowlist context pattern on this line enclosing the digit?
+            rel_start = start_pos - line_start
+            rel_end = end_pos - line_start
             matched_allowlist = False
             for pat in allowlist_patterns:
-                if pat.search(context_window):
-                    matched_allowlist = True
+                for pm in pat.finditer(line_text):
+                    if pm.start() <= rel_start and rel_end <= pm.end():
+                        matched_allowlist = True
+                        break
+                if matched_allowlist:
                     break
 
             if matched_allowlist:

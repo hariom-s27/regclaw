@@ -113,7 +113,7 @@ Fixed by the reference standard's unanimity; values: {{ fixed_by_construction_va
 
 - {{ PPI_TEXT }} (about 15 packages added by dependency install; PPI correction is 0 by construction).
 - PPI correction values: {{ ppi_correction_values }}.
-- A3 filler follow-up: skipped by decision on 22 Nov (D35).
+- A3 filler follow-up: skipped by decision on 2026-11-22 (D35).
 
 ## Deviations
 

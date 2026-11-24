@@ -25,11 +25,6 @@
     "source": "FDA 2023 guidance reference"
   },
   {
-    "context": "2019 guideline",
-    "pattern": "2019",
-    "source": "ICMR GTP 2019 guideline reference"
-  },
-  {
     "context": "2026-11-23",
     "pattern": "2026-11-23",
     "source": "Evaluation run and reporting date"
@@ -220,53 +215,8 @@
     "source": "Addendum A4 Tables A-C rows 1-19 with en-dash"
   },
   {
-    "context": "1.",
-    "pattern": "\\b1\\.",
-    "source": "Ordered list item 1"
-  },
-  {
-    "context": "2.",
-    "pattern": "\\b2\\.",
-    "source": "Ordered list item 2"
-  },
-  {
-    "context": "3.",
-    "pattern": "\\b3\\.",
-    "source": "Ordered list item 3"
-  },
-  {
-    "context": "4.",
-    "pattern": "\\b4\\.",
-    "source": "Ordered list item 4"
-  },
-  {
-    "context": "5.",
-    "pattern": "\\b5\\.",
-    "source": "Ordered list item 5"
-  },
-  {
-    "context": "6.",
-    "pattern": "\\b6\\.",
-    "source": "Ordered list item 6"
-  },
-  {
-    "context": "7.",
-    "pattern": "\\b7\\.",
-    "source": "Ordered list item 7"
-  },
-  {
-    "context": "8.",
-    "pattern": "\\b8\\.",
-    "source": "Ordered list item 8"
-  },
-  {
-    "context": "9.",
-    "pattern": "\\b9\\.",
-    "source": "Ordered list item 9"
-  },
-  {
-    "context": "10.",
-    "pattern": "\\b10\\.",
-    "source": "Ordered list item 10"
+    "context": "Markdown list marker",
+    "pattern": "^\\s*\\d+\\.\\s",
+    "source": "Numbered list item marker at line start"
   }
 ]
