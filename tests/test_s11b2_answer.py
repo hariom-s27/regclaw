@@ -125,6 +125,13 @@ def test_answer_rules_file_sha_length_lf_and_no_trailing_spaces():
         assert line == line.rstrip(" \t"), f"trailing whitespace on line: {line!r}"
 
 
+def test_load_answer_rules_normalizes_crlf_copy(tmp_path):
+    raw_bytes = answer.RULES_PATH.read_bytes()
+    crlf_copy = tmp_path / "answer_rules_crlf.txt"
+    crlf_copy.write_bytes(raw_bytes.replace(b"\n", b"\r\n"))
+    assert answer.load_answer_rules(crlf_copy) == answer.load_answer_rules()
+
+
 @pytest.mark.parametrize(
     "text,expected",
     [

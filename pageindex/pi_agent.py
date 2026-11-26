@@ -89,7 +89,7 @@ Outline (node_id, title, PDF page span, summary):
 
 def load_answer_rules(path: Path | str = RULES_PATH) -> str:
     """Load the frozen shared answer rules text without its single trailing LF."""
-    text = Path(path).read_text(encoding="utf-8")
+    text = Path(path).read_text(encoding="utf-8").replace("\r\n", "\n")
     return text[:-1] if text.endswith("\n") else text
 
 
