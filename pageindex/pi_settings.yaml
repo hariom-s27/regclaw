@@ -10,7 +10,7 @@ index_mode: standard            # standard = LLM builds titles/structure (matche
 index_model: anthropic/claude-sonnet-5-5      # LiteLLM name -> needs ANTHROPIC_API_KEY
 summary_model: anthropic/claude-sonnet-5-5
 agent_model: claude-sonnet-5-5                # Anthropic SDK name
-verifier_model: claude-haiku-4-5-20251001
+verifier_model: claude-haiku-5-5
 
 toc_check_page_num: 20
 max_page_num_each_node: 10
@@ -21,11 +21,17 @@ if_add_doc_description: "yes"
 if_add_node_text: "no"
 allow_unpinned_pageindex: false # true (or --allow-unpinned-pageindex) = build with a non-pinned PageIndex commit
 litellm_max_tokens: 16000       # anthropic/ route only; must be null on the Azure route (R22 P4)
+tree_reserve_max_tokens: 32000  # reserve bound when a PageIndex call has no explicit max_tokens
 
 agent_max_turns: 12
 max_pages_per_fetch: 12
 max_pages_total: 40
 overview_char_budget: 24000
+agent_max_tokens: 16000
+verifier_max_tokens: 4096
+agent_timeout_s: 300.0
+verifier_timeout_s: 120.0
+judge_timeout_s: 180.0
 
 # Ragas judge (eval/eval_pageindex.py; R22 R2/R3/D2). Azure v1 deployment name, REQUIRED for a
 # Ragas run (here or --judge); no default. One of: gpt-5-mini, gpt-4.1-mini, o4-mini.

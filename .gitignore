@@ -31,3 +31,5 @@ meril_local_v1/pageindex/store/
 meril_local_v1/pageindex/logs/
 meril_local_v1/pageindex/results/
 meril_local_v1/obligation/models/
+# S11 golden draft and local run data (never commit)
+data/s11/

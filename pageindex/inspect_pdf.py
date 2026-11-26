@@ -22,7 +22,7 @@ import pymupdf  # PyMuPDF >= 1.24 (import name 'pymupdf'; 'fitz' is the deprecat
 EMPTY_CHARS = 25          # a page with fewer characters than this counts as "no text"
 OCR_THRESHOLD = 0.5       # more than half the pages empty -> OCR before indexing
 TOC_LINE = re.compile(r"(\.{3,}|…{2,}|\s{2,})\s*\d{1,4}\s*$|\s\d{1,4}\s*$")
-FOOTER_NUM = re.compile(r"^\s*(?:page\s+)?(\d{1,4})(?:\s+of\s+\d+)?\s*$", re.I)
+FOOTER_NUM = re.compile(r"^\s*(?:(page)\s+)?(\d{1,4})(?:\s+of\s+\d+)?\s*$", re.I)
 
 
 def text_stats(doc) -> tuple[list[int], int]:
@@ -31,11 +31,17 @@ def text_stats(doc) -> tuple[list[int], int]:
 
 
 def printed_number(page) -> int | None:
-    """Look for a bare page number in the first/last 3 non-empty lines (header or footer)."""
+    """Look for a bare page number in the last/first 3 non-empty lines (footer first), ignoring years."""
     lines = [l for l in page.get_text().splitlines() if l.strip()]
     for line in lines[-3:][::-1] + lines[:3]:
         if m := FOOTER_NUM.match(line):
-            return int(m.group(1))
+            has_prefix = bool(m.group(1))
+            num = int(m.group(2))
+            if num < 1:
+                continue
+            if not has_prefix and 1900 <= num <= 2099:
+                continue
+            return num
     return None
 
 

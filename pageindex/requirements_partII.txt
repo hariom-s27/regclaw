@@ -19,7 +19,9 @@ litellm==1.106.0
 ragas==0.4.3
 instructor==1.17.0          # resolved with ragas 0.4.3 + litellm 1.106.0 (py3.11)
 openai==2.54.0              # resolved; litellm 1.106.0 needs >=2.20,<3; matches CI's pin
+openai-agents==0.20.0       # resolved transitively by pageindex 0.2.10
+PyPDF2==3.0.1
+PyMuPDF==1.28.2
 langchain-community<0.4     # ragas 0.4.3 imports langchain_community.chat_models.vertexai (gone in 0.4)
 
-# parser parity tool (pageindex/parser_parity.py): PyPDF2 comes with pageindex
-# (PageIndex pins PyPDF2>=3.0.0; resolved 3.0.1); PyMuPDF is in requirements.txt.
+# parser parity tool (pageindex/parser_parity.py): PyPDF2 + PyMuPDF pinned above.

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -23,6 +24,11 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent
 
 
+AGENT_TIMEOUT_S = 300.0
+VERIFIER_TIMEOUT_S = 120.0
+JUDGE_TIMEOUT_S = 180.0
+
+
 # --------------------------------------------------------------------------- settings
 class Settings(BaseModel):
     store_dir: Path = ROOT / "store"
@@ -35,7 +41,7 @@ class Settings(BaseModel):
     summary_model: str = "anthropic/claude-sonnet-5-5"
     # Anthropic SDK model names (used by our agent + verifier).
     agent_model: str = "claude-sonnet-5-5"
-    verifier_model: str = "claude-haiku-4-5-20251001"
+    verifier_model: str = "claude-haiku-5-5"
     # PageIndex config.yaml options (defaults copied from the repo's config.yaml)
     toc_check_page_num: int = 20
     max_page_num_each_node: int = 10
@@ -48,18 +54,44 @@ class Settings(BaseModel):
     # anthropic/ route only. The opt-in Azure route (openai/<deployment>) must NOT cap
     # (R22 P4: hidden reasoning tokens -> finish_reason=length loops), so set null there.
     litellm_max_tokens: Optional[int] = 16000
-    # Ragas judge (ADR 0029 draft, R22 R2/R3/D2). REQUIRED for a Ragas run; no default.
+    # Ragas judge (ADR 0029 draft, R22 R2/R3/D2). Azure deployment, REQUIRED for a Ragas run; no default.
     judge_model: Optional[str] = None
     judge_repeats: int = 3
     embedding_model: str = "text-embedding-3-small"
     # R22 D1: ingest refuses a PageIndex commit other than PAGEINDEX_PIN_SHA unless this is
     # true (or --allow-unpinned-pageindex); the manifest then records "unpinned: <commit>".
     allow_unpinned_pageindex: bool = False
-    # agent budgets
+    # agent budgets and timeouts
     agent_max_turns: int = 12
     max_pages_per_fetch: int = 12
     max_pages_total: int = 40
     overview_char_budget: int = 24000
+    agent_max_tokens: int = 16000
+    verifier_max_tokens: int = 4096
+    tree_reserve_max_tokens: int = 32000
+    agent_timeout_s: float = AGENT_TIMEOUT_S
+    verifier_timeout_s: float = VERIFIER_TIMEOUT_S
+    judge_timeout_s: float = JUDGE_TIMEOUT_S
+
+    @field_validator("store_dir", mode="before")
+    @classmethod
+    def _resolve_store_dir(cls, v: Path | str) -> Path:
+        p = Path(v)
+        return p if p.is_absolute() else (ROOT / p).resolve()
+
+    @field_validator("agent_max_tokens", "verifier_max_tokens", "tree_reserve_max_tokens")
+    @classmethod
+    def _positive_tokens(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"max_tokens must be > 0, got {v!r}")
+        return v
+
+    @field_validator("agent_timeout_s", "verifier_timeout_s", "judge_timeout_s")
+    @classmethod
+    def _positive_timeout(cls, v: float) -> float:
+        if not math.isfinite(v) or v <= 0:
+            raise ValueError(f"timeout must be finite and > 0, got {v!r}")
+        return float(v)
 
     @field_validator("index_mode")
     @classmethod
@@ -289,11 +321,16 @@ def parse_page_spec(spec: str) -> list[int]:
         part = part.strip()
         if "-" in part:
             a, b = (int(x) for x in part.split("-"))
+            if a < 1 or b < 1:
+                raise ValueError("Page numbers must be >= 1 (1-based physical PDF pages)")
             if a > b:
                 raise ValueError(f"Range '{part}' has start > end")
             pages.update(range(a, b + 1))
         else:
-            pages.add(int(part))
+            p = int(part)
+            if p < 1:
+                raise ValueError("Page numbers must be >= 1 (1-based physical PDF pages)")
+            pages.add(p)
     return sorted(pages)
 
 

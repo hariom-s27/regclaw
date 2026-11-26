@@ -58,6 +58,7 @@ import asyncio
 import hashlib
 import importlib
 import json
+import logging
 import math
 import statistics
 import sys
@@ -69,9 +70,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "pageindex"))
-from pi_common import (azure_credentials, azure_v1_base_url, check_deployment_names,  # noqa: E402
-                       is_reasoning_model, load_settings)
+from eval.s11.ledger import UsageLogger, default_s11_paths  # noqa: E402
+from pi_client import ModelVersionGuard, build_guarded_async_openai  # noqa: E402
+from pi_common import (JUDGE_TIMEOUT_S, azure_credentials, azure_v1_base_url,  # noqa: E402
+                       check_deployment_names, is_reasoning_model, load_settings)
+
+log = logging.getLogger("pageindex.eval")
 
 RAGAS_METRICS = ["faithfulness", "answer_relevancy", "answer_correctness"]
 PAGE_METRICS = ["hit", "recall", "precision"]
@@ -124,20 +130,33 @@ def judge_kwargs(judge: str) -> dict:
     return kw
 
 
-def azure_async_client():
-    """AsyncOpenAI on the Azure v1 surface; endpoint and key from env at call time only."""
+def azure_async_client(timeout: float = JUDGE_TIMEOUT_S, *, usage_log=None, guard: ModelVersionGuard | None = None):
+    """Guarded AsyncOpenAI on the Azure v1 surface; requires usage_log (no ledger)."""
+    if usage_log is None:
+        raise ValueError("azure_async_client requires usage_log")
     from openai import AsyncOpenAI
     endpoint, key = azure_credentials()
-    return AsyncOpenAI(base_url=azure_v1_base_url(endpoint), api_key=key)
+    log.info("azure judge client: max_retries=0 timeout=%.1fs", timeout)
+    return build_guarded_async_openai(
+        base_url=azure_v1_base_url(endpoint),
+        api_key=key,
+        timeout=timeout,
+        usage_log=usage_log,
+        guard=guard,
+        async_openai_cls=AsyncOpenAI,
+    )
 
 
-def build_ragas(judge: str, embedding_model: str = "text-embedding-3-small", client=None) -> dict:
+def build_ragas(judge: str, embedding_model: str = "text-embedding-3-small",
+                client=None, timeout: float | None = None, *,
+                usage_log=None, guard: ModelVersionGuard | None = None) -> dict:
     check_deployment_names({"judge": judge, "embedding_model": embedding_model})   # D2, before any client
     from ragas.embeddings.base import embedding_factory
     from ragas.llms import llm_factory
     from ragas.metrics.collections import AnswerCorrectness, AnswerRelevancy, Faithfulness
 
-    client = client or azure_async_client()
+    effective_timeout = JUDGE_TIMEOUT_S if timeout is None else timeout
+    client = client or azure_async_client(timeout=effective_timeout, usage_log=usage_log, guard=guard)
     llm = llm_factory(judge, client=client, **judge_kwargs(judge))   # provider stays "openai" (R2)
     emb = embedding_factory("openai", model=embedding_model, client=client)
     return {
@@ -228,6 +247,10 @@ def evaluate_item(g: dict, out: dict, metrics: dict | None, judge_repeats: int,
                     print(f"  ! {g['id']} run {run} repeat {jr + 1}: {name} failed: {why}", file=sys.stderr)
         rows.append({"run": run, "judge_repeat": jr + 1, "id": g["id"], "status": status,
                      "unanswerable": unanswerable, "ragas_note": note, "judge_errors": errors,
+                     "answer": out.get("answer", ""),
+                     "answer_pre_repair": out.get("answer_pre_repair", out.get("answer", "")),
+                     "repaired": bool(out.get("repaired", False)),
+                     "dropped_sentences": list(out.get("dropped_sentences", [])),
                      "retrieved": sorted(set(retrieved)), "gold": g["gold_pages"],
                      **pm, **scores, "latency_s": latency, "timings": out.get("timings", {})})
     return rows
@@ -277,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--judge", help="Azure judge deployment (REQUIRED for Ragas unless judge_model is set): "
                                     "gpt-5-mini, gpt-4.1-mini or o4-mini")
     ap.add_argument("--settings", default=str(ROOT / "pageindex" / "pi_settings.yaml"))
+    _, default_usage, _ = default_s11_paths(ROOT)
+    ap.add_argument("--usage-log", default=str(default_usage))
     ap.add_argument("--no-ragas", action="store_true")
     ap.add_argument("--out", default="eval_results.json")
     args = ap.parse_args(argv)
@@ -296,7 +321,20 @@ def main(argv: list[str] | None = None) -> int:
     golden = json.loads(golden_path.read_text(encoding="utf-8"))
     validate_golden(golden)
     system = fake_system if args.dry_run else load_system(args.system)
-    metrics = None if args.no_ragas else build_ragas(judge, s.embedding_model)
+    guard = None if args.no_ragas else ModelVersionGuard()
+    metrics = (
+        None
+        if args.no_ragas
+        else build_ragas(
+            judge,
+            s.embedding_model,
+            timeout=s.judge_timeout_s,
+            usage_log=UsageLogger(Path(args.usage_log)),
+            guard=guard,
+        )
+    )
+    if metrics is not None:
+        print(f"Judge {judge}: timeout={s.judge_timeout_s}s max_retries=0", file=sys.stderr)
 
     rows = []  # one row per (run, query, judge_repeat)
     for run in range(1, args.runs + 1):
@@ -316,7 +354,8 @@ def main(argv: list[str] | None = None) -> int:
     out_path = Path(args.out)
     out_path.write_text(json.dumps(rows, indent=2))
     c = counts(rows, metrics is not None)
-    invalid = metrics is not None and c["judge_errors_total"] > 0
+    model_violations = guard.violations if guard is not None else []
+    invalid = metrics is not None and (c["judge_errors_total"] > 0 or len(model_violations) > 0)
     exit_code = EXIT_JUDGE_ERRORS if invalid else 0
 
     # ---- per-query table: mean [min-max] across all runs/judge repeats
@@ -357,8 +396,12 @@ def main(argv: list[str] | None = None) -> int:
         for m, v in c["ragas_na"].items():
             print(f"  {m:20s} {v['judge_error']} | {v['not_computed_agent_failure']} | {v['excluded_unanswerable']}")
     if invalid:
-        print(f"\nRUN INVALID (R4): {c['judge_errors_total']} judge/metric error(s) on answered items. "
-              "Fix and re-run; no Ragas means are reported.", file=sys.stderr)
+        if c["judge_errors_total"] > 0:
+            print(f"\nRUN INVALID (R4): {c['judge_errors_total']} judge/metric error(s) on answered items. "
+                  "Fix and re-run; no Ragas means are reported.", file=sys.stderr)
+        if model_violations:
+            print(f"\nRUN INVALID (model version drift): {len(model_violations)} model version violation(s) "
+                  "detected. Fix and re-run; no Ragas means are reported.", file=sys.stderr)
 
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -367,8 +410,12 @@ def main(argv: list[str] | None = None) -> int:
         "runs": args.runs, "judge_repeats": repeats if metrics else None, "retrieved": args.retrieved,
         "ragas": None if metrics is None else {
             "version": _ragas_version(), "api": "ragas.metrics.collections", "metrics": RAGAS_METRICS,
-            "judge": judge, "judge_kwargs": judge_kwargs(judge), "embedding_model": s.embedding_model,
-            "route": "azure_openai_v1"},
+            "judge": judge, "judge_kwargs": judge_kwargs(judge), "judge_timeout_s": s.judge_timeout_s,
+            "embedding_model": s.embedding_model, "route": "azure_openai_v1"},
+        "model_version_guard": None if guard is None else {
+            "observed_models": guard.observed_models,
+            "violations": model_violations,
+        },
         "counts": c, "valid": not invalid, "exit_code": exit_code,
     }
     manifest_path = out_path.with_name(out_path.stem + ".manifest.json")

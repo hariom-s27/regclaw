@@ -83,15 +83,22 @@ def azure(monkeypatch):
     ('gpt-5-mini', {'max_tokens': 8192, 'reasoning_effort': 'low'}),
     ('o4-mini', {'max_tokens': 8192, 'reasoning_effort': 'low'}),
     ('gpt-4.1-mini', {'max_tokens': 8192})])
-def test_judge_factory_args(ev, fake_ragas, azure, judge, expected):
-    metrics = ev.build_ragas(judge)
+def test_judge_factory_args(ev, fake_ragas, azure, tmp_path, judge, expected):
+    import httpx
+    from eval.s11.ledger import UsageLogger
+
+    metrics = ev.build_ragas(judge, usage_log=UsageLogger(tmp_path / 'usage.jsonl'))
     assert set(metrics) == {'faithfulness', 'answer_relevancy', 'answer_correctness'}
     model, kw = fake_ragas.llm
     assert model == judge and kw.pop('client').kind == 'async-openai'
     assert kw == expected and 'provider' not in kw            # default "openai", never "litellm"
     assert fake_ragas.emb[0] == 'openai'
     assert fake_ragas.emb[1]['model'] == 'text-embedding-3-small'
-    assert azure == [{'base_url': 'https://res.openai.azure.com/openai/v1/', 'api_key': SECRET}]
+    assert len(azure) == 1
+    az_kw = dict(azure[0])
+    assert isinstance(az_kw.pop('http_client'), httpx.AsyncClient)
+    assert az_kw == {'base_url': 'https://res.openai.azure.com/openai/v1/', 'api_key': SECRET,
+                     'max_retries': 0, 'timeout': 180.0}
 
 
 @pytest.mark.parametrize('judge,emb', [('gpt-4o-mini', 'text-embedding-3-small'),
@@ -103,10 +110,12 @@ def test_unknown_deployments_refused_before_any_client(ev, fake_ragas, azure, ju
     assert azure == [] and fake_ragas.llm is None
 
 
-def test_missing_azure_env_is_refused(ev, fake_ragas, monkeypatch):
+def test_missing_azure_env_is_refused(ev, fake_ragas, tmp_path, monkeypatch):
+    from eval.s11.ledger import UsageLogger
+
     monkeypatch.delenv('AZURE_OPENAI_ENDPOINT', raising=False)
     with pytest.raises(RuntimeError, match='AZURE_OPENAI_ENDPOINT'):
-        ev.build_ragas('gpt-5-mini')
+        ev.build_ragas('gpt-5-mini', usage_log=UsageLogger(tmp_path / 'usage.jsonl'))
 
 
 def golden_file(tmp_path, items=None):
@@ -157,7 +166,8 @@ def run_main(ev, monkeypatch, tmp_path, outputs, *extra, judge='gpt-5-mini'):
     monkeypatch.setattr(ev, 'load_system', lambda spec: system_for(outputs))
     out = tmp_path / 'rows.json'
     code = ev.main(['--golden', str(golden_file(tmp_path)), '--system', 'x:run', '--runs', '1',
-                    '--settings', str(settings_file(tmp_path, judge)), '--out', str(out), *extra])
+                    '--settings', str(settings_file(tmp_path, judge)),
+                    '--usage-log', str(tmp_path / 'usage.jsonl'), '--out', str(out), *extra])
     return code, json.loads(out.read_text()), json.loads((tmp_path / 'rows.manifest.json').read_text())
 
 
