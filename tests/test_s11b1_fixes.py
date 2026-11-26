@@ -143,15 +143,15 @@ def test_verifier_model_is_claude_haiku_5_5(mods):
 
 
 def test_timeout_and_max_token_settings_defaults_and_validation(mods):
-    assert mods.common.AGENT_TIMEOUT_S == 300.0
-    assert mods.common.VERIFIER_TIMEOUT_S == 120.0
+    assert mods.common.AGENT_TIMEOUT_S == 600.0
+    assert mods.common.VERIFIER_TIMEOUT_S == 180.0
     assert mods.common.JUDGE_TIMEOUT_S == 180.0
     for s in (mods.common.Settings(), mods.common.load_settings()):
-        assert s.agent_timeout_s == 300.0
-        assert s.verifier_timeout_s == 120.0
+        assert s.agent_timeout_s == 600.0
+        assert s.verifier_timeout_s == 180.0
         assert s.judge_timeout_s == 180.0
-        assert s.agent_max_tokens == 16000
-        assert s.verifier_max_tokens == 4096
+        assert s.agent_max_tokens == 32000
+        assert s.verifier_max_tokens == 16000
 
     for field in ("agent_timeout_s", "verifier_timeout_s", "judge_timeout_s"):
         with pytest.raises(ValueError):
@@ -188,8 +188,8 @@ def test_no_temperature_top_p_or_top_k_sent_by_run_agent_or_verify(mods, monkeyp
     for req in client.requests:
         for forbidden in ("temperature", "top_p", "top_k"):
             assert forbidden not in req
-    assert client.requests[0]["max_tokens"] == 16000
-    assert client.requests[2]["max_tokens"] == 4096
+    assert client.requests[0]["max_tokens"] == 32000
+    assert client.requests[2]["max_tokens"] == 16000
 
 
 def test_pi_agent_passes_max_retries_zero_timeouts_and_logs(mods, monkeypatch, caplog, tmp_path):
@@ -218,13 +218,13 @@ def test_pi_agent_passes_max_retries_zero_timeouts_and_logs(mods, monkeypatch, c
         )
 
     assert client_inits == [
-        {"max_retries": 0, "timeout": 300.0},
-        {"max_retries": 0, "timeout": 120.0},
+        {"max_retries": 0, "timeout": 600.0},
+        {"max_retries": 0, "timeout": 180.0},
     ]
-    assert client.requests[0]["timeout"] == 300.0
-    assert client.requests[2]["timeout"] == 120.0
-    assert r["timeouts"] == {"agent_timeout_s": 300.0, "verifier_timeout_s": 120.0}
-    assert "agent_timeout_s=300.0" in caplog.text and "verifier_timeout_s=120.0" in caplog.text
+    assert client.requests[0]["timeout"] == 600.0
+    assert client.requests[2]["timeout"] == 180.0
+    assert r["timeouts"] == {"agent_timeout_s": 600.0, "verifier_timeout_s": 180.0}
+    assert "agent_timeout_s=600.0" in caplog.text and "verifier_timeout_s=180.0" in caplog.text
 
 
 def test_eval_pageindex_passes_judge_timeout_and_logs_manifest(mods, fake_ragas, monkeypatch, tmp_path, capsys):
@@ -310,6 +310,7 @@ def test_usage_accumulates_cache_and_verifier_tokens_and_models(mods, monkeypatc
         "cache_read_input_tokens": 170,
         "cache_creation_input_tokens": 50,
         "calls": 3,
+        "thinking_tokens": None,
     }
     expected_verifier = {
         "input_tokens": 85,
@@ -317,8 +318,16 @@ def test_usage_accumulates_cache_and_verifier_tokens_and_models(mods, monkeypatc
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0,
         "calls": 2,
+        "thinking_tokens": None,
     }
-    expected_total = {k: expected_agent[k] + expected_verifier[k] for k in expected_agent}
+    expected_total = {
+        "input_tokens": expected_agent["input_tokens"] + expected_verifier["input_tokens"],
+        "output_tokens": expected_agent["output_tokens"] + expected_verifier["output_tokens"],
+        "cache_read_input_tokens": expected_agent["cache_read_input_tokens"] + expected_verifier["cache_read_input_tokens"],
+        "cache_creation_input_tokens": expected_agent["cache_creation_input_tokens"] + expected_verifier["cache_creation_input_tokens"],
+        "calls": expected_agent["calls"] + expected_verifier["calls"],
+        "thinking_tokens": None,
+    }
     assert u["agent"] == expected_agent
     assert u["verifier"] == expected_verifier
     assert u["total"] == expected_total

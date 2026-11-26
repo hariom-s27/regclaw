@@ -1,5 +1,5 @@
 # Part II pricing table (USD per 1M tokens).
-# Source: Anthropic pricing page, checked 2026-11-26 (approved S11b1-05).
+# Source: platform.claude.com pricing + prompt-caching docs, checked 2026-11-26
 currency: USD
 per_tokens: 1000000
 cap_usd: 60.0
@@ -10,7 +10,7 @@ models:
     bill_against_cap: true
     input_per_1m: 2.00
     output_per_1m: 10.00
-    cache_read_per_1m: 0.20
+    cache_read_per_1m: 0.10
     cache_write_5m_per_1m: 2.50
 
   claude-haiku-5-5:
@@ -18,15 +18,17 @@ models:
     bill_against_cap: true
     # Tier is set by prompt_tokens = input + cache_read + cache_write
     # (for reservation, tier uses input_estimate).
-    # Cache tokens are not expected for Haiku; if non-zero, cache_read is
-    # priced at the tier input price and cache_write at 1.25x it, with a warning.
     prompt_tiers:
       - max_prompt_tokens: 100000
         input_per_1m: 0.10
         output_per_1m: 0.50
+        cache_read_per_1m: 0.01
+        cache_write_5m_per_1m: 0.125
       - max_prompt_tokens: null
         input_per_1m: 0.50
         output_per_1m: 2.50
+        cache_read_per_1m: 0.05
+        cache_write_5m_per_1m: 0.625
 
   gpt-4.1-mini:
     provider: azure_openai

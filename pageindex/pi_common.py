@@ -24,9 +24,10 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent
 
 
-AGENT_TIMEOUT_S = 300.0
-VERIFIER_TIMEOUT_S = 120.0
+AGENT_TIMEOUT_S = 600.0
+VERIFIER_TIMEOUT_S = 180.0
 JUDGE_TIMEOUT_S = 180.0
+ANSWER_EFFORT_CHOICES = ("medium", "high")
 
 
 # --------------------------------------------------------------------------- settings
@@ -66,12 +67,28 @@ class Settings(BaseModel):
     max_pages_per_fetch: int = 12
     max_pages_total: int = 40
     overview_char_budget: int = 24000
-    agent_max_tokens: int = 16000
-    verifier_max_tokens: int = 4096
+    answer_effort: str = "medium"
+    verifier_effort: str = "medium"
+    agent_max_tokens: int = 32000
+    verifier_max_tokens: int = 16000
     tree_reserve_max_tokens: int = 32000
     agent_timeout_s: float = AGENT_TIMEOUT_S
     verifier_timeout_s: float = VERIFIER_TIMEOUT_S
     judge_timeout_s: float = JUDGE_TIMEOUT_S
+
+    @field_validator("answer_effort")
+    @classmethod
+    def _valid_answer_effort(cls, v: str) -> str:
+        if not isinstance(v, str) or v not in ANSWER_EFFORT_CHOICES:
+            raise ValueError(f"answer_effort must be one of {ANSWER_EFFORT_CHOICES}, got {v!r}")
+        return v
+
+    @field_validator("verifier_effort")
+    @classmethod
+    def _valid_verifier_effort(cls, v: str) -> str:
+        if v != "medium":
+            raise ValueError(f"verifier_effort is fixed to 'medium', got {v!r}")
+        return v
 
     @field_validator("store_dir", mode="before")
     @classmethod
