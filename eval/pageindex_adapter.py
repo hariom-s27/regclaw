@@ -30,12 +30,16 @@ def run(question: str) -> dict:
     r = answer_question(question, FAMILY, VERSION)
     return {
         "answer": r["answer"],
+        "answer_pre_repair": r.get("answer_pre_repair", r["answer"]),
         "fetched_pages": r["fetched_pages"],
         "page_text": dict(zip(r["fetched_pages"], r["contexts"])),
         "cited_pages": r["cited_pages"],
         "timings": {"total": r["latency_s"]},
         "usage": r["usage"],
         "repaired": r["repaired"],
+        "dropped_sentences": r.get("dropped_sentences", []),
+        "models": r.get("models", {}),
+        "timeouts": r.get("timeouts", {}),
         # R22 R7: "ok" or "failed:<max_tokens|empty_answer|max_turns>" (a system outcome)
         "status": r.get("status", "ok"),
         "cited_not_fetched": r.get("cited_not_fetched", []),

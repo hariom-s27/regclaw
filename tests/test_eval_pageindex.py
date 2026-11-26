@@ -91,7 +91,8 @@ def test_judge_factory_args(ev, fake_ragas, azure, judge, expected):
     assert kw == expected and 'provider' not in kw            # default "openai", never "litellm"
     assert fake_ragas.emb[0] == 'openai'
     assert fake_ragas.emb[1]['model'] == 'text-embedding-3-small'
-    assert azure == [{'base_url': 'https://res.openai.azure.com/openai/v1/', 'api_key': SECRET}]
+    assert azure == [{'base_url': 'https://res.openai.azure.com/openai/v1/', 'api_key': SECRET,
+                      'max_retries': 0, 'timeout': 180.0}]
 
 
 @pytest.mark.parametrize('judge,emb', [('gpt-4o-mini', 'text-embedding-3-small'),

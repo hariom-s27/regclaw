@@ -14,9 +14,17 @@ from datetime import date
 from importlib import metadata
 from pathlib import Path
 
-from pi_common import (PAGEINDEX_PIN_SHA, DocRecord, Settings, index_backend,
-                       installed_pageindex_commit, load_manifest, load_settings, model_route,
-                       now_utc, page_count, save_manifest, sha256_file, text_layer_report)
+if __package__:
+    from .pi_common import (PAGEINDEX_PIN_SHA, DocRecord, Settings, index_backend,
+                            installed_pageindex_commit, load_manifest, load_settings, model_route,
+                            now_utc, page_count, save_manifest, sha256_file, text_layer_report)
+else:
+    _here = str(Path(__file__).resolve().parent)
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    from pi_common import (PAGEINDEX_PIN_SHA, DocRecord, Settings, index_backend,
+                           installed_pageindex_commit, load_manifest, load_settings, model_route,
+                           now_utc, page_count, save_manifest, sha256_file, text_layer_report)
 
 
 def _pageindex_version() -> str:
@@ -26,7 +34,7 @@ def _pageindex_version() -> str:
         return "unknown (source checkout)"
 
 
-def build_tree(pdf_path: str, s: Settings) -> dict:
+def build_tree(pdf_path: str, s: Settings, *, allow_unpinned: bool | None = None) -> dict:
     """Run PageIndex in-process. Returns PageIndex's own output dict unchanged.
 
     R22 (PageIndex 50a71b6): PageIndex's default mode is now "flash", so the standard
@@ -40,6 +48,8 @@ def build_tree(pdf_path: str, s: Settings) -> dict:
     #                     long TOC JSON (PageIndex raises on finish_reason == "length").
     #   Azure route:      {"api_base", "api_key"} only, NO max_tokens cap (P3, P4).
     backend = index_backend(s)      # validates models, route, deployment names, credentials
+    effective_allow_unpinned = s.allow_unpinned_pageindex if allow_unpinned is None else allow_unpinned
+    pageindex_commit_or_refuse(effective_allow_unpinned)
     from pageindex.utils import ConfigLoader, _llm_backend
 
     token = _llm_backend.set(backend or None)
@@ -131,7 +141,7 @@ def ingest(pdf: str, family: str, version: str, title: str | None = None,
         shutil.copy2(pdf, pdf_copy)
 
     # 5) build + persist
-    result = build_tree(str(pdf_copy), s)
+    result = build_tree(str(pdf_copy), s, allow_unpinned=allow_unpinned)
     tree_path = store / "trees" / f"{key}.json"
     tree_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -170,11 +180,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--title")
     ap.add_argument("--effective-date", type=date.fromisoformat)
     ap.add_argument("--force", action="store_true", help="rebuild even if cached")
+    ap.add_argument("--settings", help="path to settings YAML (default: pageindex/pi_settings.yaml)")
     ap.add_argument("--allow-unpinned-pageindex", action="store_true", default=None,
                     help="build with a PageIndex commit other than the pin; recorded as 'unpinned: <commit>'")
     a = ap.parse_args(argv)
-    r = ingest(a.pdf, a.family, a.version, a.title, a.effective_date, a.force,
-               allow_unpinned=a.allow_unpinned_pageindex)
+    kw = {"allow_unpinned": a.allow_unpinned_pageindex}
+    if a.settings is not None:
+        kw["s"] = load_settings(Path(a.settings))
+    r = ingest(a.pdf, a.family, a.version, a.title, a.effective_date, a.force, **kw)
     print(r.model_dump_json(indent=2))
     return 0
 

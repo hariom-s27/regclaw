@@ -62,23 +62,13 @@ def session(pi, max_turns=12):
 
 @pytest.mark.parametrize('first,reason', [(text('partial', 'max_tokens'), 'max_tokens'),
                                           (text(''), 'empty_answer')])
-def test_one_retry_then_answer(pi, first, reason, caplog):
+def test_bad_stop_or_empty_fails_immediately_without_retry(pi, first, reason, caplog):
     sess = session(pi)
     client = Client(first, text('Answer.'))
-    answer, messages, use = pi.agent.run_agent(client, sess, 'q')
-    assert answer == 'Answer.' and sess.failure is None and sess.retries == 1
-    assert use['turns'] == 2
-    assert all(m['content'] != first.content for m in messages if m['role'] == 'assistant')
+    answer, _, use = pi.agent.run_agent(client, sess, 'q')
+    assert answer == '' and sess.failure == reason and sess.retries == 0
+    assert use['turns'] == 1 and len(client.requests) == 1
     assert reason in caplog.text
-
-
-@pytest.mark.parametrize('bad,reason', [(lambda: text('x', 'max_tokens'), 'max_tokens'),
-                                        (lambda: text(''), 'empty_answer')])
-def test_second_failure_fails_the_item(pi, bad, reason):
-    sess = session(pi)
-    client = Client(bad(), bad())
-    answer, _, _ = pi.agent.run_agent(client, sess, 'q')
-    assert answer == '' and sess.failure == reason and len(client.requests) == 2
 
 
 def test_max_turns_is_a_failure_not_a_forced_answer(pi):
@@ -98,7 +88,7 @@ def test_answer_question_reports_failure_and_skips_verify(pi, monkeypatch):
     monkeypatch.setattr(pi.agent, 'load_tree', lambda p: {'structure': []})
     monkeypatch.setattr(pi.agent, 'fetch_pages', lambda path, pages: {p: f'page {p}' for p in pages})
     client = Client(tool('fetch_pages', {'pages': '2'}))
-    monkeypatch.setattr(pi.agent.anthropic, 'Anthropic', lambda: client)
+    monkeypatch.setattr(pi.agent.anthropic, 'Anthropic', lambda **kw: client)
     r = pi.agent.answer_question('q', 'gtp', s=s)
     assert r['status'] == 'failed:max_turns' and r['answer'] == '' and r['cited_pages'] == []
     assert r['fetched_pages'] == [2] and r['verdicts'] == []
@@ -120,7 +110,7 @@ def test_cited_pages_are_validated_against_fetched(pi, monkeypatch):
                     # repair round: the unfetched citation is dropped
                     text('Storage shall be at 2-8 C [p. 2].'),
                     verdicts(ok))
-    monkeypatch.setattr(pi.agent.anthropic, 'Anthropic', lambda: client)
+    monkeypatch.setattr(pi.agent.anthropic, 'Anthropic', lambda **kw: client)
     r = pi.agent.answer_question('q', 'gtp', s=s)
     assert r['status'] == 'ok' and r['repaired'] is True
     assert r['cited_pages'] == [2] and r['cited_not_fetched'] == []

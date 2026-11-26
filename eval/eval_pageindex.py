@@ -58,6 +58,7 @@ import asyncio
 import hashlib
 import importlib
 import json
+import logging
 import math
 import statistics
 import sys
@@ -70,8 +71,10 @@ from dotenv import load_dotenv
 load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pageindex"))
-from pi_common import (azure_credentials, azure_v1_base_url, check_deployment_names,  # noqa: E402
-                       is_reasoning_model, load_settings)
+from pi_common import (JUDGE_TIMEOUT_S, azure_credentials, azure_v1_base_url,  # noqa: E402
+                       check_deployment_names, is_reasoning_model, load_settings)
+
+log = logging.getLogger("pageindex.eval")
 
 RAGAS_METRICS = ["faithfulness", "answer_relevancy", "answer_correctness"]
 PAGE_METRICS = ["hit", "recall", "precision"]
@@ -124,20 +127,24 @@ def judge_kwargs(judge: str) -> dict:
     return kw
 
 
-def azure_async_client():
+def azure_async_client(timeout: float = JUDGE_TIMEOUT_S):
     """AsyncOpenAI on the Azure v1 surface; endpoint and key from env at call time only."""
     from openai import AsyncOpenAI
     endpoint, key = azure_credentials()
-    return AsyncOpenAI(base_url=azure_v1_base_url(endpoint), api_key=key)
+    log.info("azure judge client: max_retries=0 timeout=%.1fs", timeout)
+    return AsyncOpenAI(base_url=azure_v1_base_url(endpoint), api_key=key,
+                       max_retries=0, timeout=timeout)
 
 
-def build_ragas(judge: str, embedding_model: str = "text-embedding-3-small", client=None) -> dict:
+def build_ragas(judge: str, embedding_model: str = "text-embedding-3-small",
+                client=None, timeout: float | None = None) -> dict:
     check_deployment_names({"judge": judge, "embedding_model": embedding_model})   # D2, before any client
     from ragas.embeddings.base import embedding_factory
     from ragas.llms import llm_factory
     from ragas.metrics.collections import AnswerCorrectness, AnswerRelevancy, Faithfulness
 
-    client = client or azure_async_client()
+    effective_timeout = JUDGE_TIMEOUT_S if timeout is None else timeout
+    client = client or azure_async_client(timeout=effective_timeout)
     llm = llm_factory(judge, client=client, **judge_kwargs(judge))   # provider stays "openai" (R2)
     emb = embedding_factory("openai", model=embedding_model, client=client)
     return {
@@ -228,6 +235,10 @@ def evaluate_item(g: dict, out: dict, metrics: dict | None, judge_repeats: int,
                     print(f"  ! {g['id']} run {run} repeat {jr + 1}: {name} failed: {why}", file=sys.stderr)
         rows.append({"run": run, "judge_repeat": jr + 1, "id": g["id"], "status": status,
                      "unanswerable": unanswerable, "ragas_note": note, "judge_errors": errors,
+                     "answer": out.get("answer", ""),
+                     "answer_pre_repair": out.get("answer_pre_repair", out.get("answer", "")),
+                     "repaired": bool(out.get("repaired", False)),
+                     "dropped_sentences": list(out.get("dropped_sentences", [])),
                      "retrieved": sorted(set(retrieved)), "gold": g["gold_pages"],
                      **pm, **scores, "latency_s": latency, "timings": out.get("timings", {})})
     return rows
@@ -296,7 +307,9 @@ def main(argv: list[str] | None = None) -> int:
     golden = json.loads(golden_path.read_text(encoding="utf-8"))
     validate_golden(golden)
     system = fake_system if args.dry_run else load_system(args.system)
-    metrics = None if args.no_ragas else build_ragas(judge, s.embedding_model)
+    metrics = None if args.no_ragas else build_ragas(judge, s.embedding_model, timeout=s.judge_timeout_s)
+    if metrics is not None:
+        print(f"Judge {judge}: timeout={s.judge_timeout_s}s max_retries=0", file=sys.stderr)
 
     rows = []  # one row per (run, query, judge_repeat)
     for run in range(1, args.runs + 1):
@@ -367,8 +380,8 @@ def main(argv: list[str] | None = None) -> int:
         "runs": args.runs, "judge_repeats": repeats if metrics else None, "retrieved": args.retrieved,
         "ragas": None if metrics is None else {
             "version": _ragas_version(), "api": "ragas.metrics.collections", "metrics": RAGAS_METRICS,
-            "judge": judge, "judge_kwargs": judge_kwargs(judge), "embedding_model": s.embedding_model,
-            "route": "azure_openai_v1"},
+            "judge": judge, "judge_kwargs": judge_kwargs(judge), "judge_timeout_s": s.judge_timeout_s,
+            "embedding_model": s.embedding_model, "route": "azure_openai_v1"},
         "counts": c, "valid": not invalid, "exit_code": exit_code,
     }
     manifest_path = out_path.with_name(out_path.stem + ".manifest.json")

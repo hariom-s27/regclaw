@@ -19,11 +19,20 @@ from pathlib import Path
 
 import anthropic
 if __package__ in (None, ''):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    _root_dir = str(Path(__file__).resolve().parents[1])
+    _here = str(Path(__file__).resolve().parent)
+    if _root_dir not in sys.path:
+        sys.path.insert(0, _root_dir)
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
 from observability.tracing import stage, traced, record_response
 
-from pi_common import (Settings, fetch_pages, load_manifest, load_settings, load_tree,
-                       node_map, outline, parse_page_spec, resolve_edition, subtree_span)
+if __package__:
+    from .pi_common import (Settings, fetch_pages, load_manifest, load_settings, load_tree,
+                            node_map, outline, parse_page_spec, resolve_edition, subtree_span)
+else:
+    from pi_common import (Settings, fetch_pages, load_manifest, load_settings, load_tree,
+                           node_map, outline, parse_page_spec, resolve_edition, subtree_span)
 
 log = logging.getLogger("pageindex.agent")   # stderr via logging; never prints the question
 
@@ -88,6 +97,7 @@ class Session:
     # "max_turns"); None means the last run_agent call produced an answer.
     failure: str | None = None
     retries: int = 0
+    agent_models: list[str] = field(default_factory=list)
 
 
 @traced('pageindex.tool', as_type='tool')
@@ -135,47 +145,82 @@ def _text_of(resp) -> str:
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 
+_USAGE_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "calls",
+)
+
+
+def _empty_usage() -> dict[str, int]:
+    return {k: 0 for k in _USAGE_KEYS}
+
+
+def _extract_usage(resp) -> dict[str, int]:
+    ru = getattr(resp, "usage", None)
+    return {
+        "input_tokens": getattr(ru, "input_tokens", 0) or 0,
+        "output_tokens": getattr(ru, "output_tokens", 0) or 0,
+        "cache_read_input_tokens": getattr(ru, "cache_read_input_tokens", 0) or 0,
+        "cache_creation_input_tokens": getattr(ru, "cache_creation_input_tokens", 0) or 0,
+        "calls": 1,
+    }
+
+
+def _add_usage(dst: dict[str, int], src: dict[str, int]) -> None:
+    for k in _USAGE_KEYS:
+        dst[k] += src.get(k, 0)
+
+
+def _pack_usage(agent: dict[str, int], verifier: dict[str, int], turns: int) -> dict:
+    total = {k: agent[k] + verifier[k] for k in _USAGE_KEYS}
+    return {
+        "agent": dict(agent),
+        "verifier": dict(verifier),
+        "total": total,
+        "input_tokens": agent["input_tokens"],
+        "output_tokens": agent["output_tokens"],
+        "turns": turns,
+    }
+
+
 def run_agent(client: anthropic.Anthropic, sess: Session, question: str,
               extra_user_msg: str | None = None, prior: list | None = None) -> tuple[str, list, dict]:
-    """Navigator loop. R22 R7 (mapped to Anthropic stop reasons, ADR 0029 draft):
-    - stop_reason "max_tokens" (Anthropic's finish_reason == "length") or an empty final
-      text is a failure: logged, retried once per call, then sess.failure is set;
-    - using all agent_max_turns turns without a final answer is a failure
-      (sess.failure = "max_turns"), not a forced answer that would be scored as wrong.
+    """Navigator loop. S11 §3/§8:
+    - stop_reason "max_tokens" or an empty final text fails immediately (no internal retry);
+    - using all agent_max_turns turns without a final answer is a failure (sess.failure = "max_turns").
     On failure the returned answer is "" and the caller must not score it as an answer.
     """
     s = sess.s
     sess.failure = None
-    system = SYSTEM_TMPL.format(
+    system_text = SYSTEM_TMPL.format(
         title=sess.rec.title, version=sess.rec.version, pages=sess.rec.page_count,
         description=sess.rec.doc_description or "(none)", max_total=s.max_pages_total,
         outline=outline(sess.tree["structure"], max_depth=2, char_budget=s.overview_char_budget))
+    system = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
     messages = prior or [{"role": "user", "content": question}]
     if extra_user_msg:
         messages.append({"role": "user", "content": extra_user_msg})
-    usage = {"input_tokens": 0, "output_tokens": 0, "turns": 0}
-    retry_left = 1
+    usage = {**_empty_usage(), "turns": 0}
 
     turn = 0
     while turn < s.agent_max_turns:
         with stage('pageindex.navigate', as_type='generation', model=s.agent_model) as observation:
             resp = client.messages.create(
-                model=s.agent_model, max_tokens=4096, system=system, tools=TOOLS,
-                tool_choice={"type": "auto"}, messages=messages)
+                model=s.agent_model, max_tokens=s.agent_max_tokens, system=system, tools=TOOLS,
+                tool_choice={"type": "auto"}, messages=messages, timeout=s.agent_timeout_s)
             record_response(observation, resp)
-        usage["input_tokens"] += resp.usage.input_tokens
-        usage["output_tokens"] += resp.usage.output_tokens
+        _add_usage(usage, _extract_usage(resp))
         usage["turns"] += 1
+        if getattr(resp, "model", None):
+            sess.agent_models.append(resp.model)
         bad = ("max_tokens" if resp.stop_reason == "max_tokens"
                else "empty_answer" if resp.stop_reason != "tool_use" and not _text_of(resp)
                else None)
         if bad:
-            if retry_left:   # same request again; the truncated/empty reply is not kept
-                retry_left -= 1
-                sess.retries += 1
-                log.warning("navigator %s (stop_reason=%s); retrying once", bad, resp.stop_reason)
-                continue
-            log.error("navigator %s after one retry; item fails", bad)
+            log.error("navigator %s (stop_reason=%s); item fails", bad, resp.stop_reason)
             sess.failure = bad
             return "", messages, usage
         messages.append({"role": "assistant", "content": resp.content})
@@ -258,11 +303,15 @@ def _norm(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip().lower()
 
 
-def verify(client: anthropic.Anthropic, s: Settings, answer: str,
-           fetched: dict[int, str]) -> list[dict]:
+def _append_reason(existing: str, note: str) -> str:
+    return f"{existing} | {note}" if existing else note
+
+
+def verify_with_usage(client: anthropic.Anthropic, s: Settings, answer: str,
+                      fetched: dict[int, str]) -> tuple[list[dict], dict[str, int], str | None]:
     claims = split_claims(answer)
     if not claims:
-        return []
+        return [], _empty_usage(), None
     page_block = "\n\n".join(f"=== PDF page {p} ===\n{t.strip()}" for p, t in sorted(fetched.items()))
     claim_block = "\n".join(
         f"{c['id']}. {c['text']}\n   cited pages: {c['pages'] or 'NONE'}"
@@ -270,11 +319,19 @@ def verify(client: anthropic.Anthropic, s: Settings, answer: str,
         for c in claims)
     with stage('pageindex.verify', as_type='generation', model=s.verifier_model) as observation:
         resp = client.messages.create(
-            model=s.verifier_model, max_tokens=4096, tools=[VERDICT_TOOL],
+            model=s.verifier_model, max_tokens=s.verifier_max_tokens, tools=[VERDICT_TOOL],
             tool_choice={"type": "tool", "name": "report_verdicts"},
-            messages=[{"role": "user", "content": VERIFY_PROMPT.format(pages=page_block, claims=claim_block)}])
+            messages=[{"role": "user", "content": VERIFY_PROMPT.format(pages=page_block, claims=claim_block)}],
+            timeout=s.verifier_timeout_s)
         record_response(observation, resp)
-    block = next(b for b in resp.content if b.type == "tool_use")
+    v_usage = _extract_usage(resp)
+    resp_model = getattr(resp, "model", None)
+    block = next((b for b in getattr(resp, "content", []) if getattr(b, "type", None) == "tool_use"), None)
+    if block is None or not isinstance(getattr(block, "input", None), dict):
+        log.warning("verifier returned no valid tool_use block (model=%s)", resp_model)
+        out = [{**c, "verdict": "unsupported", "evidence": "", "reason": "verifier returned no tool_use block"}
+               for c in claims]
+        return out, v_usage, resp_model
     by_id = {v["claim_id"]: v for v in block.input.get("verdicts", [])}
     out = []
     for c in claims:
@@ -283,12 +340,26 @@ def verify(client: anthropic.Anthropic, s: Settings, answer: str,
         # deterministic guards on top of the LLM judge
         if any(p not in fetched for p in c["pages"]):
             v["verdict"], v["reason"] = "unsupported", "cites a page that was never fetched"
-        elif v["verdict"] == "supported" and v.get("evidence"):
-            cited_text = _norm(" ".join(fetched[p] for p in c["pages"]))
-            if _norm(v["evidence"])[:80] not in cited_text:
+        elif v.get("verdict") == "supported":
+            ev_text = (v.get("evidence") or "").strip()
+            if not c["pages"]:
+                v["verdict"] = "needs_citation"
+                v["reason"] = _append_reason(v.get("reason", ""), "claim has no cited pages")
+            elif not ev_text:
                 v["verdict"] = "partially_supported"
-                v["reason"] += " | evidence quote not found verbatim on cited pages"
+                v["reason"] = _append_reason(v.get("reason", ""), "missing verbatim evidence quote")
+            else:
+                cited_text = _norm(" ".join(fetched[p] for p in c["pages"]))
+                if _norm(ev_text)[:80] not in cited_text:
+                    v["verdict"] = "partially_supported"
+                    v["reason"] = _append_reason(v.get("reason", ""), "evidence quote not found verbatim on cited pages")
         out.append({**c, **v})
+    return out, v_usage, resp_model
+
+
+def verify(client: anthropic.Anthropic, s: Settings, answer: str,
+           fetched: dict[int, str]) -> list[dict]:
+    out, _, _ = verify_with_usage(client, s, answer, fetched)
     return out
 
 
@@ -303,13 +374,27 @@ def answer_question(question: str, family: str, version: str | None = None,
     rec = resolve_edition(load_manifest(s), family, version, as_of)
     tree = load_tree(rec.tree_path)
     sess = Session(rec=rec, tree=tree, nodes=node_map(tree["structure"]), s=s)
-    client = anthropic.Anthropic()
+    log.info("pageindex timeouts: agent_timeout_s=%.1f verifier_timeout_s=%.1f",
+             s.agent_timeout_s, s.verifier_timeout_s)
+    agent_client = anthropic.Anthropic(max_retries=0, timeout=s.agent_timeout_s)
+    u_agent = _empty_usage()
+    u_ver = _empty_usage()
+    verifier_models: list[str] = []
 
-    answer, history, usage = run_agent(client, sess, question)
+    answer, history, u1 = run_agent(agent_client, sess, question)
+    _add_usage(u_agent, u1)
+    agent_turns = u1["turns"]
     if sess.failure:
-        return _failed(question, rec, sess, usage, t0, repaired=False)
-    verdicts = verify(client, s, answer, sess.fetched)
+        return _failed(question, rec, sess, _pack_usage(u_agent, u_ver, agent_turns), t0,
+                       repaired=False, answer_pre_repair="", verifier_models=verifier_models)
+    answer_pre_repair = answer
+    verifier_client = anthropic.Anthropic(max_retries=0, timeout=s.verifier_timeout_s)
+    verdicts, vu1, vm1 = verify_with_usage(verifier_client, s, answer, sess.fetched)
+    _add_usage(u_ver, vu1)
+    if vm1:
+        verifier_models.append(vm1)
     repaired = False
+    dropped_sentences: list[str] = []
 
     bad = [v for v in verdicts if v["verdict"] in FAIL]
     if bad:  # one repair round: tell the navigator exactly what failed
@@ -318,14 +403,19 @@ def answer_question(question: str, family: str, version: str | None = None,
             f"- \"{v['text']}\" -> {v['verdict']}: {v['reason']}" for v in bad) + (
             "\nRewrite the full answer. Fix or remove each failing sentence. You may fetch more "
             "pages. Keep the same citation format.")
-        answer, history, u2 = run_agent(client, sess, question, extra_user_msg=feedback, prior=history)
-        for k in usage:
-            usage[k] += u2[k]
+        answer, history, u2 = run_agent(agent_client, sess, question, extra_user_msg=feedback, prior=history)
+        _add_usage(u_agent, u2)
+        agent_turns += u2["turns"]
         if sess.failure:   # the repair round is an agent call too: same failure rule (R7)
-            return _failed(question, rec, sess, usage, t0, repaired=True)
-        verdicts = verify(client, s, answer, sess.fetched)
+            return _failed(question, rec, sess, _pack_usage(u_agent, u_ver, agent_turns), t0,
+                           repaired=True, answer_pre_repair=answer_pre_repair, verifier_models=verifier_models)
+        verdicts, vu2, vm2 = verify_with_usage(verifier_client, s, answer, sess.fetched)
+        _add_usage(u_ver, vu2)
+        if vm2:
+            verifier_models.append(vm2)
         bad = [v for v in verdicts if v["verdict"] in FAIL]
         if bad:  # still failing: drop those sentences rather than ship unsupported claims
+            dropped_sentences = [v["text"] for v in bad]
             keep = [v["text"] for v in verdicts if v["verdict"] not in FAIL]
             answer = " ".join(keep) + (
                 f"\n\n[Note: {len(bad)} statement(s) removed because they could not be "
@@ -337,25 +427,36 @@ def answer_question(question: str, family: str, version: str | None = None,
     cited = sorted({p for v in verdicts if v["verdict"] not in FAIL for p in v["pages"]
                     if p in sess.fetched})
     return {
-        "question": question, "doc_id": rec.doc_id, "answer": answer, "status": "ok",
+        "question": question, "doc_id": rec.doc_id, "answer": answer,
+        "answer_pre_repair": answer_pre_repair, "status": "ok",
         "cited_pages": cited, "cited_not_fetched": cited_not_fetched,
         "fetched_pages": sorted(sess.fetched),
-        "verdicts": verdicts, "repaired": repaired, "tool_calls": sess.tool_calls,
-        "usage": usage, "retries": sess.retries, "latency_s": round(time.perf_counter() - t0, 2),
+        "verdicts": verdicts, "repaired": repaired, "dropped_sentences": dropped_sentences,
+        "tool_calls": sess.tool_calls, "usage": _pack_usage(u_agent, u_ver, agent_turns),
+        "models": {"agent": list(dict.fromkeys(sess.agent_models)),
+                   "verifier": list(dict.fromkeys(verifier_models))},
+        "timeouts": {"agent_timeout_s": s.agent_timeout_s, "verifier_timeout_s": s.verifier_timeout_s},
+        "retries": sess.retries, "latency_s": round(time.perf_counter() - t0, 2),
         # keep page texts for Ragas (R7): retrieved_contexts
         "contexts": [sess.fetched[p] for p in sorted(sess.fetched)],
     }
 
 
-def _failed(question: str, rec, sess: Session, usage: dict, t0: float, repaired: bool) -> dict:
+def _failed(question: str, rec, sess: Session, usage: dict, t0: float, repaired: bool,
+            answer_pre_repair: str = "", verifier_models: list[str] | None = None) -> dict:
     """A navigator failure is a SYSTEM OUTCOME (R7): no answer, nothing cited; the
     evaluation keeps the item and scores it as a miss (eval_pageindex.py)."""
     return {
         "question": question, "doc_id": rec.doc_id, "answer": "",
+        "answer_pre_repair": answer_pre_repair,
         "status": f"failed:{sess.failure}",
         "cited_pages": [], "cited_not_fetched": [], "fetched_pages": sorted(sess.fetched),
-        "verdicts": [], "repaired": repaired, "tool_calls": sess.tool_calls,
-        "usage": usage, "retries": sess.retries, "latency_s": round(time.perf_counter() - t0, 2),
+        "verdicts": [], "repaired": repaired, "dropped_sentences": [],
+        "tool_calls": sess.tool_calls, "usage": usage,
+        "models": {"agent": list(dict.fromkeys(sess.agent_models)),
+                   "verifier": list(dict.fromkeys(verifier_models or []))},
+        "timeouts": {"agent_timeout_s": sess.s.agent_timeout_s, "verifier_timeout_s": sess.s.verifier_timeout_s},
+        "retries": sess.retries, "latency_s": round(time.perf_counter() - t0, 2),
         "contexts": [sess.fetched[p] for p in sorted(sess.fetched)],
     }
 

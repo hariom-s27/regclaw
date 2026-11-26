@@ -71,7 +71,8 @@ def azure_settings(pi, tmp_path, **kw):
                               summary_model='openai/gpt-5-mini', litellm_max_tokens=None, **kw)
 
 
-def test_default_standard_calls_page_index_main_with_explicit_models(pi, fake_pageindex, tmp_path):
+def test_default_standard_calls_page_index_main_with_explicit_models(pi, fake_pageindex, tmp_path, monkeypatch):
+    monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: pi.common.PAGEINDEX_PIN_SHA)
     s = pi.common.Settings(store_dir=tmp_path / 'store')
     pi.ingest.build_tree('doc.pdf', s)
     (mode, doc, opt, backend), = fake_pageindex.calls
@@ -82,6 +83,7 @@ def test_default_standard_calls_page_index_main_with_explicit_models(pi, fake_pa
 
 
 def test_azure_route_sends_base_and_key_but_no_cap(pi, fake_pageindex, tmp_path, monkeypatch):
+    monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: pi.common.PAGEINDEX_PIN_SHA)
     monkeypatch.setenv('AZURE_OPENAI_ENDPOINT', 'https://res.openai.azure.com')
     monkeypatch.setenv('AZURE_OPENAI_API_KEY', SECRET)
     pi.ingest.build_tree('doc.pdf', azure_settings(pi, tmp_path))
@@ -90,7 +92,8 @@ def test_azure_route_sends_base_and_key_but_no_cap(pi, fake_pageindex, tmp_path,
     assert opt['index_model'] == 'openai/gpt-5-mini' and opt['summary_model'] == 'openai/gpt-5-mini'
 
 
-def test_flash_only_when_explicit(pi, fake_pageindex, tmp_path):
+def test_flash_only_when_explicit(pi, fake_pageindex, tmp_path, monkeypatch):
+    monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: pi.common.PAGEINDEX_PIN_SHA)
     s = pi.common.Settings(store_dir=tmp_path / 'store', index_mode='flash')
     pi.ingest.build_tree('doc.pdf', s)
     assert fake_pageindex.calls[0][0] == 'flash'
