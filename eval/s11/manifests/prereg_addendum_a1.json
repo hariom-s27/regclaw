@@ -1,0 +1,11 @@
+{
+  "schema": "s11-manifest.v1",
+  "created_utc": "2026-11-26T19:23:10.006899+00:00",
+  "files": [
+    {
+      "path": "specs/S11_PREREG_ADDENDUM_A1.md",
+      "sha256_lf": "8ea7c71298610db09fae4565d9fa44ffc4fd488f67b4d0aabc65ea58b7279625",
+      "bytes_lf": 3466
+    }
+  ]
+}

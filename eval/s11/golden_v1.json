@@ -1,0 +1,320 @@
+{
+  "schema": "s11-golden-v2",
+  "pdf_sha256": "5986189705d960d6f03dbd3980fd86e48166e75b242214539428730d0797d1e6",
+  "page_convention": "all pages are physical PDF page index (1-based)",
+  "test": [
+    {
+      "id": "gtp-01",
+      "type": "single_fact",
+      "answerable": true,
+      "question": "For how long are institutions expected to keep records on gene therapy products and the trials that use them?",
+      "reference": "Records about GTPs and their clinical trials have to be retained for no less than fifteen years, with the head of the institution supporting investigators in keeping them.",
+      "reference_claims": [
+        "GTP and clinical trial records must be retained for at least 15 years"
+      ],
+      "gold_page_sets": [
+        [
+          28
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-02",
+      "type": "single_fact",
+      "answerable": true,
+      "question": "Above what construct size does a sponsor no longer have to sequence the whole vector, and what sequence must it supply instead?",
+      "reference": "Vectors of 40 kb or smaller need full sequencing with an annotated sequence submitted; for anything larger, only the sequence of the active GTP component is required, alongside restriction maps.",
+      "reference_claims": [
+        "Vectors up to 40 kb must be fully sequenced and annotated",
+        "For vectors above 40 kb, the sequence of the active GTP component must be provided"
+      ],
+      "gold_page_sets": [
+        [
+          31
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-03",
+      "type": "single_fact",
+      "answerable": true,
+      "question": "How long should trial participants who received a gene therapy product be followed up, and how long after marketing?",
+      "reference": "Ideally participants are followed for at least five years, decided case by case, and a ten-year follow-up is recommended after the product is marketed.",
+      "reference_claims": [
+        "Follow-up of at least 5 years (case by case) is recommended",
+        "Post-marketing follow-up of 10 years is recommended"
+      ],
+      "gold_page_sets": [
+        [
+          69
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-04",
+      "type": "single_fact",
+      "answerable": true,
+      "question": "What cleanroom grade is required for filling and packaging a gene therapy product, and is a lower grade allowed for bulk production?",
+      "reference": "Final filling and packaging must happen in a Class A area; bulk manufacture may be done in either a Class B or a Class A facility.",
+      "reference_claims": [
+        "Final filling and packaging must be done in a Class A area",
+        "Bulk production may be done in Class B or Class A"
+      ],
+      "gold_page_sets": [
+        [
+          44
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-05",
+      "type": "multi_page",
+      "answerable": true,
+      "question": "A CAR-T product has to be infused before final sterility results come back. On what basis can it be released, and who should be consulted?",
+      "reference": "Because standard final sterility results would come too late, another sterility assurance approach is needed: release can rest on 24-48 hour culture sterility tests plus suitable molecular methods, worked out in consultation with GTAEC.",
+      "reference_claims": [
+        "Release criteria may rely on 24-48 hour culture sterility tests",
+        "Appropriate molecular methods are used alongside",
+        "This is done in consultation with GTAEC"
+      ],
+      "gold_page_sets": [
+        [
+          39,
+          40
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-06",
+      "type": "multi_page",
+      "answerable": true,
+      "question": "A dose cohort tolerated the product safely but did not get enough clinical benefit. Can those patients be dosed again with the same product, and what conditions apply?",
+      "reference": "A second dose can be considered in that situation, but the same product is allowed only if there has been no local or systemic immune response over a reasonable follow-up of about one to two years; the immune data must be taken to GTAEC, and a GTAEC recommendation is mandatory for such protocol additions.",
+      "reference_claims": [
+        "Yes: a second administration may be considered in this situation",
+        "The same GTP may be reused only if there is no immune response at the site or systemically over about 1-2 years",
+        "Immune response data must be evaluated and discussed with GTAEC",
+        "GTAEC recommendation is mandatory for such protocol additions or new applications"
+      ],
+      "gold_page_sets": [
+        [
+          69,
+          70
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-07",
+      "type": "multi_page",
+      "answerable": true,
+      "question": "A developer has three candidates: an siRNA therapeutic, an autologous CAR-T cell product and a plasmid DNA vaccine. Which of these does the guideline cover, and does any carry further requirements?",
+      "reference": "All three are covered: siRNA counts as a GTP, CAR-T cells are covered as ex vivo modified cells, and nucleic-acid DNA vaccines are covered too, though they will face additional requirements to be specified later.",
+      "reference_claims": [
+        "siRNA products are GTPs under the guideline",
+        "CAR-T cells are GTPs (ex vivo genetically modified cells)",
+        "DNA vaccines (final product is nucleic acid) fall under the guideline",
+        "DNA vaccines carry additional requirements to be specified later"
+      ],
+      "gold_page_sets": [
+        [
+          19,
+          20
+        ],
+        [
+          16,
+          20
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-08",
+      "type": "annexure",
+      "answerable": true,
+      "question": "After the product has been given, how long must the patient stay in hospital under close watch, and to whom must adverse events in that period be reported straight away?",
+      "reference": "Patients stay in hospital under close observation for at least 48-96 hours after administration, adjusted for the disease, product and expected serious events; all AEs and SAEs go immediately to the EC and CDSCO.",
+      "reference_claims": [
+        "Patients must remain hospitalised under close observation for at least 48-96 hours after administration",
+        "All AEs and SAEs must be reported immediately to the EC and CDSCO"
+      ],
+      "gold_page_sets": [
+        [
+          110
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-09",
+      "type": "annexure",
+      "answerable": true,
+      "question": "How often is the national gene therapy advisory committee expected to meet, and does its membership include anyone from outside science and government?",
+      "reference": "It may meet every quarter, or more often if needed. Besides official nominees and biomedical experts, it includes ethics and legal experts, a social scientist, a lay person and a women's representative.",
+      "reference_claims": [
+        "Meetings may be quarterly, or more frequent as needed",
+        "Membership includes non-scientific members such as a lay person, ethics/legal experts, a social scientist and a women's representative"
+      ],
+      "gold_page_sets": [
+        [
+          89
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-10",
+      "type": "cross_reference",
+      "answerable": true,
+      "question": "The guideline forbids publicising GTP cures for diseases on a statutory list. Under which schedule of the drug rules is that list, and are genetic disorders on it?",
+      "reference": "The list is Schedule J of the Drugs and Cosmetics Rules, reproduced in an annexure, and genetic disorders are one of the listed conditions, so GTP cure claims for them may not be advertised.",
+      "reference_claims": [
+        "The list is Schedule J of the Drugs and Cosmetics Act/Rules",
+        "Genetic disorders appear on that list"
+      ],
+      "gold_page_sets": [
+        [
+          106
+        ],
+        [
+          73,
+          106
+        ],
+        [
+          11,
+          106
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-11",
+      "type": "cross_reference",
+      "answerable": true,
+      "question": "When there is little experience with a product and its route, how should a first-in-human trial schedule its subjects, and how early must they be admitted before infusion according to the administration annexure that section points to?",
+      "reference": "Consecutive subjects and the different dose cohorts should be staggered so that serious events can be watched and exposure limited; the annexure then requires first-in-human subjects to be admitted at least 24-48 hours before infusion.",
+      "reference_claims": [
+        "Consecutively enrolled subjects should be staggered",
+        "Dose cohorts should also be staggered",
+        "First-in-human patients must be admitted no less than 24-48 hours ahead of the infusion"
+      ],
+      "gold_page_sets": [
+        [
+          65,
+          109
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-12",
+      "type": "condition",
+      "answerable": true,
+      "question": "For a product already approved for clinical use abroad, what reduced preclinical testing may be enough, and when does that relief not apply?",
+      "reference": "It may be enough to check just the clinical-grade vector lot against outcome measures within its release testing, but not if the delivery vector, the transgene or the production process has changed.",
+      "reference_claims": [
+        "Testing may be limited to the clinical vector lot, checked against outcome measures within release testing",
+        "This does not apply if the delivery vector, transgene or production process varies"
+      ],
+      "gold_page_sets": [
+        [
+          48
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "gtp-13",
+      "type": "unanswerable_near_miss",
+      "answerable": false,
+      "question": "What fee does an applicant pay for a pre-IND consultation with the advisory committee?",
+      "reference": "The guideline does not state this.",
+      "reference_claims": [],
+      "gold_page_sets": [],
+      "unanswerable_note": "Pre-IND consultation is discussed (p6, p25, p88, p89) but no fee is set. Searched: 'fee' (only hit is 'feedback', p89); 'payment' (no hits); 'charge' (p3 'In-charge'; p25 'negatively charged'; p28 participants not liable to pay, PMS may be charged; p75 glossary; p95 tests free for participants). No fee for applicants anywhere."
+    },
+    {
+      "id": "gtp-14",
+      "type": "unanswerable_near_miss",
+      "answerable": false,
+      "question": "Within how many days must the advisory committee give its recommendation on a clinical trial application?",
+      "reference": "The guideline does not state this.",
+      "reference_claims": [],
+      "gold_page_sets": [],
+      "unanswerable_note": "GTAEC review of trial applications is described (p25-26 s6.5, p89 s1.1.3, p104 flow) with no time limit. Searched: 'days' (no hits); 'timeline'/'time limit' (no hits); 'within' (p5, 8, 17, 27, 53, 75-77, 81, none a deadline); 'weeks'/'months' (only GMP batch duration, p46). Quarterly meetings (p89) are not a review deadline."
+    },
+    {
+      "id": "gtp-15",
+      "type": "unanswerable_out_of_scope",
+      "answerable": false,
+      "question": "How is the compensation amount worked out if a participant dies because of a gene therapy trial?",
+      "reference": "The guideline does not state this.",
+      "reference_claims": [],
+      "gold_page_sets": [],
+      "unanswerable_note": "Out of scope: the compensation quantum comes from the New Drugs and Clinical Trials Rules 2019, which the guideline defers to (p28 s7.14). Searched: 'compensation' (only p98, a consent-template heading promising medical care for injury, no amount or formula); 'injury' (only p98); 'death' (only glossary 'mortality', p79). Also checked 'liab' (p28 s7.17/s7.19, p98): nothing on death compensation."
+    },
+    {
+      "id": "gtp-16",
+      "type": "unanswerable_out_of_scope",
+      "answerable": false,
+      "question": "What membership must an institution's biosafety committee have? For example, is an outside expert or a DBT nominee required?",
+      "reference": "The guideline does not state this.",
+      "reference_claims": [],
+      "gold_page_sets": [],
+      "unanswerable_note": "Out of scope: IBSC constitution is governed by the Regulations and Guidelines on Biosafety of Recombinant DNA Research and Biocontainment 2017, which the guideline cites (p26 s6.2). Searched: 'IBSC' (p13, 26-28, 43, 45-46, 72, 104: approvals and duties only); 'composition'/'composed' (p25 and p89 refer to GTAEC; others unrelated); 'nominee' (only p89, GTAEC)."
+    }
+  ],
+  "dev": [
+    {
+      "id": "dev-01",
+      "type": "single_fact",
+      "answerable": true,
+      "question": "How many rare diseases have Indian tertiary care hospitals reported so far, according to the guideline?",
+      "reference": "Tertiary hospitals in India have reported about 450 rare diseases.",
+      "reference_claims": [
+        "About 450 rare diseases have been reported by tertiary care hospitals in India"
+      ],
+      "gold_page_sets": [
+        [
+          17
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "dev-02",
+      "type": "annexure",
+      "answerable": true,
+      "question": "Which approvals does the model trial protocol expect the sponsor to document, and when is the stem cell committee included?",
+      "reference": "The protocol template lists approvals from the EC, RCGM, GTAEC and CDSCO, plus IC-SCR only when stem cells are used.",
+      "reference_claims": [
+        "Approvals of EC, RCGM, GTAEC and CDSCO are listed",
+        "IC-SCR approval is needed only if stem cells are used"
+      ],
+      "gold_page_sets": [
+        [
+          91
+        ],
+        [
+          92
+        ]
+      ],
+      "unanswerable_note": ""
+    },
+    {
+      "id": "dev-03",
+      "type": "unanswerable_near_miss",
+      "answerable": false,
+      "question": "What quorum is needed for the national gene therapy advisory committee to make a recommendation?",
+      "reference": "The guideline does not state this.",
+      "reference_claims": [],
+      "gold_page_sets": [],
+      "unanswerable_note": "GTAEC composition and meeting frequency are on p89; no quorum is given. Searched: 'quorum' (no hits); 'minimum number' (no hits); 'member' (p8, 26, 54, 89, 114: none states a quorum)."
+    }
+  ]
+}
