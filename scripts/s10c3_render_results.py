@@ -28,7 +28,27 @@ AZURE_RECONCILIATION = (
     "Reconciled by hand against Azure Monitor (run sheet). Azure Monitor counts each embedding "
     "request twice under two operation names; the ledger is never below the real count."
 )
-PPI_TEXT = "not run (ppi-python not installed, decision D35)"
+PPI_NOT_RUN_LINE = (
+    "PPI: not run (ppi-python not installed, decision D35; installing it adds about 15 packages; "
+    "the PPI correction is 0 by construction here)."
+)
+ROBUSTNESS_ORDER = ("main", "jury_median", "LOJO-A", "LOJO-B", "LOJO-C", "conservative_max")
+
+# Fields permitted to render as "-" when absent from numbers.json / analysis.json.
+OPTIONAL_FIELDS: Dict[str, str] = {
+    "profiles_rules_under_call": "analysis.py calls profiles_with_under_call only on final, not on rule",
+    "sec_rules_acc": "analysis.py secondary_cells computes exact_accuracy only on final; no rules_accuracy key exists",
+    "sec_rules_f1": "analysis.py secondary_cells computes macro_f1 only on final; no rules_macro_f1 key exists",
+    "sec_rules_qwk": "analysis.py secondary_cells computes qw_kappa only on final; no rules_qw_kappa key exists",
+    "sec_rules_binkappa": "analysis.py secondary_cells computes binary_kappa only on final; no rules_binary_kappa key exists",
+    "ppi_correction_note": "analysis.py omits ppi.{arm}.correction_note when ppi-python is not installed (decision D35)",
+}
+
+
+def req(mapping: Any, key: str, path: str) -> Any:
+    if not isinstance(mapping, dict) or key not in mapping:
+        raise KeyError(f"Missing required key: {path}.{key}")
+    return mapping[key]
 
 
 def normalised_sha(raw: bytes) -> str:
@@ -48,10 +68,20 @@ def clean(val: Any) -> Any:
     return val
 
 
+def _no_neg_zero(val: float, decimals: int) -> str:
+    if val == 0.0:
+        val = 0.0
+    s = f"{val:.{decimals}f}"
+    neg_zero = "-" + f"{0.0:.{decimals}f}"
+    return f"{0.0:.{decimals}f}" if s == neg_zero else s
+
+
 def format_rate(rate: Optional[float], count_x: Optional[int] = None, count_n: Optional[int] = None) -> str:
     if rate is None or (isinstance(rate, float) and not math.isfinite(rate)):
+        if count_x is not None and count_n is not None:
+            return f"undefined ({count_x}/{count_n})"
         return "undefined"
-    s = f"{float(rate):.3f}"
+    s = _no_neg_zero(float(rate), 3)
     if count_x is not None and count_n is not None:
         s += f" ({count_x}/{count_n})"
     return s
@@ -60,19 +90,37 @@ def format_rate(rate: Optional[float], count_x: Optional[int] = None, count_n: O
 def format_ci(lo: Optional[float], hi: Optional[float]) -> str:
     if lo is None or hi is None or not math.isfinite(lo) or not math.isfinite(hi):
         return "[undefined, undefined]"
-    return f"[{float(lo):.3f}, {float(hi):.3f}]"
+    return f"[{_no_neg_zero(float(lo), 3)}, {_no_neg_zero(float(hi), 3)}]"
 
 
 def format_p(p: Optional[float], p_fraction: Optional[str] = None) -> str:
     if p is None or (isinstance(p, float) and not math.isfinite(p)):
         return "undefined"
     if p_fraction:
-        return f"{p_fraction} ({float(p):.4f})"
-    return f"{float(p):.4f}"
+        if "/" in p_fraction:
+            num, den = p_fraction.split("/", 1)
+            if den == "1":
+                return num
+        return f"{p_fraction} ({_no_neg_zero(float(p), 4)})"
+    return _no_neg_zero(float(p), 4)
+
+
+def format_wording(raw_wording: str, lo: Optional[float], hi: Optional[float]) -> str:
+    if lo is None or hi is None or not math.isfinite(lo) or not math.isfinite(hi):
+        return raw_wording
+    bound = _no_neg_zero(max(abs(float(lo)), abs(float(hi))), 3)
+    return re.sub(r"([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)$", bound, raw_wording.strip(), flags=re.IGNORECASE)
 
 
 def format_int(n: Any) -> str:
     return str(int(n))
+
+
+def _verified_count(rate: float, denom: int, context: str) -> int:
+    count = round(float(rate) * denom)
+    if abs(count / denom - float(rate)) > 1e-12:
+        raise ValueError(f"Non-exact integer numerator for {context}: rate={rate}, denom={denom}")
+    return int(count)
 
 
 def build_formatted_vars(numbers: Dict[str, Any]) -> Dict[str, str]:
@@ -80,364 +128,484 @@ def build_formatted_vars(numbers: Dict[str, Any]) -> Dict[str, str]:
     v["HEADER"] = HEADER
     v["STRUCTURAL_NOTE"] = STRUCTURAL_NOTE
     v["AZURE_RECONCILIATION"] = AZURE_RECONCILIATION
-    v["PPI_TEXT"] = PPI_TEXT
+    v["PPI_NOT_RUN_LINE"] = PPI_NOT_RUN_LINE
     v["SCOPE_NOTE"] = SCOPE_NOTE
 
     # Constants & Run counts
-    runs = numbers.get("runs_summary", {})
-    v["total_runs"] = format_int(runs.get("total_runs", 100))
-    v["medium_runs"] = format_int(runs.get("medium_runs", 50))
-    v["high_runs"] = format_int(runs.get("high_runs", 50))
-    v["strata_count"] = format_int(runs.get("strata_profiles", 8))
-    v["trap_count"] = format_int(runs.get("trap_profiles", 2))
-    v["dev_profile_count"] = format_int(runs.get("total_dev_profiles", 10))
-    v["repeats"] = format_int(runs.get("repeats", 5))
+    runs = req(numbers, "runs_summary", "numbers")
+    v["total_runs"] = format_int(req(runs, "total_runs", "runs_summary"))
+    v["medium_runs"] = format_int(req(runs, "medium_runs", "runs_summary"))
+    v["high_runs"] = format_int(req(runs, "high_runs", "runs_summary"))
+    v["strata_count"] = format_int(req(runs, "strata_profiles", "runs_summary"))
+    v["trap_count"] = format_int(req(runs, "trap_profiles", "runs_summary"))
+    v["dev_profile_count"] = format_int(req(runs, "total_dev_profiles", "runs_summary"))
+    v["repeats"] = format_int(req(runs, "repeats", "runs_summary"))
 
     # Paid requests & Ledger
-    paid = numbers.get("paid_requests", {})
-    v["candidates_paid_requests"] = format_int(paid.get("candidates", 23))
-    v["candidates_global_start"] = format_int(paid.get("candidates_global_start", 0))
-    v["candidates_global_end"] = format_int(paid.get("candidates_global_end", 23))
-    v["pilot_paid_requests"] = format_int(paid.get("pilot", 6))
-    v["pilot_retries"] = format_int(paid.get("pilot_retries", 2))
-    v["pilot_global_start"] = format_int(paid.get("pilot_global_start", 23))
-    v["pilot_global_end"] = format_int(paid.get("pilot_global_end", 29))
-    v["main_paid_requests"] = format_int(paid.get("main", 100))
-    v["main_retries"] = format_int(paid.get("main_retries", 0))
-    v["main_global_start"] = format_int(paid.get("main_global_start", 29))
-    v["main_global_end"] = format_int(paid.get("main_global_end", 129))
-    v["total_paid_requests"] = format_int(paid.get("total", 129))
-    v["paid_call_cap"] = format_int(paid.get("cap", 150))
+    paid = req(numbers, "paid_requests", "numbers")
+    v["candidates_paid_requests"] = format_int(req(paid, "candidates", "paid_requests"))
+    v["candidates_global_start"] = format_int(req(paid, "candidates_global_start", "paid_requests"))
+    v["candidates_global_end"] = format_int(req(paid, "candidates_global_end", "paid_requests"))
+    v["pilot_paid_requests"] = format_int(req(paid, "pilot", "paid_requests"))
+    v["pilot_retries"] = format_int(req(paid, "pilot_retries", "paid_requests"))
+    v["pilot_global_start"] = format_int(req(paid, "pilot_global_start", "paid_requests"))
+    v["pilot_global_end"] = format_int(req(paid, "pilot_global_end", "paid_requests"))
+    v["main_paid_requests"] = format_int(req(paid, "main", "paid_requests"))
+    v["main_retries"] = format_int(req(paid, "main_retries", "paid_requests"))
+    v["main_global_start"] = format_int(req(paid, "main_global_start", "paid_requests"))
+    v["main_global_end"] = format_int(req(paid, "main_global_end", "paid_requests"))
+    v["total_paid_requests"] = format_int(req(paid, "total", "paid_requests"))
+    v["paid_call_cap"] = format_int(req(paid, "cap", "paid_requests"))
 
-    # LLM Details
-    sec = numbers.get("secondary", {})
-    med_all = sec.get("medium_all", {})
-    high_all = sec.get("high_all", {})
-    med_llm = med_all.get("llm_detail", {})
-    high_llm = high_all.get("llm_detail", {})
-    v["llm_detail_medium_ok"] = format_int(med_llm.get("ok", 50))
-    v["llm_detail_medium_non_ok"] = format_int(sum(c for d, c in med_llm.items() if d != "ok"))
-    v["llm_detail_high_ok"] = format_int(high_llm.get("ok", 50))
-    v["llm_detail_high_non_ok"] = format_int(sum(c for d, c in high_llm.items() if d != "ok"))
+    # Effort Decision (loaded early so non_ok_all_50_runs is verified against llm_detail)
+    eff = req(numbers, "effort_decision", "numbers")
+    v["effort_tier"] = format_int(req(eff, "rule_fired", "effort_decision"))
+    v["effort_choice"] = str(req(eff, "choice", "effort_decision"))
+    v["effort_d_pooled"] = format_rate(req(eff, "d_pooled_medium_minus_high", "effort_decision"))
+    v["effort_d_pooled_fraction"] = str(req(eff, "d_pooled_medium_minus_high_fraction", "effort_decision"))
+    v["effort_d_pooled_direction"] = "medium − high"
+    v["effort_threshold"] = format_rate(req(eff, "threshold", "effort_decision"))
+    v["effort_threshold_fraction"] = str(req(eff, "threshold_fraction", "effort_decision"))
+    v["effort_high_le_med_count"] = format_int(req(eff, "high_le_medium_profiles", "effort_decision"))
+    v["strata_zero_mandatory"] = format_int(req(eff, "strata_profiles_zero_gold_mandatory", "effort_decision"))
+    non_ok = req(eff, "non_ok_all_50_runs", "effort_decision")
+    v["effort_med_non_ok"] = format_int(req(non_ok, "medium", "effort_decision.non_ok_all_50_runs"))
+    v["effort_high_non_ok"] = format_int(req(non_ok, "high", "effort_decision.non_ok_all_50_runs"))
+    v["effort_non_ok_gap"] = format_int(req(eff, "non_ok_medium_minus_high", "effort_decision"))
+
+    # LLM Details (all 10 profiles: 40 strata + 10 trap = 50 runs per arm)
+    sec = req(numbers, "secondary", "numbers")
+    med_all = req(sec, "medium_all", "secondary")
+    high_all = req(sec, "high_all", "secondary")
+    med_llm = req(med_all, "llm_detail", "secondary.medium_all")
+    high_llm = req(high_all, "llm_detail", "secondary.high_all")
+
+    tr = req(numbers, "traps", "numbers")
+    tr_med_all_sec = req(req(req(tr, "medium", "traps"), "all_runs", "traps.medium"), "secondary", "traps.medium.all_runs")
+    tr_high_all_sec = req(req(req(tr, "high", "traps"), "all_runs", "traps.high"), "secondary", "traps.high.all_runs")
+    tr_med_llm = req(tr_med_all_sec, "llm_detail", "traps.medium.all_runs.secondary")
+    tr_high_llm = req(tr_high_all_sec, "llm_detail", "traps.high.all_runs.secondary")
+
+    med_strata_ok = int(req(med_llm, "ok", "secondary.medium_all.llm_detail"))
+    high_strata_ok = int(req(high_llm, "ok", "secondary.high_all.llm_detail"))
+    med_trap_ok = int(req(tr_med_llm, "ok", "traps.medium.all_runs.secondary.llm_detail"))
+    high_trap_ok = int(req(tr_high_llm, "ok", "traps.high.all_runs.secondary.llm_detail"))
+    med_strata_runs = sum(int(c) for c in med_llm.values())
+    high_strata_runs = sum(int(c) for c in high_llm.values())
+    med_trap_runs = sum(int(c) for c in tr_med_llm.values())
+    high_trap_runs = sum(int(c) for c in tr_high_llm.values())
+
+    med_non_ok_sum = sum(int(c) for d, c in med_llm.items() if d != "ok") + sum(int(c) for d, c in tr_med_llm.items() if d != "ok")
+    high_non_ok_sum = sum(int(c) for d, c in high_llm.items() if d != "ok") + sum(int(c) for d, c in tr_high_llm.items() if d != "ok")
+
+    v["llm_detail_medium_strata_ok"] = format_int(med_strata_ok)
+    v["llm_detail_medium_trap_ok"] = format_int(med_trap_ok)
+    v["llm_detail_medium_ok"] = format_int(med_strata_ok + med_trap_ok)
+    v["llm_detail_medium_non_ok"] = format_int(med_non_ok_sum)
+    v["llm_detail_high_strata_ok"] = format_int(high_strata_ok)
+    v["llm_detail_high_trap_ok"] = format_int(high_trap_ok)
+    v["llm_detail_high_ok"] = format_int(high_strata_ok + high_trap_ok)
+    v["llm_detail_high_non_ok"] = format_int(high_non_ok_sum)
+    v["strata_runs_per_arm"] = format_int(med_strata_runs)
+    v["trap_runs_per_arm"] = format_int(med_trap_runs)
 
     # Primary Metrics
-    pri = numbers.get("primary", {})
-    p_med = pri.get("medium", {})
-    p_high = pri.get("high", {})
+    pri = req(numbers, "primary", "numbers")
+    v["n_efforts"] = format_int(len(pri))
+    p_med = req(pri, "medium", "primary")
+    p_high = req(pri, "high", "primary")
 
-    tip_med = p_med.get("tipping", {})
-    tip_high = p_high.get("tipping", {})
-    u_med, p_cnt_med = tip_med.get("U", 0), tip_med.get("P", 40)
-    u_high, p_cnt_high = tip_high.get("U", 0), tip_high.get("P", 40)
+    tip_med = req(p_med, "tipping", "primary.medium")
+    tip_high = req(p_high, "tipping", "primary.high")
+    u_med = int(req(tip_med, "U", "primary.medium.tipping"))
+    p_cnt_med = int(req(tip_med, "P", "primary.medium.tipping"))
+    u_high = int(req(tip_high, "U", "primary.high.tipping"))
+    p_cnt_high = int(req(tip_high, "P", "primary.high.tipping"))
+    if p_cnt_med != p_cnt_high:
+        raise ValueError(f"Mismatched tipping P across arms: medium={p_cnt_med}, high={p_cnt_high}")
     v["tipping_medium_u_p"] = f"{u_med}/{p_cnt_med}"
     v["tipping_high_u_p"] = f"{u_high}/{p_cnt_high}"
+    v["tipping_P"] = format_int(p_cnt_med)
 
-    v["primary_medium_under_call"] = format_rate(p_med.get("under_call_rate"), u_med, p_cnt_med)
-    v["primary_high_under_call"] = format_rate(p_high.get("under_call_rate"), u_high, p_cnt_high)
+    v["primary_medium_under_call"] = format_rate(req(p_med, "under_call_rate", "primary.medium"), u_med, p_cnt_med)
+    v["primary_high_under_call"] = format_rate(req(p_high, "under_call_rate", "primary.high"), u_high, p_cnt_high)
 
-    rules_med_rate = p_med.get("rules_under_call_rate")
-    rules_high_rate = p_high.get("rules_under_call_rate")
-    rules_u_med = round(rules_med_rate * p_cnt_med) if rules_med_rate is not None and p_cnt_med else None
-    rules_u_high = round(rules_high_rate * p_cnt_high) if rules_high_rate is not None and p_cnt_high else None
+    rules_med_rate = float(req(p_med, "rules_under_call_rate", "primary.medium"))
+    rules_high_rate = float(req(p_high, "rules_under_call_rate", "primary.high"))
+    rules_u_med = _verified_count(rules_med_rate, p_cnt_med, "primary.medium.rules_under_call_rate")
+    rules_u_high = _verified_count(rules_high_rate, p_cnt_high, "primary.high.rules_under_call_rate")
     v["primary_medium_rules_under_call"] = format_rate(rules_med_rate, rules_u_med, p_cnt_med)
     v["primary_high_rules_under_call"] = format_rate(rules_high_rate, rules_u_high, p_cnt_high)
     v["primary_rules_under_call"] = v["primary_medium_rules_under_call"]
-    v["rules_rates_equal_str"] = str(numbers.get("rules_rates_equal", True)).lower()
+    v["rules_rates_equal_str"] = str(bool(req(numbers, "rules_rates_equal", "numbers"))).lower()
+    v["med_removed_frac"] = f"{rules_u_med - u_med}/{p_cnt_med}"
+    v["high_removed_frac"] = f"{rules_u_high - u_high}/{p_cnt_high}"
 
     # Tipping ranges
-    e1_med = tip_med.get("ranges", {}).get("E1", {})
-    e2_med = tip_med.get("ranges", {}).get("E2", {})
-    e1_high = tip_high.get("ranges", {}).get("E1", {})
-    e2_high = tip_high.get("ranges", {}).get("E2", {})
-    v["tipping_medium_e1"] = format_ci(e1_med.get("lower"), e1_med.get("upper"))
-    v["tipping_medium_e2"] = format_ci(e2_med.get("lower"), e2_med.get("upper"))
-    v["tipping_high_e1"] = format_ci(e1_high.get("lower"), e1_high.get("upper"))
-    v["tipping_high_e2"] = format_ci(e2_high.get("lower"), e2_high.get("upper"))
+    ranges_med = req(tip_med, "ranges", "primary.medium.tipping")
+    ranges_high = req(tip_high, "ranges", "primary.high.tipping")
+    e1_med = req(ranges_med, "E1", "primary.medium.tipping.ranges")
+    e2_med = req(ranges_med, "E2", "primary.medium.tipping.ranges")
+    e1_high = req(ranges_high, "E1", "primary.high.tipping.ranges")
+    e2_high = req(ranges_high, "E2", "primary.high.tipping.ranges")
+    v["tipping_medium_e1"] = format_ci(req(e1_med, "lower", "tipping.med.E1"), req(e1_med, "upper", "tipping.med.E1"))
+    v["tipping_medium_e2"] = format_ci(req(e2_med, "lower", "tipping.med.E2"), req(e2_med, "upper", "tipping.med.E2"))
+    v["tipping_high_e1"] = format_ci(req(e1_high, "lower", "tipping.high.E1"), req(e1_high, "upper", "tipping.high.E1"))
+    v["tipping_high_e2"] = format_ci(req(e2_high, "lower", "tipping.high.E2"), req(e2_high, "upper", "tipping.high.E2"))
 
     # Lift
-    lift_med = p_med.get("under_call_reduction", {})
-    lift_high = p_high.get("under_call_reduction", {})
-    v["lift_medium_reduction"] = format_rate(lift_med.get("point"))
-    v["lift_medium_ci"] = format_ci(lift_med.get("lo"), lift_med.get("hi"))
-    v["lift_high_reduction"] = format_rate(lift_high.get("point"))
-    v["lift_high_ci"] = format_ci(lift_high.get("lo"), lift_high.get("hi"))
-    v["lift_medium_direction"] = lift_med.get("direction", "rules - hybrid").replace("-", "−")
-    v["lift_high_direction"] = lift_high.get("direction", "rules - hybrid").replace("-", "−")
+    lift_med = req(p_med, "under_call_reduction", "primary.medium")
+    lift_high = req(p_high, "under_call_reduction", "primary.high")
+    v["lift_medium_reduction"] = format_rate(req(lift_med, "point", "primary.medium.under_call_reduction"))
+    v["lift_medium_ci"] = format_ci(req(lift_med, "lo", "primary.medium.under_call_reduction"), req(lift_med, "hi", "primary.medium.under_call_reduction"))
+    v["lift_high_reduction"] = format_rate(req(lift_high, "point", "primary.high.under_call_reduction"))
+    v["lift_high_ci"] = format_ci(req(lift_high, "lo", "primary.high.under_call_reduction"), req(lift_high, "hi", "primary.high.under_call_reduction"))
+    v["lift_medium_direction"] = str(req(lift_med, "direction", "primary.medium.under_call_reduction")).replace("-", "−")
+    v["lift_high_direction"] = str(req(lift_high, "direction", "primary.high.under_call_reduction")).replace("-", "−")
 
-    # Profile-level under-call
-    prof_med = p_med.get("profiles_with_under_call", {})
-    prof_high = p_high.get("profiles_with_under_call", {})
-    v["profiles_rules_under_call"] = format_rate(
-        prof_med.get("count_rules", 0) / prof_med.get("n", 8) if prof_med.get("n") else None,
-        prof_med.get("count_rules", 0), prof_med.get("n", 8)
-    )
+    # Profile-level under-call (1a, 1b)
+    prof_med = req(p_med, "profiles_with_under_call", "primary.medium")
+    prof_high = req(p_high, "profiles_with_under_call", "primary.high")
+    assert "profiles_rules_under_call" in OPTIONAL_FIELDS
+    v["profiles_rules_under_call"] = "-"
     v["profiles_medium_under_call"] = format_rate(
-        prof_med.get("count", 0) / prof_med.get("n", 8) if prof_med.get("n") else None,
-        prof_med.get("count", 0), prof_med.get("n", 8)
+        req(prof_med, "rate", "primary.medium.profiles_with_under_call"),
+        int(req(prof_med, "count", "primary.medium.profiles_with_under_call")),
+        int(req(prof_med, "n", "primary.medium.profiles_with_under_call")),
     )
-    v["profiles_medium_ci"] = format_ci(prof_med.get("exact_ci", {}).get("lo"), prof_med.get("exact_ci", {}).get("hi"))
+    v["profiles_medium_ci"] = format_ci(
+        req(prof_med, "lo", "primary.medium.profiles_with_under_call"),
+        req(prof_med, "hi", "primary.medium.profiles_with_under_call"),
+    )
     v["profiles_high_under_call"] = format_rate(
-        prof_high.get("count", 0) / prof_high.get("n", 8) if prof_high.get("n") else None,
-        prof_high.get("count", 0), prof_high.get("n", 8)
+        req(prof_high, "rate", "primary.high.profiles_with_under_call"),
+        int(req(prof_high, "count", "primary.high.profiles_with_under_call")),
+        int(req(prof_high, "n", "primary.high.profiles_with_under_call")),
     )
-    v["profiles_high_ci"] = format_ci(prof_high.get("exact_ci", {}).get("lo"), prof_high.get("exact_ci", {}).get("hi"))
-
-    # Effort Decision
-    eff = numbers.get("effort_decision", {})
-    v["effort_tier"] = format_int(eff.get("rule_fired", 3))
-    v["effort_choice"] = str(eff.get("choice", "MEDIUM"))
-    v["effort_d_pooled"] = format_rate(eff.get("d_pooled_medium_minus_high"))
-    v["effort_d_pooled_fraction"] = str(eff.get("d_pooled_medium_minus_high_fraction", "0/1"))
-    v["effort_d_pooled_direction"] = "medium − high"
-    v["effort_threshold"] = format_rate(eff.get("threshold", 0.05))
-    v["effort_threshold_fraction"] = str(eff.get("threshold_fraction", "1/20"))
-    v["effort_high_le_med_count"] = format_int(eff.get("high_le_medium_profiles", 8))
-    v["strata_zero_mandatory"] = format_int(eff.get("strata_profiles_zero_gold_mandatory", 0))
-    non_ok = eff.get("non_ok_all_50_runs", {})
-    v["effort_med_non_ok"] = format_int(non_ok.get("medium", 0))
-    v["effort_high_non_ok"] = format_int(non_ok.get("high", 0))
-    v["effort_non_ok_gap"] = format_int(eff.get("non_ok_medium_minus_high", 0))
+    v["profiles_high_ci"] = format_ci(
+        req(prof_high, "lo", "primary.high.profiles_with_under_call"),
+        req(prof_high, "hi", "primary.high.profiles_with_under_call"),
+    )
 
     # Paired Comparison
-    paired = numbers.get("paired_comparison", {})
-    ci_p = paired.get("ci", {})
-    flip = paired.get("sign_flip", {})
-    v["paired_point"] = format_rate(ci_p.get("point"))
-    v["paired_lo"] = format_rate(ci_p.get("lo"))
-    v["paired_hi"] = format_rate(ci_p.get("hi"))
-    v["paired_ci"] = format_ci(ci_p.get("lo"), ci_p.get("hi"))
+    paired = req(numbers, "paired_comparison", "numbers")
+    ci_p = req(paired, "ci", "paired_comparison")
+    flip = req(paired, "sign_flip", "paired_comparison")
+    p_ci_lo = req(ci_p, "lo", "paired_comparison.ci")
+    p_ci_hi = req(ci_p, "hi", "paired_comparison.ci")
+    v["paired_point"] = format_rate(req(ci_p, "point", "paired_comparison.ci"))
+    v["paired_lo"] = format_rate(p_ci_lo)
+    v["paired_hi"] = format_rate(p_ci_hi)
+    v["paired_ci"] = format_ci(p_ci_lo, p_ci_hi)
     v["paired_difference"] = f"{v['paired_point']} {v['paired_ci']}"
-    v["sign_flip_p"] = format_p(flip.get("p"), flip.get("p_fraction"))
-    v["paired_wording"] = str(paired.get("wording", "consistent with no difference"))
-    v["paired_direction"] = str(paired.get("direction", "high - medium")).replace("-", "−")
+    v["sign_flip_p"] = format_p(req(flip, "p", "paired_comparison.sign_flip"), req(flip, "p_fraction", "paired_comparison.sign_flip"))
+    v["sign_flip_patterns"] = format_int(req(flip, "patterns", "paired_comparison.sign_flip"))
+    v["paired_wording"] = format_wording(str(req(paired, "wording", "paired_comparison")), p_ci_lo, p_ci_hi)
+    v["paired_direction"] = str(req(paired, "direction", "paired_comparison")).replace("-", "−")
 
     # Secondary Metrics (ok_only)
-    s_med = sec.get("medium", {})
-    s_high = sec.get("high", {})
+    s_med = req(sec, "medium", "secondary")
+    s_high = req(sec, "high", "secondary")
 
-    v["sec_med_over_call"] = format_rate(s_med.get("over_call_rate"))
-    v["sec_high_over_call"] = format_rate(s_high.get("over_call_rate"))
-    oc_inc_med = s_med.get("over_call_increase", {})
-    oc_inc_high = s_high.get("over_call_increase", {})
-    v["sec_rules_over_call"] = format_rate(oc_inc_med.get("rules_rate"))
-    v["sec_med_over_call_lift"] = f"{format_rate(oc_inc_med.get('point'))} {format_ci(oc_inc_med.get('lo'), oc_inc_med.get('hi'))}"
-    v["sec_high_over_call_lift"] = f"{format_rate(oc_inc_high.get('point'))} {format_ci(oc_inc_high.get('lo'), oc_inc_high.get('hi'))}"
+    v["sec_med_over_call"] = format_rate(req(s_med, "over_call_rate", "secondary.medium"))
+    v["sec_high_over_call"] = format_rate(req(s_high, "over_call_rate", "secondary.high"))
+    oc_inc_med = req(s_med, "over_call_increase", "secondary.medium")
+    oc_inc_high = req(s_high, "over_call_increase", "secondary.high")
+    v["sec_rules_over_call"] = format_rate(req(oc_inc_med, "rules_rate", "secondary.medium.over_call_increase"))
+    v["sec_med_over_call_lift"] = (
+        f"{format_rate(req(oc_inc_med, 'point', 'secondary.medium.over_call_increase'))} "
+        f"{format_ci(req(oc_inc_med, 'lo', 'secondary.medium.over_call_increase'), req(oc_inc_med, 'hi', 'secondary.medium.over_call_increase'))}"
+    )
+    v["sec_high_over_call_lift"] = (
+        f"{format_rate(req(oc_inc_high, 'point', 'secondary.high.over_call_increase'))} "
+        f"{format_ci(req(oc_inc_high, 'lo', 'secondary.high.over_call_increase'), req(oc_inc_high, 'hi', 'secondary.high.over_call_increase'))}"
+    )
 
-    v["sec_rules_acc"] = format_rate(s_med.get("rules_accuracy", s_med.get("exact_accuracy")))
-    v["sec_med_acc"] = format_rate(s_med.get("exact_accuracy"))
-    v["sec_high_acc"] = format_rate(s_high.get("exact_accuracy"))
+    for opt_k in ("sec_rules_acc", "sec_rules_f1", "sec_rules_qwk", "sec_rules_binkappa"):
+        assert opt_k in OPTIONAL_FIELDS
+        v[opt_k] = "-"
+    v["sec_med_acc"] = format_rate(req(s_med, "exact_accuracy", "secondary.medium"))
+    v["sec_high_acc"] = format_rate(req(s_high, "exact_accuracy", "secondary.high"))
+    v["sec_med_f1"] = format_rate(req(s_med, "macro_f1", "secondary.medium"))
+    v["sec_high_f1"] = format_rate(req(s_high, "macro_f1", "secondary.high"))
+    v["sec_med_qwk"] = format_rate(req(s_med, "qw_kappa", "secondary.medium"))
+    v["sec_high_qwk"] = format_rate(req(s_high, "qw_kappa", "secondary.high"))
+    v["sec_med_binkappa"] = format_rate(req(s_med, "binary_kappa", "secondary.medium"))
+    v["sec_high_binkappa"] = format_rate(req(s_high, "binary_kappa", "secondary.high"))
 
-    v["sec_rules_f1"] = format_rate(s_med.get("rules_macro_f1", s_med.get("macro_f1")))
-    v["sec_med_f1"] = format_rate(s_med.get("macro_f1"))
-    v["sec_high_f1"] = format_rate(s_high.get("macro_f1"))
-
-    v["sec_rules_qwk"] = format_rate(s_med.get("rules_qw_kappa", s_med.get("qw_kappa")))
-    v["sec_med_qwk"] = format_rate(s_med.get("qw_kappa"))
-    v["sec_high_qwk"] = format_rate(s_high.get("qw_kappa"))
-
-    v["sec_rules_binkappa"] = format_rate(s_med.get("rules_binary_kappa", s_med.get("binary_kappa")))
-    v["sec_med_binkappa"] = format_rate(s_med.get("binary_kappa"))
-    v["sec_high_binkappa"] = format_rate(s_high.get("binary_kappa"))
-
-    stab_med = s_med.get("stability", {})
-    stab_high = s_high.get("stability", {})
-    v["sec_med_profile_share"] = format_rate(stab_med.get("identical_profile_share"))
-    v["sec_high_profile_share"] = format_rate(stab_high.get("identical_profile_share"))
-    v["sec_med_cell_flip"] = format_rate(stab_med.get("cell_flip_rate"))
-    v["sec_high_cell_flip"] = format_rate(stab_high.get("cell_flip_rate"))
+    stab_med = req(s_med, "stability", "secondary.medium")
+    stab_high = req(s_high, "stability", "secondary.high")
+    v["sec_med_profile_share"] = format_rate(req(stab_med, "identical_profile_share", "secondary.medium.stability"))
+    v["sec_high_profile_share"] = format_rate(req(stab_high, "identical_profile_share", "secondary.high.stability"))
+    v["sec_med_cell_flip"] = format_rate(req(stab_med, "cell_flip_rate", "secondary.medium.stability"))
+    v["sec_high_cell_flip"] = format_rate(req(stab_high, "cell_flip_rate", "secondary.high.stability"))
 
     # Disagreement Table & Upgrade P/R
-    dis_med = s_med.get("disagreement_table", {})
-    dis_high = s_high.get("disagreement_table", {})
-    v["disag_med_rules_right"] = format_int(dis_med.get("rules_right", 0))
-    v["disag_med_llm_right"] = format_int(dis_med.get("llm_right", 0))
-    v["disag_med_both_wrong"] = format_int(dis_med.get("both_wrong", 0))
-    v["disag_med_n"] = format_int(dis_med.get("n", 0))
-    v["disag_high_rules_right"] = format_int(dis_high.get("rules_right", 0))
-    v["disag_high_llm_right"] = format_int(dis_high.get("llm_right", 0))
-    v["disag_high_both_wrong"] = format_int(dis_high.get("both_wrong", 0))
-    v["disag_high_n"] = format_int(dis_high.get("n", 0))
+    dis_med = req(s_med, "disagreement_table", "secondary.medium")
+    dis_high = req(s_high, "disagreement_table", "secondary.high")
+    v["disag_med_rules_right"] = format_int(req(dis_med, "rules_right", "secondary.medium.disagreement_table"))
+    v["disag_med_llm_right"] = format_int(req(dis_med, "llm_right", "secondary.medium.disagreement_table"))
+    v["disag_med_both_wrong"] = format_int(req(dis_med, "both_wrong", "secondary.medium.disagreement_table"))
+    v["disag_med_n"] = format_int(req(dis_med, "n", "secondary.medium.disagreement_table"))
+    v["disag_high_rules_right"] = format_int(req(dis_high, "rules_right", "secondary.high.disagreement_table"))
+    v["disag_high_llm_right"] = format_int(req(dis_high, "llm_right", "secondary.high.disagreement_table"))
+    v["disag_high_both_wrong"] = format_int(req(dis_high, "both_wrong", "secondary.high.disagreement_table"))
+    v["disag_high_n"] = format_int(req(dis_high, "n", "secondary.high.disagreement_table"))
 
-    up_med = s_med.get("upgrade_pr", {})
-    up_high = s_high.get("upgrade_pr", {})
-    v["up_med_p"] = format_rate(up_med.get("precision"))
-    v["up_med_r"] = format_rate(up_med.get("recall"))
-    v["up_high_p"] = format_rate(up_high.get("precision"))
-    v["up_high_r"] = format_rate(up_high.get("recall"))
+    up_med = req(s_med, "upgrade_pr", "secondary.medium")
+    up_high = req(s_high, "upgrade_pr", "secondary.high")
+    up_med_u = int(req(up_med, "upgrades", "secondary.medium.upgrade_pr"))
+    up_med_w = int(req(up_med, "warranted", "secondary.medium.upgrade_pr"))
+    up_med_hit = int(req(up_med, "warranted_upgrades", "secondary.medium.upgrade_pr"))
+    up_high_u = int(req(up_high, "upgrades", "secondary.high.upgrade_pr"))
+    up_high_w = int(req(up_high, "warranted", "secondary.high.upgrade_pr"))
+    up_high_hit = int(req(up_high, "warranted_upgrades", "secondary.high.upgrade_pr"))
+
+    v["up_med_upgrades"] = format_int(up_med_u)
+    v["up_high_upgrades"] = format_int(up_high_u)
+    v["up_med_p"] = format_rate(req(up_med, "precision", "secondary.medium.upgrade_pr"), up_med_hit, up_med_u)
+    v["up_med_r"] = format_rate(req(up_med, "recall", "secondary.medium.upgrade_pr"), up_med_hit, up_med_w)
+    v["up_high_p"] = format_rate(req(up_high, "precision", "secondary.high.upgrade_pr"), up_high_hit, up_high_u)
+    v["up_high_r"] = format_rate(req(up_high, "recall", "secondary.high.upgrade_pr"), up_high_hit, up_high_w)
 
     # By-tag primary & secondary
-    tag_med = s_med.get("by_tag", {})
-    tag_high = s_high.get("by_tag", {})
+    tag_med = req(s_med, "by_tag", "secondary.medium")
+    tag_high = req(s_high, "by_tag", "secondary.high")
     for tag in ("always_rule", "matrix_settled", "judgement"):
-        tm = tag_med.get(tag, {})
-        th = tag_high.get(tag, {})
-        lift_m = tm.get("under_call_reduction", {})
-        lift_h = th.get("under_call_reduction", {})
-        v[f"tag_{tag}_rules"] = format_rate(lift_m.get("rules_rate"))
-        v[f"tag_{tag}_med"] = format_rate(tm.get("under_call_rate"))
-        v[f"tag_{tag}_high"] = format_rate(th.get("under_call_rate"))
-        v[f"tag_{tag}_med_lift"] = f"{format_rate(lift_m.get('point'))} {format_ci(lift_m.get('lo'), lift_m.get('hi'))}"
-        v[f"tag_{tag}_high_lift"] = f"{format_rate(lift_h.get('point'))} {format_ci(lift_h.get('lo'), lift_h.get('hi'))}"
+        tm = req(tag_med, tag, "secondary.medium.by_tag")
+        th = req(tag_high, tag, "secondary.high.by_tag")
+        lift_m = req(tm, "under_call_reduction", f"secondary.medium.by_tag.{tag}")
+        lift_h = req(th, "under_call_reduction", f"secondary.high.by_tag.{tag}")
+        v[f"tag_{tag}_rules"] = format_rate(req(lift_m, "rules_rate", f"tag.{tag}.med.under_call_reduction"))
+        v[f"tag_{tag}_med"] = format_rate(req(tm, "under_call_rate", f"tag.{tag}.med"))
+        v[f"tag_{tag}_high"] = format_rate(req(th, "under_call_rate", f"tag.{tag}.high"))
+        v[f"tag_{tag}_med_lift"] = (
+            f"{format_rate(req(lift_m, 'point', f'tag.{tag}.med.lift'))} "
+            f"{format_ci(req(lift_m, 'lo', f'tag.{tag}.med.lift'), req(lift_m, 'hi', f'tag.{tag}.med.lift'))}"
+        )
+        v[f"tag_{tag}_high_lift"] = (
+            f"{format_rate(req(lift_h, 'point', f'tag.{tag}.high.lift'))} "
+            f"{format_ci(req(lift_h, 'lo', f'tag.{tag}.high.lift'), req(lift_h, 'hi', f'tag.{tag}.high.lift'))}"
+        )
 
-        up_m = tm.get("upgrade_pr", {})
-        up_h = th.get("upgrade_pr", {})
-        v[f"tag_{tag}_up_med_p"] = format_rate(up_m.get("precision"))
-        v[f"tag_{tag}_up_med_r"] = format_rate(up_m.get("recall"))
-        v[f"tag_{tag}_up_high_p"] = format_rate(up_h.get("precision"))
-        v[f"tag_{tag}_up_high_r"] = format_rate(up_h.get("recall"))
+        up_m = req(tm, "upgrade_pr", f"secondary.medium.by_tag.{tag}")
+        up_h = req(th, "upgrade_pr", f"secondary.high.by_tag.{tag}")
+        m_hit = int(req(up_m, "warranted_upgrades", f"tag.{tag}.med.upgrade_pr"))
+        m_u = int(req(up_m, "upgrades", f"tag.{tag}.med.upgrade_pr"))
+        m_w = int(req(up_m, "warranted", f"tag.{tag}.med.upgrade_pr"))
+        h_hit = int(req(up_h, "warranted_upgrades", f"tag.{tag}.high.upgrade_pr"))
+        h_u = int(req(up_h, "upgrades", f"tag.{tag}.high.upgrade_pr"))
+        h_w = int(req(up_h, "warranted", f"tag.{tag}.high.upgrade_pr"))
+        v[f"tag_{tag}_up_med_p"] = format_rate(req(up_m, "precision", f"tag.{tag}.med.upgrade_pr"), m_hit, m_u)
+        v[f"tag_{tag}_up_med_r"] = format_rate(req(up_m, "recall", f"tag.{tag}.med.upgrade_pr"), m_hit, m_w)
+        v[f"tag_{tag}_up_high_p"] = format_rate(req(up_h, "precision", f"tag.{tag}.high.upgrade_pr"), h_hit, h_u)
+        v[f"tag_{tag}_up_high_r"] = format_rate(req(up_h, "recall", f"tag.{tag}.high.upgrade_pr"), h_hit, h_w)
 
     # Traps
-    tr = numbers.get("traps", {})
-    tr_med_pri = tr.get("medium", {}).get("all_runs", {}).get("primary", {})
-    tr_high_pri = tr.get("high", {}).get("all_runs", {}).get("primary", {})
-    tr_med_sec = tr.get("medium", {}).get("ok_only", {}).get("secondary", {})
-    tr_high_sec = tr.get("high", {}).get("ok_only", {}).get("secondary", {})
-    v["trap_med_under_call"] = format_rate(tr_med_pri.get("under_call_rate"))
-    v["trap_high_under_call"] = format_rate(tr_high_pri.get("under_call_rate"))
-    v["trap_rules_under_call"] = format_rate(tr_med_pri.get("rules_under_call_rate"))
-    tr_lift_m = tr_med_pri.get("under_call_reduction", {})
-    tr_lift_h = tr_high_pri.get("under_call_reduction", {})
-    v["trap_med_lift"] = f"{format_rate(tr_lift_m.get('point'))} {format_ci(tr_lift_m.get('lo'), tr_lift_m.get('hi'))}"
-    v["trap_high_lift"] = f"{format_rate(tr_lift_h.get('point'))} {format_ci(tr_lift_h.get('lo'), tr_lift_h.get('hi'))}"
-    v["trap_med_over_call"] = format_rate(tr_med_sec.get("over_call_rate"))
-    v["trap_high_over_call"] = format_rate(tr_high_sec.get("over_call_rate"))
-    v["trap_med_acc"] = format_rate(tr_med_sec.get("exact_accuracy"))
-    v["trap_high_acc"] = format_rate(tr_high_sec.get("exact_accuracy"))
+    tr_med_all_pri = req(req(req(tr, "medium", "traps"), "all_runs", "traps.medium"), "primary", "traps.medium.all_runs")
+    tr_high_all_pri = req(req(req(tr, "high", "traps"), "all_runs", "traps.high"), "primary", "traps.high.all_runs")
+    tr_med_sec = req(req(req(tr, "medium", "traps"), "ok_only", "traps.medium"), "secondary", "traps.medium.ok_only")
+    tr_high_sec = req(req(req(tr, "high", "traps"), "ok_only", "traps.high"), "secondary", "traps.high.ok_only")
+    v["trap_med_under_call"] = format_rate(req(tr_med_all_pri, "under_call_rate", "traps.medium.all_runs.primary"))
+    v["trap_high_under_call"] = format_rate(req(tr_high_all_pri, "under_call_rate", "traps.high.all_runs.primary"))
+    v["trap_rules_under_call"] = format_rate(req(tr_med_all_pri, "rules_under_call_rate", "traps.medium.all_runs.primary"))
+    tr_lift_m = req(tr_med_all_pri, "under_call_reduction", "traps.medium.all_runs.primary")
+    tr_lift_h = req(tr_high_all_pri, "under_call_reduction", "traps.high.all_runs.primary")
+    v["trap_med_lift"] = (
+        f"{format_rate(req(tr_lift_m, 'point', 'traps.medium.lift'))} "
+        f"{format_ci(req(tr_lift_m, 'lo', 'traps.medium.lift'), req(tr_lift_m, 'hi', 'traps.medium.lift'))}"
+    )
+    v["trap_high_lift"] = (
+        f"{format_rate(req(tr_lift_h, 'point', 'traps.high.lift'))} "
+        f"{format_ci(req(tr_lift_h, 'lo', 'traps.high.lift'), req(tr_lift_h, 'hi', 'traps.high.lift'))}"
+    )
+    v["trap_med_over_call"] = format_rate(req(tr_med_sec, "over_call_rate", "traps.medium.ok_only.secondary"))
+    v["trap_high_over_call"] = format_rate(req(tr_high_sec, "over_call_rate", "traps.high.ok_only.secondary"))
+    v["trap_med_acc"] = format_rate(req(tr_med_sec, "exact_accuracy", "traps.medium.ok_only.secondary"))
+    v["trap_high_acc"] = format_rate(req(tr_high_sec, "exact_accuracy", "traps.high.ok_only.secondary"))
 
-    # Fixed by construction line
-    audit = numbers.get("audit_a_gaps", {})
-    band = numbers.get("robustness_band", {}).get("versions", {})
-    fam = numbers.get("family_overlap", {}).get("medium", {})
-    ppi = numbers.get("ppi", {}).get("medium", {})
-    corr = ppi.get("correction_note", {})
+    # Fixed by construction line (robustness versions + audit A gaps + PPI correction; family_overlap removed)
+    audit = req(numbers, "audit_a_gaps", "numbers")
+    band = req(req(numbers, "robustness_band", "numbers"), "versions", "robustness_band")
+    v["n_versions"] = format_int(len(band))
+    main_band = req(band, "main", "robustness_band.versions")
+    main_eff = req(main_band, "effort_decision", "robustness_band.versions.main")
+    main_rates = req(main_band, "primary_under_call_rates", "robustness_band.versions.main")
+    band_med_str = format_rate(req(main_rates, "medium", "robustness_band.main.rates"), u_med, p_cnt_med)
+    band_high_str = format_rate(req(main_rates, "high", "robustness_band.main.rates"), u_high, p_cnt_high)
 
     gaps_str = "; ".join(
-        f"judge {j}: under-call {audit.get(j, {}).get('under_call', {}).get('x', 0)}/{audit.get(j, {}).get('under_call', {}).get('n', 10)}, "
-        f"over-call {audit.get(j, {}).get('over_call', {}).get('x', 0)}/{audit.get(j, {}).get('over_call', {}).get('n', 10)}"
+        f"judge {j}: under-call {req(req(req(audit, j, 'audit_a_gaps'), 'under_call', f'audit.{j}'), 'x', f'audit.{j}.under_call')}/{req(req(req(audit, j, 'audit_a_gaps'), 'under_call', f'audit.{j}'), 'n', f'audit.{j}.under_call')}, "
+        f"over-call {req(req(req(audit, j, 'audit_a_gaps'), 'over_call', f'audit.{j}'), 'x', f'audit.{j}.over_call')}/{req(req(req(audit, j, 'audit_a_gaps'), 'over_call', f'audit.{j}'), 'n', f'audit.{j}.over_call')}"
         for j in ("A", "B", "C")
     )
-    fam_str = "; ".join(
-        f"judge {j}: share={format_rate(fam.get(j, {}).get('share'))} ({fam.get(j, {}).get('x', 0)}/{fam.get(j, {}).get('n', 0)})"
-        for j in ("A", "B", "C")
+
+    ppi_all = req(numbers, "ppi", "numbers")
+    ppi_med = req(ppi_all, "medium", "ppi")
+    ppi_high = req(ppi_all, "high", "ppi")
+    _ = req(ppi_med, "status", "ppi.medium")
+    _ = req(ppi_high, "status", "ppi.high")
+    assert "ppi_correction_note" in OPTIONAL_FIELDS
+    if "correction_note" in ppi_med:
+        corr = ppi_med["correction_note"]
+        num_c = req(corr, "mean_numerator_correction_term", "ppi.medium.correction_note")
+        den_c = req(corr, "mean_denominator_correction_term", "ppi.medium.correction_note")
+        ppi_part = f"PPI correction (mean numerator correction={format_rate(num_c)}, mean denominator correction={format_rate(den_c)})"
+    else:
+        ppi_part = "PPI correction: 0 by construction (PPI not run; the audit labels match the reference)"
+
+    v["fixed_by_construction_values"] = (
+        f"{len(band)} robustness versions identical (medium {band_med_str}, high {band_high_str}, "
+        f"decision {req(main_eff, 'choice', 'main.eff')} tier {req(main_eff, 'rule_fired', 'main.eff')}); "
+        f"per-judge gaps ({gaps_str}); {ppi_part}"
     )
-    corr_str = (
-        f"mean numerator correction={corr.get('mean_numerator_correction_term', 0)}, "
-        f"mean denominator correction={corr.get('mean_denominator_correction_term', 0)}"
-    )
-    v["fixed_by_construction_values"] = f"{gaps_str}; family overlap ({fam_str}); PPI ({corr_str})"
-    v["ppi_correction_values"] = corr_str
+
+    # Family overlap (Appendix table)
+    fam_root = req(numbers, "family_overlap", "numbers")
+    fam_rows: List[str] = []
+    for arm_label, arm_key in (("Medium", "medium"), ("High", "high")):
+        fam_arm = req(req(fam_root, arm_key, "family_overlap"), "all_runs", f"family_overlap.{arm_key}")
+        cells_str = []
+        for j in ("A", "B", "C"):
+            jd = req(fam_arm, j, f"family_overlap.{arm_key}.all_runs")
+            jx = int(req(jd, "x", f"family_overlap.{arm_key}.all_runs.{j}"))
+            jn = int(req(jd, "n", f"family_overlap.{arm_key}.all_runs.{j}"))
+            jshare = req(jd, "share", f"family_overlap.{arm_key}.all_runs.{j}")
+            cells_str.append(format_rate(jshare, jx, jn))
+        fam_rows.append(f"| {arm_label} | {cells_str[0]} | {cells_str[1]} | {cells_str[2]} |")
+    v["family_overlap_table_rows"] = "\n".join(fam_rows)
 
     # Split cells
-    splits = numbers.get("split_cells", {})
-    v["split_mandatory_count"] = format_int(splits.get("strata_split_gold_mandatory_cells", 0))
+    splits = req(numbers, "split_cells", "numbers")
+    v["split_mandatory_count"] = format_int(req(splits, "strata_split_gold_mandatory_cells", "split_cells"))
 
     # Appendix tables
-    per_prof_med = p_med.get("per_profile", [])
-    per_prof_high = p_high.get("per_profile", [])
-    tip_prof_med = tip_med.get("per_profile", {})
-    tip_prof_high = tip_high.get("per_profile", {})
+    per_prof_med = req(p_med, "per_profile", "primary.medium")
+    per_prof_high = req(p_high, "per_profile", "primary.high")
+    tip_prof_med = req(tip_med, "per_profile", "primary.medium.tipping")
+    tip_prof_high = req(tip_high, "per_profile", "primary.high.tipping")
 
     prof_rows: List[str] = []
     for pm in per_prof_med:
-        pid = pm.get("profile_id", "")
-        ph = next((p for p in per_prof_high if p.get("profile_id") == pid), {})
-        u_m = tip_prof_med.get(pid, {}).get("U", 0)
-        p_m = tip_prof_med.get(pid, {}).get("P", 0)
-        u_h = tip_prof_high.get(pid, {}).get("U", 0)
-        p_h = tip_prof_high.get(pid, {}).get("P", 0)
+        pid = req(pm, "profile_id", "primary.medium.per_profile[]")
+        ph = next((p for p in per_prof_high if req(p, "profile_id", "primary.high.per_profile[]") == pid), None)
+        if ph is None:
+            raise KeyError(f"Missing profile_id {pid} in primary.high.per_profile")
+        tm_p = req(tip_prof_med, pid, "primary.medium.tipping.per_profile")
+        th_p = req(tip_prof_high, pid, "primary.high.tipping.per_profile")
+        u_m = int(req(tm_p, "U", f"tipping.med.per_profile.{pid}"))
+        p_m = int(req(tm_p, "P", f"tipping.med.per_profile.{pid}"))
+        u_h = int(req(th_p, "U", f"tipping.high.per_profile.{pid}"))
+        p_h = int(req(th_p, "P", f"tipping.high.per_profile.{pid}"))
 
-        r_m = format_rate(pm.get("hybrid_under_call_rate"), u_m, p_m)
-        r_h = format_rate(ph.get("hybrid_under_call_rate"), u_h, p_h)
-        r_rule = format_rate(pm.get("rules_under_call_rate"))
-        l_m = format_rate(pm.get("under_call_reduction_rules_minus_hybrid"))
-        l_h = format_rate(ph.get("under_call_reduction_rules_minus_hybrid"))
+        r_rule_val = float(req(pm, "rules_under_call_rate", f"primary.medium.per_profile.{pid}"))
+        r_rule_u = _verified_count(r_rule_val, p_m, f"per_profile.{pid}.rules_under_call_rate")
+        r_m = format_rate(req(pm, "hybrid_under_call_rate", f"primary.medium.per_profile.{pid}"), u_m, p_m)
+        r_h = format_rate(req(ph, "hybrid_under_call_rate", f"primary.high.per_profile.{pid}"), u_h, p_h)
+        r_rule = format_rate(r_rule_val, r_rule_u, p_m)
+        l_m = format_rate(req(pm, "under_call_reduction_rules_minus_hybrid", f"primary.medium.per_profile.{pid}"), r_rule_u - u_m, p_m)
+        l_h = format_rate(req(ph, "under_call_reduction_rules_minus_hybrid", f"primary.high.per_profile.{pid}"), r_rule_u - u_h, p_h)
         prof_rows.append(f"| `{pid}` | {r_rule} | {r_m} | {r_h} | {l_m} | {l_h} | {u_m}/{p_m} | {u_h}/{p_h} |")
     v["per_profile_table_rows"] = "\n".join(prof_rows)
 
     # Leave-one-out tipping table
-    loo_med = tip_med.get("leave_one_profile_out", {})
-    loo_high = tip_high.get("leave_one_profile_out", {})
+    loo_med = req(tip_med, "leave_one_profile_out", "primary.medium.tipping")
+    loo_high = req(tip_high, "leave_one_profile_out", "primary.high.tipping")
     loo_rows: List[str] = []
     for pid in sorted(loo_med.keys()):
-        om = loo_med.get(pid, {})
-        oh = loo_high.get(pid, {})
-        e1_m = om.get("ranges", {}).get("E1", {})
-        e2_m = om.get("ranges", {}).get("E2", {})
-        e1_h = oh.get("ranges", {}).get("E1", {})
-        e2_h = oh.get("ranges", {}).get("E2", {})
+        om = req(loo_med, pid, "tipping.med.loo")
+        oh = req(loo_high, pid, "tipping.high.loo")
+        om_r = req(om, "ranges", f"tipping.med.loo.{pid}")
+        oh_r = req(oh, "ranges", f"tipping.high.loo.{pid}")
+        e1_m = req(om_r, "E1", f"tipping.med.loo.{pid}.ranges")
+        e2_m = req(om_r, "E2", f"tipping.med.loo.{pid}.ranges")
+        e1_h = req(oh_r, "E1", f"tipping.high.loo.{pid}.ranges")
+        e2_h = req(oh_r, "E2", f"tipping.high.loo.{pid}.ranges")
         loo_rows.append(
-            f"| `{pid}` | {om.get('U', 0)}/{om.get('P', 0)} | {format_ci(e1_m.get('lower'), e1_m.get('upper'))} | "
-            f"{format_ci(e2_m.get('lower'), e2_m.get('upper'))} | {oh.get('U', 0)}/{oh.get('P', 0)} | "
-            f"{format_ci(e1_h.get('lower'), e1_h.get('upper'))} | {format_ci(e2_h.get('lower'), e2_h.get('upper'))} |"
+            f"| `{pid}` | {req(om, 'U', 'om')}/{req(om, 'P', 'om')} | {format_ci(req(e1_m, 'lower', 'e1m'), req(e1_m, 'upper', 'e1m'))} | "
+            f"{format_ci(req(e2_m, 'lower', 'e2m'), req(e2_m, 'upper', 'e2m'))} | {req(oh, 'U', 'oh')}/{req(oh, 'P', 'oh')} | "
+            f"{format_ci(req(e1_h, 'lower', 'e1h'), req(e1_h, 'upper', 'e1h'))} | {format_ci(req(e2_h, 'lower', 'e2h'), req(e2_h, 'upper', 'e2h'))} |"
         )
     v["leave_one_out_table_rows"] = "\n".join(loo_rows)
 
     # Two-way split sensitivity table
-    split_sens = splits.get("split_sensitivity", {})
-    sens_med = split_sens.get("medium", {})
-    sens_high = split_sens.get("high", {})
+    split_sens = req(splits, "split_sensitivity", "split_cells")
+    sens_med = req(split_sens, "medium", "split_cells.split_sensitivity")
+    sens_high = req(split_sens, "high", "split_cells.split_sensitivity")
     two_way_rows: List[str] = []
     for direction in ("lower", "higher"):
-        sm = sens_med.get(direction, {}).get("ok_only", {})
-        sh = sens_high.get(direction, {}).get("ok_only", {})
+        sm = req(req(sens_med, direction, "sens_med"), "ok_only", f"sens_med.{direction}")
+        sh = req(req(sens_high, direction, "sens_high"), "ok_only", f"sens_high.{direction}")
         two_way_rows.append(
             f"| Scored against {direction} label | "
-            f"{format_rate(sm.get('over_call_rate'))} | {format_rate(sh.get('over_call_rate'))} | "
-            f"{format_rate(sm.get('exact_accuracy'))} | {format_rate(sh.get('exact_accuracy'))} | "
-            f"{format_rate(sm.get('macro_f1'))} | {format_rate(sh.get('macro_f1'))} | "
-            f"{format_rate(sm.get('qw_kappa'))} | {format_rate(sh.get('qw_kappa'))} |"
+            f"{format_rate(req(sm, 'over_call_rate', 'sm'))} | {format_rate(req(sh, 'over_call_rate', 'sh'))} | "
+            f"{format_rate(req(sm, 'exact_accuracy', 'sm'))} | {format_rate(req(sh, 'exact_accuracy', 'sh'))} | "
+            f"{format_rate(req(sm, 'macro_f1', 'sm'))} | {format_rate(req(sh, 'macro_f1', 'sh'))} | "
+            f"{format_rate(req(sm, 'qw_kappa', 'sm'))} | {format_rate(req(sh, 'qw_kappa', 'sh'))} |"
         )
     v["two_way_table_rows"] = "\n".join(two_way_rows)
 
-    # Robustness band table
+    # Robustness band table (explicit order: main, jury_median, LOJO-A, LOJO-B, LOJO-C, conservative_max)
     band_rows: List[str] = []
-    for name, bdata in band.items():
-        rates = bdata.get("primary_under_call_rates", {})
-        b_eff = bdata.get("effort_decision", {})
-        changed = "true" if bdata.get("decision_would_change", False) else "false"
+    for name in ROBUSTNESS_ORDER:
+        bdata = req(band, name, "robustness_band.versions")
+        rates = req(bdata, "primary_under_call_rates", f"robustness_band.versions.{name}")
+        b_eff = req(bdata, "effort_decision", f"robustness_band.versions.{name}")
+        changed = "true" if bool(req(bdata, "decision_would_change", f"robustness_band.versions.{name}")) else "false"
         band_rows.append(
-            f"| `{name}` | {format_rate(rates.get('medium'))} | {format_rate(rates.get('high'))} | "
-            f"{b_eff.get('choice', 'MEDIUM')} (tier {b_eff.get('rule_fired', 3)}) | {changed} |"
+            f"| `{name}` | {format_rate(req(rates, 'medium', f'{name}.rates'))} | {format_rate(req(rates, 'high', f'{name}.rates'))} | "
+            f"{req(b_eff, 'choice', f'{name}.eff')} (tier {req(b_eff, 'rule_fired', f'{name}.eff')}) | {changed} |"
         )
     v["robustness_band_table_rows"] = "\n".join(band_rows)
 
     # Judge gaps table
     gap_rows: List[str] = []
     for j in ("A", "B", "C"):
-        jg = audit.get(j, {})
-        u = jg.get("under_call", {})
-        o = jg.get("over_call", {})
-        gap_rows.append(f"| Judge {j} | {u.get('x', 0)}/{u.get('n', 10)} | {o.get('x', 0)}/{o.get('n', 10)} |")
+        jg = req(audit, j, "audit_a_gaps")
+        u = req(jg, "under_call", f"audit_a_gaps.{j}")
+        o = req(jg, "over_call", f"audit_a_gaps.{j}")
+        gap_rows.append(f"| Judge {j} | {req(u, 'x', 'u')}/{req(u, 'n', 'u')} | {req(o, 'x', 'o')}/{req(o, 'n', 'o')} |")
     v["judge_gaps_table_rows"] = "\n".join(gap_rows)
 
     # Blocked downgrades & Stability detail
-    bd_m = s_med.get("blocked_downgrades", 0)
-    bd_h = s_high.get("blocked_downgrades", 0)
-    v["blocked_downgrades_med"] = format_int(bd_m.get("blocked_downgrades", 0) if isinstance(bd_m, dict) else bd_m)
-    v["blocked_downgrades_high"] = format_int(bd_h.get("blocked_downgrades", 0) if isinstance(bd_h, dict) else bd_h)
+    bd_m = req(s_med, "blocked_downgrades", "secondary.medium")
+    bd_h = req(s_high, "blocked_downgrades", "secondary.high")
+    v["blocked_downgrades_med"] = format_int(req(bd_m, "blocked_downgrades", "secondary.medium.blocked_downgrades"))
+    v["blocked_downgrades_high"] = format_int(req(bd_h, "blocked_downgrades", "secondary.high.blocked_downgrades"))
 
-    # Resources
-    res_med = med_all.get("resources", {})
-    res_high = high_all.get("resources", {})
-    tok_m = res_med.get("tokens", {})
-    tok_h = res_high.get("tokens", {})
-    v["tokens_med_input"] = format_int(tok_m.get("input", 0))
-    v["tokens_med_output"] = format_int(tok_m.get("output", 0))
-    v["tokens_med_reasoning"] = format_int(tok_m.get("reasoning", 0))
-    v["tokens_med_cached"] = format_int(tok_m.get("cached", 0))
-    v["tokens_high_input"] = format_int(tok_h.get("input", 0))
-    v["tokens_high_output"] = format_int(tok_h.get("output", 0))
-    v["tokens_high_reasoning"] = format_int(tok_h.get("reasoning", 0))
-    v["tokens_high_cached"] = format_int(tok_h.get("cached", 0))
+    # Resources (sum over 40 strata runs per arm + computed latency per run; plus trap resources)
+    res_med = req(med_all, "resources", "secondary.medium_all")
+    res_high = req(high_all, "resources", "secondary.high_all")
+    tok_m = req(res_med, "tokens", "secondary.medium_all.resources")
+    tok_h = req(res_high, "tokens", "secondary.high_all.resources")
+    v["tokens_med_input"] = format_int(req(tok_m, "input", "tok_m"))
+    v["tokens_med_output"] = format_int(req(tok_m, "output", "tok_m"))
+    v["tokens_med_reasoning"] = format_int(req(tok_m, "reasoning", "tok_m"))
+    v["tokens_med_cached"] = format_int(req(tok_m, "cached", "tok_m"))
+    v["tokens_high_input"] = format_int(req(tok_h, "input", "tok_h"))
+    v["tokens_high_output"] = format_int(req(tok_h, "output", "tok_h"))
+    v["tokens_high_reasoning"] = format_int(req(tok_h, "reasoning", "tok_h"))
+    v["tokens_high_cached"] = format_int(req(tok_h, "cached", "tok_h"))
 
-    lat_m = res_med.get("latency_s")
-    lat_h = res_high.get("latency_s")
-    v["latency_med_s"] = f"{lat_m:.2f}" if lat_m is not None else "undefined"
-    v["latency_high_s"] = f"{lat_h:.2f}" if lat_h is not None else "undefined"
-    v["attempts_med"] = format_int(res_med.get("attempts", 0))
-    v["attempts_high"] = format_int(res_high.get("attempts", 0))
-    v["http_attempts_med"] = format_int(res_med.get("http_attempts", 0))
-    v["http_attempts_high"] = format_int(res_high.get("http_attempts", 0))
+    lat_m = req(res_med, "latency_s", "secondary.medium_all.resources")
+    lat_h = req(res_high, "latency_s", "secondary.high_all.resources")
+    v["latency_med_s"] = format_rate(lat_m)
+    v["latency_high_s"] = format_rate(lat_h)
+    v["latency_med_per_run_s"] = format_rate(float(lat_m) / med_strata_runs if lat_m is not None and med_strata_runs else None)
+    v["latency_high_per_run_s"] = format_rate(float(lat_h) / high_strata_runs if lat_h is not None and high_strata_runs else None)
+    v["attempts_med"] = format_int(req(res_med, "attempts", "secondary.medium_all.resources"))
+    v["attempts_high"] = format_int(req(res_high, "attempts", "secondary.high_all.resources"))
+    v["http_attempts_med"] = format_int(req(res_med, "http_attempts", "secondary.medium_all.resources"))
+    v["http_attempts_high"] = format_int(req(res_high, "http_attempts", "secondary.high_all.resources"))
+
+    tr_res_m = req(tr_med_all_sec, "resources", "traps.medium.all_runs.secondary")
+    tr_res_h = req(tr_high_all_sec, "resources", "traps.high.all_runs.secondary")
+    tr_lat_m = req(tr_res_m, "latency_s", "tr_res_m")
+    tr_lat_h = req(tr_res_h, "latency_s", "tr_res_h")
+    v["trap_latency_med_s"] = format_rate(tr_lat_m)
+    v["trap_latency_high_s"] = format_rate(tr_lat_h)
+    v["trap_latency_med_per_run_s"] = format_rate(float(tr_lat_m) / med_trap_runs if tr_lat_m is not None and med_trap_runs else None)
+    v["trap_latency_high_per_run_s"] = format_rate(float(tr_lat_h) / high_trap_runs if tr_lat_h is not None and high_trap_runs else None)
 
     return v
 
@@ -498,104 +666,136 @@ def extract_cmd(analysis_path_str: str, expect_sha: str, receipts_dir_str: str, 
         receipt_shas[rel_path] = normalised_sha(raw_rec)
         receipt_docs[rel_path] = json.loads(raw_rec.decode("utf-8"))
 
-    # Scope check: verify every run in all_runs is ok
-    med_all = analysis.get("secondary", {}).get("medium", {}).get("all_runs", {})
-    high_all = analysis.get("secondary", {}).get("high", {}).get("all_runs", {})
-    med_detail = med_all.get("llm_detail", {})
-    high_detail = high_all.get("llm_detail", {})
-
-    med_non_ok = sum(c for d, c in med_detail.items() if d != "ok")
-    high_non_ok = sum(c for d, c in high_detail.items() if d != "ok")
-    if med_non_ok > 0 or high_non_ok > 0:
-        sys.stderr.write(f"non_ok_runs_in_arm count=1 (med={med_non_ok}, high={high_non_ok})\n")
-        return 2
-
-    # Rules rate check
-    pri = analysis.get("primary", {})
-    med_rules = pri.get("medium", {}).get("rules_under_call_rate")
-    high_rules = pri.get("high", {}).get("rules_under_call_rate")
-    rules_rates_equal = (med_rules == high_rules)
-
-    cand_rec = receipt_docs["eval/s10/manifests/s10c_candidates_run.json"]
-    pilot_rec = receipt_docs["eval/s10/manifests/s10c_pilot_run.json"]
-    main_rec = receipt_docs["eval/s10/manifests/s10c_main_run.json"]
-
-    numbers_data: Dict[str, Any] = {
-        "analysis_sha256": actual_sha,
-        "receipt_shas": receipt_shas,
-        "scope_all_ok": True,
-        "rules_rates_equal": rules_rates_equal,
-        "runs_summary": {
-            "total_runs": 100,
-            "medium_runs": 50,
-            "high_runs": 50,
-            "strata_profiles": 8,
-            "trap_profiles": 2,
-            "total_dev_profiles": 10,
-            "repeats": 5,
-        },
-        "paid_requests": {
-            "candidates": cand_rec.get("counts", {}).get("http_attempts", 23),
-            "candidates_global_start": cand_rec.get("global_start", 0),
-            "candidates_global_end": cand_rec.get("global_end", 23),
-            "pilot": pilot_rec.get("counts", {}).get("http_attempts", 6),
-            "pilot_records": pilot_rec.get("counts", {}).get("records", 4),
-            "pilot_retries": pilot_rec.get("counts", {}).get("http_attempts", 6) - pilot_rec.get("counts", {}).get("records", 4),
-            "pilot_global_start": pilot_rec.get("counts", {}).get("call_totals", {}).get("global_start", 23),
-            "pilot_global_end": pilot_rec.get("counts", {}).get("call_totals", {}).get("global_end", 29),
-            "main": main_rec.get("counts", {}).get("http_attempts", 100),
-            "main_records": main_rec.get("counts", {}).get("records", 100),
-            "main_retries": main_rec.get("counts", {}).get("http_attempts", 100) - main_rec.get("counts", {}).get("records", 100),
-            "main_global_start": main_rec.get("counts", {}).get("call_totals", {}).get("global_start", 29),
-            "main_global_end": main_rec.get("counts", {}).get("call_totals", {}).get("global_end", 129),
-            "total": main_rec.get("counts", {}).get("call_totals", {}).get("total", 129),
-            "cap": 150,
-        },
-        "primary": {
-            "medium": {
-                "under_call_rate": pri.get("medium", {}).get("under_call_rate"),
-                "rules_under_call_rate": med_rules,
-                "under_call_reduction": pri.get("medium", {}).get("under_call_reduction"),
-                "under_call_ci": pri.get("medium", {}).get("under_call_ci"),
-                "profiles_with_under_call": pri.get("medium", {}).get("profiles_with_under_call"),
-                "per_profile": pri.get("medium", {}).get("per_profile"),
-                "tipping": analysis.get("tipping", {}).get("medium"),
-            },
-            "high": {
-                "under_call_rate": pri.get("high", {}).get("under_call_rate"),
-                "rules_under_call_rate": high_rules,
-                "under_call_reduction": pri.get("high", {}).get("under_call_reduction"),
-                "under_call_ci": pri.get("high", {}).get("under_call_ci"),
-                "profiles_with_under_call": pri.get("high", {}).get("profiles_with_under_call"),
-                "per_profile": pri.get("high", {}).get("per_profile"),
-                "tipping": analysis.get("tipping", {}).get("high"),
-            },
-        },
-        "effort_decision": analysis.get("effort_decision"),
-        "paired_comparison": analysis.get("paired_comparison"),
-        "robustness_band": analysis.get("robustness_band"),
-        "secondary": {
-            "medium": analysis.get("secondary", {}).get("medium", {}).get("ok_only"),
-            "high": analysis.get("secondary", {}).get("high", {}).get("ok_only"),
-            "medium_all": med_all,
-            "high_all": high_all,
-        },
-        "traps": analysis.get("traps"),
-        "audit_a_gaps": analysis.get("audit_a_gaps"),
-        "family_overlap": analysis.get("family_overlap"),
-        "ppi": analysis.get("ppi"),
-        "split_cells": {
-            "strata_split_gold_mandatory_cells": analysis.get("strata_split_gold_mandatory_cells", 0),
-            "primary_two_way_required": analysis.get("primary_two_way_required", False),
-            "split_sensitivity": analysis.get("split_sensitivity"),
-        },
-    }
-
-    # Verify template variables can be constructed
+    # Scope check: verify every run across strata and traps in all_runs is ok
     try:
+        sec_raw = req(analysis, "secondary", "analysis")
+        med_all = req(req(sec_raw, "medium", "analysis.secondary"), "all_runs", "analysis.secondary.medium")
+        high_all = req(req(sec_raw, "high", "analysis.secondary"), "all_runs", "analysis.secondary.high")
+        med_detail = req(med_all, "llm_detail", "analysis.secondary.medium.all_runs")
+        high_detail = req(high_all, "llm_detail", "analysis.secondary.high.all_runs")
+
+        tr_raw = req(analysis, "traps", "analysis")
+        tr_med_sec = req(req(req(tr_raw, "medium", "analysis.traps"), "all_runs", "analysis.traps.medium"), "secondary", "analysis.traps.medium.all_runs")
+        tr_high_sec = req(req(req(tr_raw, "high", "analysis.traps"), "all_runs", "analysis.traps.high"), "secondary", "analysis.traps.high.all_runs")
+        tr_med_detail = req(tr_med_sec, "llm_detail", "analysis.traps.medium.all_runs.secondary")
+        tr_high_detail = req(tr_high_sec, "llm_detail", "analysis.traps.high.all_runs.secondary")
+
+        med_non_ok = sum(int(c) for d, c in med_detail.items() if d != "ok") + sum(int(c) for d, c in tr_med_detail.items() if d != "ok")
+        high_non_ok = sum(int(c) for d, c in high_detail.items() if d != "ok") + sum(int(c) for d, c in tr_high_detail.items() if d != "ok")
+        if med_non_ok > 0 or high_non_ok > 0:
+            sys.stderr.write(f"non_ok_runs_in_arm count=1 (med={med_non_ok}, high={high_non_ok})\n")
+            return 2
+
+        eff_raw = req(analysis, "effort_decision", "analysis")
+        non_ok_50 = req(eff_raw, "non_ok_all_50_runs", "analysis.effort_decision")
+        if int(req(non_ok_50, "medium", "non_ok_all_50_runs")) != med_non_ok or int(req(non_ok_50, "high", "non_ok_all_50_runs")) != high_non_ok:
+            sys.stderr.write("non_ok_count_mismatch count=1\n")
+            return 2
+
+        pri = req(analysis, "primary", "analysis")
+        pri_med = req(pri, "medium", "analysis.primary")
+        pri_high = req(pri, "high", "analysis.primary")
+        tip_raw = req(analysis, "tipping", "analysis")
+        med_rules = req(pri_med, "rules_under_call_rate", "analysis.primary.medium")
+        high_rules = req(pri_high, "rules_under_call_rate", "analysis.primary.high")
+        rules_rates_equal = (med_rules == high_rules)
+
+        cand_rec = receipt_docs["eval/s10/manifests/s10c_candidates_run.json"]
+        pilot_rec = receipt_docs["eval/s10/manifests/s10c_pilot_run.json"]
+        main_rec = receipt_docs["eval/s10/manifests/s10c_main_run.json"]
+
+        cand_counts = req(cand_rec, "counts", "candidates_receipt")
+        pilot_counts = req(pilot_rec, "counts", "pilot_receipt")
+        pilot_ct = req(pilot_counts, "call_totals", "pilot_receipt.counts")
+        main_counts = req(main_rec, "counts", "main_receipt")
+        main_ct = req(main_counts, "call_totals", "main_receipt.counts")
+        main_global_start = int(main_ct["global_start"]) if "global_start" in main_ct else int(req(main_ct, "candidates", "main_ct")) + int(req(main_ct, "pilot", "main_ct"))
+        main_total = int(req(main_ct, "total", "main_ct"))
+        main_global_end = int(main_ct["global_end"]) if "global_end" in main_ct else main_total
+
+        tr_med_pri = req(req(req(tr_raw, "medium", "analysis.traps"), "all_runs", "analysis.traps.medium"), "primary", "analysis.traps.medium.all_runs")
+        strata_n = len(req(eff_raw, "per_profile_high_minus_medium", "analysis.effort_decision"))
+        traps_n = len(req(tr_med_pri, "per_profile", "analysis.traps.medium.all_runs.primary"))
+        repeats_val = int(req(req(med_all, "stability", "analysis.secondary.medium.all_runs"), "repeats", "stability")[0])
+        main_records_n = int(req(main_counts, "records", "main_receipt.counts"))
+        med_arm_runs = sum(int(c) for c in med_detail.values()) + sum(int(c) for c in tr_med_detail.values())
+        high_arm_runs = sum(int(c) for c in high_detail.values()) + sum(int(c) for c in tr_high_detail.values())
+
+        numbers_data: Dict[str, Any] = {
+            "analysis_sha256": actual_sha,
+            "receipt_shas": receipt_shas,
+            "scope_all_ok": True,
+            "rules_rates_equal": rules_rates_equal,
+            "runs_summary": {
+                "total_runs": main_records_n,
+                "medium_runs": med_arm_runs,
+                "high_runs": high_arm_runs,
+                "strata_profiles": strata_n,
+                "trap_profiles": traps_n,
+                "total_dev_profiles": strata_n + traps_n,
+                "repeats": repeats_val,
+            },
+            "paid_requests": {
+                "candidates": int(req(cand_counts, "http_attempts", "candidates_receipt.counts")),
+                "candidates_global_start": int(req(cand_rec, "global_start", "candidates_receipt")),
+                "candidates_global_end": int(req(cand_rec, "global_end", "candidates_receipt")),
+                "pilot": int(req(pilot_counts, "http_attempts", "pilot_receipt.counts")),
+                "pilot_records": int(req(pilot_counts, "records", "pilot_receipt.counts")),
+                "pilot_retries": int(req(pilot_counts, "http_attempts", "pilot_receipt.counts")) - int(req(pilot_counts, "records", "pilot_receipt.counts")),
+                "pilot_global_start": int(req(pilot_ct, "global_start", "pilot_receipt.counts.call_totals")),
+                "pilot_global_end": int(req(pilot_ct, "global_end", "pilot_receipt.counts.call_totals")),
+                "main": int(req(main_counts, "http_attempts", "main_receipt.counts")),
+                "main_records": main_records_n,
+                "main_retries": int(req(main_counts, "http_attempts", "main_receipt.counts")) - main_records_n,
+                "main_global_start": main_global_start,
+                "main_global_end": main_global_end,
+                "total": main_total,
+                "cap": 150,
+            },
+            "primary": {
+                "medium": {
+                    "under_call_rate": req(pri_med, "under_call_rate", "analysis.primary.medium"),
+                    "rules_under_call_rate": med_rules,
+                    "under_call_reduction": req(pri_med, "under_call_reduction", "analysis.primary.medium"),
+                    "under_call_ci": req(pri_med, "under_call_ci", "analysis.primary.medium"),
+                    "profiles_with_under_call": req(pri_med, "profiles_with_under_call", "analysis.primary.medium"),
+                    "per_profile": req(pri_med, "per_profile", "analysis.primary.medium"),
+                    "tipping": req(tip_raw, "medium", "analysis.tipping"),
+                },
+                "high": {
+                    "under_call_rate": req(pri_high, "under_call_rate", "analysis.primary.high"),
+                    "rules_under_call_rate": high_rules,
+                    "under_call_reduction": req(pri_high, "under_call_reduction", "analysis.primary.high"),
+                    "under_call_ci": req(pri_high, "under_call_ci", "analysis.primary.high"),
+                    "profiles_with_under_call": req(pri_high, "profiles_with_under_call", "analysis.primary.high"),
+                    "per_profile": req(pri_high, "per_profile", "analysis.primary.high"),
+                    "tipping": req(tip_raw, "high", "analysis.tipping"),
+                },
+            },
+            "effort_decision": eff_raw,
+            "paired_comparison": req(analysis, "paired_comparison", "analysis"),
+            "robustness_band": req(analysis, "robustness_band", "analysis"),
+            "secondary": {
+                "medium": req(req(sec_raw, "medium", "analysis.secondary"), "ok_only", "analysis.secondary.medium"),
+                "high": req(req(sec_raw, "high", "analysis.secondary"), "ok_only", "analysis.secondary.high"),
+                "medium_all": med_all,
+                "high_all": high_all,
+            },
+            "traps": tr_raw,
+            "audit_a_gaps": req(analysis, "audit_a_gaps", "analysis"),
+            "family_overlap": req(analysis, "family_overlap", "analysis"),
+            "ppi": req(analysis, "ppi", "analysis"),
+            "split_cells": {
+                "strata_split_gold_mandatory_cells": req(analysis, "strata_split_gold_mandatory_cells", "analysis"),
+                "primary_two_way_required": req(analysis, "primary_two_way_required", "analysis"),
+                "split_sensitivity": req(analysis, "split_sensitivity", "analysis"),
+            },
+        }
+
+        # Verify template variables can be constructed
         build_formatted_vars(numbers_data)
     except Exception as exc:
-        sys.stderr.write(f"template_var_build_error: {exc}\n")
+        sys.stderr.write(f"extract_error: {exc}\n")
         return 2
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -619,14 +819,16 @@ def render_cmd(numbers_path_str: str, template_path_str: str, block_template_pat
     results_out = Path(results_out_str)
     results_md = Path(results_md_str)
 
-    numbers_data = json.loads(numbers_path.read_text(encoding="utf-8"))
-    variables = build_formatted_vars(numbers_data)
-
-    template_text = template_path.read_text(encoding="utf-8")
-    block_template_text = block_template_path.read_text(encoding="utf-8")
-
-    rendered_doc = substitute(template_text, variables)
-    rendered_block = substitute(block_template_text, variables)
+    try:
+        numbers_data = json.loads(numbers_path.read_text(encoding="utf-8"))
+        variables = build_formatted_vars(numbers_data)
+        template_text = template_path.read_text(encoding="utf-8")
+        block_template_text = block_template_path.read_text(encoding="utf-8")
+        rendered_doc = substitute(template_text, variables)
+        rendered_block = substitute(block_template_text, variables)
+    except Exception as exc:
+        sys.stderr.write(f"render_error: {exc}\n")
+        return 2
 
     # Write results_s10c_dev.md with LF endings
     results_out.parent.mkdir(parents=True, exist_ok=True)

@@ -348,9 +348,39 @@ def test_template_keys_resolve(fake_env):
     assert "{{ " not in rendered_bt and " }}" not in rendered_bt
 
 
-@pytest.mark.skip(reason="Awaiting committed numbers.json from Part C")
-def test_re_render_committed():
-    """Renders from committed docs/results_s10c_dev.numbers.json and asserts byte equality with committed docs."""
+def test_render_missing_required_key_refuses(fake_env):
+    """render refuses with non-zero exit code naming missing key when a required key is absent."""
+    numbers_file = fake_env["test_dir"] / "numbers.json"
+    assert R.extract_cmd(
+        str(fake_env["analysis_file"]),
+        fake_env["analysis_sha"],
+        str(fake_env["receipts_dir"]),
+        str(numbers_file),
+    ) == 0
+
+    broken_data = json.loads(numbers_file.read_text(encoding="utf-8"))
+    del broken_data["paired_comparison"]["sign_flip"]["p"]
+    broken_file = fake_env["test_dir"] / "numbers_broken.json"
+    broken_file.write_text(json.dumps(broken_data), encoding="utf-8")
+
+    with pytest.raises(KeyError, match="paired_comparison\\.sign_flip\\.p"):
+        R.build_formatted_vars(broken_data)
+
+    out_dev = fake_env["test_dir"] / "broken_dev.md"
+    out_md = fake_env["test_dir"] / "broken_results.md"
+    code = R.render_cmd(
+        str(broken_file),
+        str(fake_env["template"]),
+        str(fake_env["block_template"]),
+        str(out_dev),
+        str(out_md),
+    )
+    assert code != 0
+    assert not out_dev.exists()
+
+
+def test_re_render_committed(tmp_path):
+    """Renders from committed docs/results_s10c_dev.numbers.json and asserts LF-normalized byte equality."""
     repo_root = Path(__file__).resolve().parents[1]
     numbers_path = repo_root / "docs" / "results_s10c_dev.numbers.json"
     template_path = repo_root / "scripts" / "s10c3_results_template.md"
@@ -362,20 +392,17 @@ def test_re_render_committed():
     assert results_dev_path.exists(), "docs/results_s10c_dev.md must exist"
     assert results_md_path.exists(), "docs/results.md must exist"
 
-    # Temporary render targets
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_dev = Path(tmpdir) / "results_s10c_dev.md"
-        tmp_results_md = Path(tmpdir) / "results.md"
-        tmp_results_md.write_text(results_md_path.read_text(encoding="utf-8"), encoding="utf-8")
+    tmp_dev = tmp_path / "results_s10c_dev.md"
+    tmp_results_md = tmp_path / "results.md"
+    tmp_results_md.write_text(results_md_path.read_text(encoding="utf-8"), encoding="utf-8")
 
-        code = R.render_cmd(
-            str(numbers_path),
-            str(template_path),
-            str(block_template_path),
-            str(tmp_dev),
-            str(tmp_results_md),
-        )
-        assert code == 0
-        assert tmp_dev.read_bytes() == results_dev_path.read_bytes()
-        assert tmp_results_md.read_bytes() == results_md_path.read_bytes()
+    code = R.render_cmd(
+        str(numbers_path),
+        str(template_path),
+        str(block_template_path),
+        str(tmp_dev),
+        str(tmp_results_md),
+    )
+    assert code == 0
+    assert tmp_dev.read_bytes().replace(b"\r\n", b"\n") == results_dev_path.read_bytes().replace(b"\r\n", b"\n")
+    assert tmp_results_md.read_bytes().replace(b"\r\n", b"\n") == results_md_path.read_bytes().replace(b"\r\n", b"\n")
