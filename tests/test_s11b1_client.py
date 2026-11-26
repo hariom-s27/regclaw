@@ -102,8 +102,8 @@ def test_retry_backoff_per_attempt_reserve_settle_and_success(client_cls, tmp_pa
     assert len({r["call_id"] for r in reserves}) == 1
     assert settles[0]["actual_usd"] == 0.0 and settles[0]["retained"] is False
     assert settles[1]["actual_usd"] == 0.0 and settles[1]["retained"] is False
-    # (100*2 + 50*10 + 200*0.20 + 100*2.50) / 1M = (200 + 500 + 40 + 250) / 1M = 0.00099
-    assert Decimal(str(settles[2]["actual_usd"])) == Decimal("0.00099")
+    # (100*2 + 50*10 + 200*0.10 + 100*2.50) / 1M = (200 + 500 + 20 + 250) / 1M = 0.00097
+    assert Decimal(str(settles[2]["actual_usd"])) == Decimal("0.00097")
     assert ledger.reserved_usd == Decimal("0")
 
     usage_rows = _read_jsonl(tmp_path / "usage.jsonl")

@@ -1,3 +1,7 @@
 retrieval_eval/*.json text eol=lf
 retrieval_eval/*.md text eol=lf
 retrieval_eval/*.yaml text eol=lf
+eval/s11/prompts/*.txt text eol=lf
+eval/s11/*.json text eol=lf
+eval/s11/manifests/*.json text eol=lf
+

@@ -1,0 +1,11 @@
+{
+  "schema": "s11-manifest.v1",
+  "created_utc": "2026-11-26T20:29:05.152159+00:00",
+  "files": [
+    {
+      "path": "eval/s11/prompts/answer_rules_v1.txt",
+      "sha256_lf": "57681cc4ace83407a4dbc26c6cda08f3409bfebdf5cf449f093e8cb015ec3875",
+      "bytes_lf": 848
+    }
+  ]
+}

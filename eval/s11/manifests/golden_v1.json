@@ -1,0 +1,11 @@
+{
+  "schema": "s11-manifest.v1",
+  "created_utc": "2026-11-26T19:25:35.042434+00:00",
+  "files": [
+    {
+      "path": "eval/s11/golden_v1.json",
+      "sha256_lf": "30163287f0c2eadf48f6253f6eb4884e5693cfc313fee295dd44ae93994031a5",
+      "bytes_lf": 14865
+    }
+  ]
+}

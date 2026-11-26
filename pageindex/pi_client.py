@@ -144,12 +144,56 @@ def _usage_ints(usage: Any) -> tuple[int, int, int, int]:
     return inp, out, cr, cw
 
 
+def _extract_effort(kwargs: dict[str, Any]) -> str | None:
+    cfg = kwargs.get("output_config")
+    if cfg is None:
+        return None
+    val = cfg.get("effort") if isinstance(cfg, dict) else getattr(cfg, "effort", None)
+    return None if val is None else str(val)
+
+
+def _extract_thinking_tokens(usage: Any) -> int | None:
+    if usage is None:
+        return None
+    details = (
+        usage.get("output_tokens_details")
+        if isinstance(usage, dict)
+        else getattr(usage, "output_tokens_details", None)
+    )
+    if details is None:
+        return None
+    tt = (
+        details.get("thinking_tokens")
+        if isinstance(details, dict)
+        else getattr(details, "thinking_tokens", None)
+    )
+    if tt is None or isinstance(tt, bool):
+        return None
+    return int(tt)
+
+
+def _assert_ends_with_user(messages: Any) -> None:
+    """Guard against assistant-ending messages (prefill 400 on Sonnet/Haiku 5.5)."""
+    if messages is None:
+        raise ValueError("Anthropic call requires a non-empty messages sequence ending with role='user'")
+    seq = list(messages) if not isinstance(messages, (list, tuple)) else messages
+    if not seq:
+        raise ValueError("Anthropic call requires a non-empty messages sequence ending with role='user'")
+    last = seq[-1]
+    role = last.get("role") if isinstance(last, dict) else getattr(last, "role", None)
+    if role != "user":
+        raise ValueError(f"Anthropic messages must end with role='user' (assistant prefill rejected), got {role!r}")
+
+
 class _MessagesProxy:
     def __init__(self, parent: "AnthropicRetryClient") -> None:
         self._parent = parent
 
     def create(self, **kwargs: Any) -> Any:
         return self._parent._create_message(**kwargs)
+
+    def count_tokens(self, **kwargs: Any) -> Any:
+        return self._parent._count_tokens(**kwargs)
 
 
 class AnthropicRetryClient:
@@ -181,9 +225,11 @@ class AnthropicRetryClient:
         self.messages = _MessagesProxy(self)
 
     def _create_message(self, **kwargs: Any) -> Any:
+        _assert_ends_with_user(kwargs.get("messages"))
         call_id = f"ant-{uuid.uuid4().hex[:12]}"
         model_req = str(kwargs.get("model") or "")
         effective_timeout = kwargs.get("timeout", self.timeout_s)
+        effort = _extract_effort(kwargs)
         max_tokens = kwargs.get("max_tokens") or self.default_max_tokens
         if max_tokens is None or int(max_tokens) <= 0:
             raise ValueError(f"Anthropic call requires positive max_tokens, got {max_tokens!r}")
@@ -225,6 +271,8 @@ class AnthropicRetryClient:
                     latency_s=0.0,
                     timeout_s=effective_timeout,
                     call_id=call_id,
+                    effort=effort,
+                    thinking_tokens=None,
                 )
                 raise
 
@@ -252,6 +300,8 @@ class AnthropicRetryClient:
                     latency_s=latency,
                     timeout_s=effective_timeout,
                     call_id=call_id,
+                    effort=effort,
+                    thinking_tokens=None,
                 )
                 if retryable and attempt < self.max_attempts:
                     delay = self.backoff_schedule[min(attempt - 1, len(self.backoff_schedule) - 1)]
@@ -270,14 +320,19 @@ class AnthropicRetryClient:
 
             latency = time.perf_counter() - t0
             model_ret = getattr(resp, "model", None)
-            inp, out, cr, cw = _usage_ints(getattr(resp, "usage", None))
+            stop_reason = getattr(resp, "stop_reason", None)
+            usage_obj = getattr(resp, "usage", None)
+            inp, out, cr, cw = _usage_ints(usage_obj)
+            thinking_toks = _extract_thinking_tokens(usage_obj)
+            call_status = "model_refusal" if stop_reason == "refusal" else "ok"
+            err_type = "model_refusal" if stop_reason == "refusal" else None
             st = self.ledger.settle(
                 res.reservation_id,
                 input_tokens=inp,
                 output_tokens=out,
                 cache_read_input_tokens=cr,
                 cache_creation_input_tokens=cw,
-                status="ok",
+                status=call_status,
             )
             self.usage_log.log(
                 provider="anthropic",
@@ -285,9 +340,9 @@ class AnthropicRetryClient:
                 model_requested=model_req,
                 model_returned=model_ret,
                 attempt=attempt,
-                status="ok",
+                status=call_status,
                 status_code=200,
-                error_type=None,
+                error_type=err_type,
                 input_tokens=inp,
                 output_tokens=out,
                 cache_read_input_tokens=cr,
@@ -296,6 +351,70 @@ class AnthropicRetryClient:
                 latency_s=latency,
                 timeout_s=effective_timeout,
                 call_id=call_id,
+                effort=effort,
+                thinking_tokens=thinking_toks,
+            )
+            return resp
+
+    def _count_tokens(self, **kwargs: Any) -> Any:
+        """Count prompt tokens via Anthropic count_tokens without ledger reserve (cost=0)."""
+        _assert_ends_with_user(kwargs.get("messages"))
+        call_id = f"ant-{uuid.uuid4().hex[:12]}"
+        model_req = str(kwargs.get("model") or "")
+        effective_timeout = kwargs.get("timeout", self.timeout_s)
+        effort = _extract_effort(kwargs)
+
+        for attempt in range(1, self.max_attempts + 1):
+            t0 = time.perf_counter()
+            try:
+                resp = self._sdk.messages.count_tokens(**kwargs)
+            except Exception as exc:
+                latency = time.perf_counter() - t0
+                status, status_code, _is_timeout, retryable = _classify_anthropic_exception(exc)
+                self.usage_log.log(
+                    provider="anthropic",
+                    lane="count_tokens",
+                    model_requested=model_req,
+                    model_returned=None,
+                    attempt=attempt,
+                    status=status,
+                    status_code=status_code,
+                    error_type=type(exc).__name__,
+                    cost_usd=0.0,
+                    latency_s=latency,
+                    timeout_s=effective_timeout,
+                    call_id=call_id,
+                    effort=effort,
+                    thinking_tokens=None,
+                )
+                if retryable and attempt < self.max_attempts:
+                    delay = self.backoff_schedule[min(attempt - 1, len(self.backoff_schedule) - 1)]
+                    self.retries += 1
+                    self._sleep(delay)
+                    continue
+                raise
+
+            latency = time.perf_counter() - t0
+            inp = int(getattr(resp, "input_tokens", 0) or 0)
+            self.usage_log.log(
+                provider="anthropic",
+                lane="count_tokens",
+                model_requested=model_req,
+                model_returned=None,
+                attempt=attempt,
+                status="ok",
+                status_code=200,
+                error_type=None,
+                input_tokens=inp,
+                output_tokens=0,
+                cache_read_input_tokens=0,
+                cache_creation_input_tokens=0,
+                cost_usd=0.0,
+                latency_s=latency,
+                timeout_s=effective_timeout,
+                call_id=call_id,
+                effort=effort,
+                thinking_tokens=None,
             )
             return resp
 

@@ -59,7 +59,7 @@ def test_prices_table_rates_haiku_tiers_and_azure_non_billable(caplog):
     }
     assert "o4-mini" not in prices.models
 
-    # Sonnet exact rates: $2/1M in, $10/1M out, $0.20/1M cache_read, $2.50/1M cache_write_5m
+    # Sonnet exact rates: $2/1M in, $10/1M out, $0.10/1M cache_read, $2.50/1M cache_write_5m
     sonnet_cost = compute_actual_cost_usd(
         prices,
         "claude-sonnet-5-5",
@@ -68,7 +68,7 @@ def test_prices_table_rates_haiku_tiers_and_azure_non_billable(caplog):
         cache_read_input_tokens=1_000_000,
         cache_creation_input_tokens=1_000_000,
     )
-    assert sonnet_cost == Decimal("14.7000000000")
+    assert sonnet_cost == Decimal("14.6000000000")
 
     # Haiku tier boundary: <= 100K vs > 100K (prompt = input + cache_read + cache_write)
     lo = compute_actual_cost_usd(prices, "claude-haiku-5-5", input_tokens=100_000, output_tokens=1_000_000)
@@ -76,7 +76,7 @@ def test_prices_table_rates_haiku_tiers_and_azure_non_billable(caplog):
     hi = compute_actual_cost_usd(prices, "claude-haiku-5-5", input_tokens=100_001, output_tokens=1_000_000)
     assert hi == Decimal("2.5500005000")  # 100001*0.50/1M + 2.50
 
-    # Haiku non-zero cache tokens trigger tier flip + warning + 1.0x / 1.25x input pricing
+    # Haiku non-zero cache tokens trigger tier flip and use listed cache_read/cache_write rates (no warning)
     with caplog.at_level(logging.WARNING, logger="s11.ledger"):
         haiku_cached = compute_actual_cost_usd(
             prices,
@@ -84,11 +84,11 @@ def test_prices_table_rates_haiku_tiers_and_azure_non_billable(caplog):
             input_tokens=60_000,
             output_tokens=0,
             cache_read_input_tokens=30_000,
-            cache_creation_input_tokens=20_000,  # total prompt = 110_000 -> >100K tier ($0.50/1M)
+            cache_creation_input_tokens=20_000,  # total prompt = 110_000 -> >100K tier ($0.50/$0.05/$0.625 per 1M)
         )
-    assert "Haiku response reported non-zero cache tokens" in caplog.text
-    # (60000 * 0.50 + 30000 * 0.50 + 20000 * 0.625) / 1M = 57500 / 1M = 0.0575
-    assert haiku_cached == Decimal("0.0575000000")
+    assert "Haiku response reported non-zero cache tokens" not in caplog.text
+    # (60000 * 0.50 + 30000 * 0.05 + 20000 * 0.625) / 1M = (30000 + 1500 + 12500) / 1M = 0.0440
+    assert haiku_cached == Decimal("0.0440000000")
 
     # Azure models never bill against cap and return None cost
     for az in ("gpt-4.1-mini", "gpt-5-mini", "text-embedding-3-small"):

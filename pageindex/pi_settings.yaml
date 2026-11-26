@@ -27,10 +27,12 @@ agent_max_turns: 12
 max_pages_per_fetch: 12
 max_pages_total: 40
 overview_char_budget: 24000
-agent_max_tokens: 16000
-verifier_max_tokens: 4096
-agent_timeout_s: 300.0
-verifier_timeout_s: 120.0
+answer_effort: medium
+verifier_effort: medium
+agent_max_tokens: 32000
+verifier_max_tokens: 16000
+agent_timeout_s: 600.0
+verifier_timeout_s: 180.0
 judge_timeout_s: 180.0
 
 # Ragas judge (eval/eval_pageindex.py; R22 R2/R3/D2). Azure v1 deployment name, REQUIRED for a

@@ -122,6 +122,8 @@ class PromptTier:
     max_prompt_tokens: int | None
     input_per_1m: Decimal
     output_per_1m: Decimal
+    cache_read_per_1m: Decimal | None = None
+    cache_write_5m_per_1m: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -180,11 +182,15 @@ def load_prices(path: Path | str = DEFAULT_PRICES_PATH) -> PriceTable:
                 mx = tr.get("max_prompt_tokens")
                 if mx is not None and int(mx) <= 0:
                     raise ValueError(f"{name}.prompt_tiers[{idx}].max_prompt_tokens must be > 0")
+                cr_val = tr.get("cache_read_per_1m")
+                cw_val = tr.get("cache_write_5m_per_1m")
                 tiers.append(
                     PromptTier(
                         max_prompt_tokens=None if mx is None else int(mx),
                         input_per_1m=_dec(tr["input_per_1m"], f"{name}.tier[{idx}].input"),
                         output_per_1m=_dec(tr["output_per_1m"], f"{name}.tier[{idx}].output"),
+                        cache_read_per_1m=None if cr_val is None else _dec(cr_val, f"{name}.tier[{idx}].cache_read_per_1m"),
+                        cache_write_5m_per_1m=None if cw_val is None else _dec(cw_val, f"{name}.tier[{idx}].cache_write_5m_per_1m"),
                     )
                 )
             specs[name] = ModelPriceSpec(
@@ -283,7 +289,10 @@ def estimate_reserve_cost_usd(
     out = Decimal(max_tokens)
     if spec.prompt_tiers:
         tier = _tier_for_prompt_tokens(spec, input_estimate)
-        return _q_usd((inp * tier.input_per_1m + out * tier.output_per_1m) / denom)
+        in_rate = tier.input_per_1m
+        if has_cache_control and tier.cache_write_5m_per_1m is not None:
+            in_rate = max(in_rate, tier.cache_write_5m_per_1m)
+        return _q_usd((inp * in_rate + out * tier.output_per_1m) / denom)
     assert spec.input_per_1m is not None and spec.output_per_1m is not None
     in_rate = spec.input_per_1m
     if has_cache_control and spec.cache_write_5m_per_1m is not None:
@@ -322,15 +331,8 @@ def compute_actual_cost_usd(
     if spec.prompt_tiers:
         prompt_tokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens
         tier = _tier_for_prompt_tokens(spec, prompt_tokens)
-        if cache_read_input_tokens > 0 or cache_creation_input_tokens > 0:
-            log.warning(
-                "Haiku response reported non-zero cache tokens (cache_read=%d, cache_creation=%d); "
-                "pricing at 1.0x / 1.25x tier input rate",
-                cache_read_input_tokens,
-                cache_creation_input_tokens,
-            )
-        cr_rate = tier.input_per_1m
-        cw_rate = tier.input_per_1m * Decimal("1.25")
+        cr_rate = tier.cache_read_per_1m if tier.cache_read_per_1m is not None else tier.input_per_1m
+        cw_rate = tier.cache_write_5m_per_1m if tier.cache_write_5m_per_1m is not None else tier.input_per_1m
         return _q_usd((inp * tier.input_per_1m + out * tier.output_per_1m + cr * cr_rate + cw * cw_rate) / denom)
 
     assert spec.input_per_1m is not None and spec.output_per_1m is not None
@@ -641,6 +643,8 @@ USAGE_FIELDS = (
     "latency_s",
     "timeout_s",
     "call_id",
+    "effort",
+    "thinking_tokens",
 )
 
 
@@ -670,6 +674,8 @@ class UsageLogger:
         latency_s: float = 0.0,
         timeout_s: float | None = None,
         call_id: str,
+        effort: str | None = None,
+        thinking_tokens: int | None = None,
     ) -> dict[str, Any]:
         row = {
             "ts_utc": now_utc_iso(),
@@ -689,6 +695,8 @@ class UsageLogger:
             "latency_s": round(float(latency_s), 4),
             "timeout_s": None if timeout_s is None else float(timeout_s),
             "call_id": str(call_id),
+            "effort": None if effort is None else str(effort),
+            "thinking_tokens": None if thinking_tokens is None or isinstance(thinking_tokens, bool) else int(thinking_tokens),
         }
         with self._lock:
             _append_jsonl_locked(self.path, row)
