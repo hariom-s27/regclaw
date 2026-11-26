@@ -28,9 +28,11 @@ if __package__ in (None, ''):
 from observability.tracing import stage, traced, record_response
 
 if __package__:
+    from .pi_client import AnthropicRetryClient
     from .pi_common import (Settings, fetch_pages, load_manifest, load_settings, load_tree,
                             node_map, outline, parse_page_spec, resolve_edition, subtree_span)
 else:
+    from pi_client import AnthropicRetryClient
     from pi_common import (Settings, fetch_pages, load_manifest, load_settings, load_tree,
                            node_map, outline, parse_page_spec, resolve_edition, subtree_span)
 
@@ -368,15 +370,22 @@ FAIL = {"unsupported", "partially_supported", "needs_citation"}
 
 @traced('pageindex.agent', as_type='agent')
 def answer_question(question: str, family: str, version: str | None = None,
-                    as_of: date | None = None, s: Settings | None = None) -> dict:
+                    as_of: date | None = None, s: Settings | None = None,
+                    *, ledger=None, usage_log=None) -> dict:
     s = s or load_settings()
     t0 = time.perf_counter()
+    if ledger is None or usage_log is None:
+        raise ValueError("answer_question requires both ledger and usage_log")
     rec = resolve_edition(load_manifest(s), family, version, as_of)
     tree = load_tree(rec.tree_path)
     sess = Session(rec=rec, tree=tree, nodes=node_map(tree["structure"]), s=s)
     log.info("pageindex timeouts: agent_timeout_s=%.1f verifier_timeout_s=%.1f",
              s.agent_timeout_s, s.verifier_timeout_s)
-    agent_client = anthropic.Anthropic(max_retries=0, timeout=s.agent_timeout_s)
+    agent_client = AnthropicRetryClient(
+        anthropic.Anthropic(max_retries=0, timeout=s.agent_timeout_s),
+        ledger=ledger, usage_log=usage_log, lane="agent",
+        timeout_s=s.agent_timeout_s, default_max_tokens=s.agent_max_tokens,
+    )
     u_agent = _empty_usage()
     u_ver = _empty_usage()
     verifier_models: list[str] = []
@@ -384,11 +393,16 @@ def answer_question(question: str, family: str, version: str | None = None,
     answer, history, u1 = run_agent(agent_client, sess, question)
     _add_usage(u_agent, u1)
     agent_turns = u1["turns"]
+    sess.retries += agent_client.retries
     if sess.failure:
         return _failed(question, rec, sess, _pack_usage(u_agent, u_ver, agent_turns), t0,
                        repaired=False, answer_pre_repair="", verifier_models=verifier_models)
     answer_pre_repair = answer
-    verifier_client = anthropic.Anthropic(max_retries=0, timeout=s.verifier_timeout_s)
+    verifier_client = AnthropicRetryClient(
+        anthropic.Anthropic(max_retries=0, timeout=s.verifier_timeout_s),
+        ledger=ledger, usage_log=usage_log, lane="verifier",
+        timeout_s=s.verifier_timeout_s, default_max_tokens=s.verifier_max_tokens,
+    )
     verdicts, vu1, vm1 = verify_with_usage(verifier_client, s, answer, sess.fetched)
     _add_usage(u_ver, vu1)
     if vm1:
@@ -403,10 +417,13 @@ def answer_question(question: str, family: str, version: str | None = None,
             f"- \"{v['text']}\" -> {v['verdict']}: {v['reason']}" for v in bad) + (
             "\nRewrite the full answer. Fix or remove each failing sentence. You may fetch more "
             "pages. Keep the same citation format.")
+        prev_agent_retries = agent_client.retries
         answer, history, u2 = run_agent(agent_client, sess, question, extra_user_msg=feedback, prior=history)
         _add_usage(u_agent, u2)
         agent_turns += u2["turns"]
+        sess.retries += (agent_client.retries - prev_agent_retries)
         if sess.failure:   # the repair round is an agent call too: same failure rule (R7)
+            sess.retries += verifier_client.retries
             return _failed(question, rec, sess, _pack_usage(u_agent, u_ver, agent_turns), t0,
                            repaired=True, answer_pre_repair=answer_pre_repair, verifier_models=verifier_models)
         verdicts, vu2, vm2 = verify_with_usage(verifier_client, s, answer, sess.fetched)
@@ -420,6 +437,7 @@ def answer_question(question: str, family: str, version: str | None = None,
             answer = " ".join(keep) + (
                 f"\n\n[Note: {len(bad)} statement(s) removed because they could not be "
                 "verified against the cited pages.]")
+    sess.retries += verifier_client.retries
 
     # R7: every cited page must be in the fetched set. verify() already marks such claims
     # unsupported; record them and never let one reach cited_pages.
@@ -462,14 +480,26 @@ def _failed(question: str, rec, sess: Session, usage: dict, t0: float, repaired:
 
 
 if __name__ == "__main__":
+    from eval.s11.ledger import CostLedger, UsageLogger, default_s11_paths
+
+    default_ledger, default_usage, _ = default_s11_paths()
     ap = argparse.ArgumentParser()
     ap.add_argument("question")
     ap.add_argument("--family", required=True)
     ap.add_argument("--version")
     ap.add_argument("--as-of", type=date.fromisoformat)
+    ap.add_argument("--ledger", default=str(default_ledger))
+    ap.add_argument("--usage-log", default=str(default_usage))
     ap.add_argument("--json", action="store_true", help="print full result JSON")
     a = ap.parse_args()
-    r = answer_question(a.question, a.family, a.version, a.as_of)
+    r = answer_question(
+        a.question,
+        a.family,
+        a.version,
+        a.as_of,
+        ledger=CostLedger(Path(a.ledger)),
+        usage_log=UsageLogger(Path(a.usage_log)),
+    )
     if a.json:
         print(json.dumps({k: v for k, v in r.items() if k != "contexts"}, indent=2, default=str))
     else:

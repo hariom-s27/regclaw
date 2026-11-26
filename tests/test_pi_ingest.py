@@ -71,10 +71,20 @@ def azure_settings(pi, tmp_path, **kw):
                               summary_model='openai/gpt-5-mini', litellm_max_tokens=None, **kw)
 
 
-def test_default_standard_calls_page_index_main_with_explicit_models(pi, fake_pageindex, tmp_path, monkeypatch):
+@pytest.fixture
+def logs(tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
+    return NS(
+        ledger=CostLedger(tmp_path / 'ledger.jsonl'),
+        usage_log=UsageLogger(tmp_path / 'usage.jsonl'),
+    )
+
+
+def test_default_standard_calls_page_index_main_with_explicit_models(pi, fake_pageindex, tmp_path, logs, monkeypatch):
     monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: pi.common.PAGEINDEX_PIN_SHA)
     s = pi.common.Settings(store_dir=tmp_path / 'store')
-    pi.ingest.build_tree('doc.pdf', s)
+    pi.ingest.build_tree('doc.pdf', s, ledger=logs.ledger, usage_log=logs.usage_log)
     (mode, doc, opt, backend), = fake_pageindex.calls
     assert mode == 'standard' and doc == 'doc.pdf'
     assert opt['index_model'] == s.index_model and opt['summary_model'] == s.summary_model
@@ -82,20 +92,20 @@ def test_default_standard_calls_page_index_main_with_explicit_models(pi, fake_pa
     assert fake_pageindex.backend.get() is None      # contextvar reset after the build
 
 
-def test_azure_route_sends_base_and_key_but_no_cap(pi, fake_pageindex, tmp_path, monkeypatch):
+def test_azure_route_sends_base_and_key_but_no_cap(pi, fake_pageindex, tmp_path, logs, monkeypatch):
     monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: pi.common.PAGEINDEX_PIN_SHA)
     monkeypatch.setenv('AZURE_OPENAI_ENDPOINT', 'https://res.openai.azure.com')
     monkeypatch.setenv('AZURE_OPENAI_API_KEY', SECRET)
-    pi.ingest.build_tree('doc.pdf', azure_settings(pi, tmp_path))
+    pi.ingest.build_tree('doc.pdf', azure_settings(pi, tmp_path), ledger=logs.ledger, usage_log=logs.usage_log)
     (_, _, opt, backend), = fake_pageindex.calls
     assert backend == {'api_base': 'https://res.openai.azure.com/openai/v1/', 'api_key': SECRET}
     assert opt['index_model'] == 'openai/gpt-5-mini' and opt['summary_model'] == 'openai/gpt-5-mini'
 
 
-def test_flash_only_when_explicit(pi, fake_pageindex, tmp_path, monkeypatch):
+def test_flash_only_when_explicit(pi, fake_pageindex, tmp_path, logs, monkeypatch):
     monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: pi.common.PAGEINDEX_PIN_SHA)
     s = pi.common.Settings(store_dir=tmp_path / 'store', index_mode='flash')
-    pi.ingest.build_tree('doc.pdf', s)
+    pi.ingest.build_tree('doc.pdf', s, ledger=logs.ledger, usage_log=logs.usage_log)
     assert fake_pageindex.calls[0][0] == 'flash'
     assert fake_pageindex.calls[0][2]['summary_model'] == s.summary_model
 
@@ -108,14 +118,14 @@ def test_bad_settings_fail_before_any_pageindex_call(pi, fake_pageindex, tmp_pat
     assert fake_pageindex.calls == []
 
 
-def test_ingest_records_mode_models_route_and_commit_without_secret(pi, fake_pageindex, tmp_path, monkeypatch):
+def test_ingest_records_mode_models_route_and_commit_without_secret(pi, fake_pageindex, tmp_path, logs, monkeypatch):
     monkeypatch.setenv('AZURE_OPENAI_ENDPOINT', 'https://res.openai.azure.com')
     monkeypatch.setenv('AZURE_OPENAI_API_KEY', SECRET)
     monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: pi.common.PAGEINDEX_PIN_SHA)
     pdf = tmp_path / 'g.pdf'
     pdf.write_bytes(b'%PDF-1.4 fake bytes')
     s = azure_settings(pi, tmp_path)
-    rec = pi.ingest.ingest(str(pdf), 'gtp', '2019', s=s)
+    rec = pi.ingest.ingest(str(pdf), 'gtp', '2019', s=s, ledger=logs.ledger, usage_log=logs.usage_log)
     assert (rec.index_mode, rec.index_model, rec.summary_model) == ('standard', 'openai/gpt-5-mini', 'openai/gpt-5-mini')
     assert rec.index_route == 'azure_openai' and rec.pageindex_commit == pi.common.PAGEINDEX_PIN_SHA
     manifest = (tmp_path / 'store' / 'manifest.json').read_text()
@@ -144,27 +154,31 @@ def test_unpinned_pageindex_is_refused_by_default(pi, fake_pageindex, tmp_path, 
     assert not list((tmp_path / 'store' / 'pdfs').iterdir())
 
 
-def test_flag_allows_unpinned_and_records_it(pi, fake_pageindex, tmp_path, monkeypatch, capsys):
+def test_flag_allows_unpinned_and_records_it(pi, fake_pageindex, tmp_path, logs, monkeypatch, capsys):
     monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: OTHER)
     rec = pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', allow_unpinned=True,
-                           s=pi.common.Settings(store_dir=tmp_path / 'store'))
+                           s=pi.common.Settings(store_dir=tmp_path / 'store'),
+                           ledger=logs.ledger, usage_log=logs.usage_log)
     assert rec.pageindex_commit == f'unpinned: {OTHER}' and rec.index_route == 'anthropic'
     stored = json.loads((tmp_path / 'store' / 'manifest.json').read_text())
     assert stored['documents']['gtp@2019']['pageindex_commit'] == f'unpinned: {OTHER}'
     assert 'UNPINNED' in capsys.readouterr().err
 
 
-def test_settings_key_allows_unpinned_and_explicit_false_overrides_it(pi, fake_pageindex, tmp_path, monkeypatch):
+def test_settings_key_allows_unpinned_and_explicit_false_overrides_it(pi, fake_pageindex, tmp_path, logs, monkeypatch):
     monkeypatch.setattr(pi.ingest, 'installed_pageindex_commit', lambda: OTHER)
     s = pi.common.Settings(store_dir=tmp_path / 'store', allow_unpinned_pageindex=True)
     with pytest.raises(RuntimeError):
-        pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', s=s, allow_unpinned=False)
-    rec = pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', s=s)
+        pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', s=s, allow_unpinned=False,
+                         ledger=logs.ledger, usage_log=logs.usage_log)
+    rec = pi.ingest.ingest(_pdf(tmp_path), 'gtp', '2019', s=s, ledger=logs.ledger, usage_log=logs.usage_log)
     assert rec.pageindex_commit == f'unpinned: {OTHER}'
 
 
 @pytest.mark.parametrize('argv,expected', [(['--allow-unpinned-pageindex'], True), ([], None)])
-def test_cli_flag_reaches_ingest(pi, monkeypatch, capsys, argv, expected):
+def test_cli_flag_reaches_ingest(pi, monkeypatch, capsys, tmp_path, argv, expected):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
     seen = {}
 
     def fake_ingest(*args, **kw):
@@ -174,6 +188,13 @@ def test_cli_flag_reaches_ingest(pi, monkeypatch, capsys, argv, expected):
                                    index_model='anthropic/x', pageindex_version='0.2.10',
                                    built_at='2026-11-03T00:00:00Z')
     monkeypatch.setattr(pi.ingest, 'ingest', fake_ingest)
-    assert pi.ingest.main(['x.pdf', '--family', 'g', '--version', '1', *argv]) == 0
-    assert seen == {'allow_unpinned': expected}      # None -> falls back to the settings key
+    ledger_p = tmp_path / 'ledger.jsonl'
+    usage_p = tmp_path / 'usage.jsonl'
+    assert pi.ingest.main([
+        'x.pdf', '--family', 'g', '--version', '1',
+        '--ledger', str(ledger_p), '--usage-log', str(usage_p), *argv,
+    ]) == 0
+    assert seen['allow_unpinned'] is expected      # None -> falls back to the settings key
+    assert isinstance(seen['ledger'], CostLedger) and seen['ledger'].path == ledger_p
+    assert isinstance(seen['usage_log'], UsageLogger) and seen['usage_log'].path == usage_p
     assert '"doc_id": "g@1"' in capsys.readouterr().out

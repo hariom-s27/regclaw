@@ -163,7 +163,9 @@ def test_timeout_and_max_token_settings_defaults_and_validation(mods):
             mods.common.Settings(**{field: 0})
 
 
-def test_no_temperature_top_p_or_top_k_sent_by_run_agent_or_verify(mods, monkeypatch):
+def test_no_temperature_top_p_or_top_k_sent_by_run_agent_or_verify(mods, monkeypatch, tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
     _patch_agent_io(monkeypatch, mods.agent)
     bad_verdict = {"claim_id": 1, "verdict": "unsupported", "evidence": "", "reason": "no"}
     ok_verdict = {"claim_id": 1, "verdict": "supported", "evidence": "Storage shall be at 2-8 C.", "reason": ""}
@@ -175,7 +177,13 @@ def test_no_temperature_top_p_or_top_k_sent_by_run_agent_or_verify(mods, monkeyp
         _verdicts(ok_verdict),
     )
     monkeypatch.setattr(mods.agent.anthropic, "Anthropic", lambda **kw: client)
-    r = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings())
+    r = mods.agent.answer_question(
+        "Storage?",
+        "gtp",
+        s=mods.common.Settings(),
+        ledger=CostLedger(tmp_path / "ledger.jsonl"),
+        usage_log=UsageLogger(tmp_path / "usage.jsonl"),
+    )
     assert r["status"] == "ok" and len(client.requests) == 5
     for req in client.requests:
         for forbidden in ("temperature", "top_p", "top_k"):
@@ -184,7 +192,9 @@ def test_no_temperature_top_p_or_top_k_sent_by_run_agent_or_verify(mods, monkeyp
     assert client.requests[2]["max_tokens"] == 4096
 
 
-def test_pi_agent_passes_max_retries_zero_timeouts_and_logs(mods, monkeypatch, caplog):
+def test_pi_agent_passes_max_retries_zero_timeouts_and_logs(mods, monkeypatch, caplog, tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
     _patch_agent_io(monkeypatch, mods.agent)
     client_inits = []
     client = _ScriptedAnthropic(
@@ -199,7 +209,13 @@ def test_pi_agent_passes_max_retries_zero_timeouts_and_logs(mods, monkeypatch, c
 
     monkeypatch.setattr(mods.agent.anthropic, "Anthropic", fake_anthropic)
     with caplog.at_level(logging.INFO, logger="pageindex.agent"):
-        r = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings())
+        r = mods.agent.answer_question(
+            "Storage?",
+            "gtp",
+            s=mods.common.Settings(),
+            ledger=CostLedger(tmp_path / "ledger.jsonl"),
+            usage_log=UsageLogger(tmp_path / "usage.jsonl"),
+        )
 
     assert client_inits == [
         {"max_retries": 0, "timeout": 300.0},
@@ -212,6 +228,8 @@ def test_pi_agent_passes_max_retries_zero_timeouts_and_logs(mods, monkeypatch, c
 
 
 def test_eval_pageindex_passes_judge_timeout_and_logs_manifest(mods, fake_ragas, monkeypatch, tmp_path, capsys):
+    import httpx
+
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://res.openai.azure.com/")
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", SECRET)
     made = []
@@ -230,11 +248,15 @@ def test_eval_pageindex_passes_judge_timeout_and_logs_manifest(mods, fake_ragas,
         "--dry-run",
         "--runs", "1",
         "--settings", str(cfg),
+        "--usage-log", str(tmp_path / "usage.jsonl"),
         "--out", str(out),
     ])
     assert code == 0
-    assert made == [{"base_url": "https://res.openai.azure.com/openai/v1/", "api_key": SECRET,
-                     "max_retries": 0, "timeout": 222.0}]
+    assert len(made) == 1
+    az_kw = dict(made[0])
+    assert isinstance(az_kw.pop("http_client"), httpx.AsyncClient)
+    assert az_kw == {"base_url": "https://res.openai.azure.com/openai/v1/", "api_key": SECRET,
+                     "max_retries": 0, "timeout": 222.0}
     manifest = json.loads((tmp_path / "out.manifest.json").read_text(encoding="utf-8"))
     assert manifest["ragas"]["judge_timeout_s"] == 222.0
     assert "timeout=222.0s" in capsys.readouterr().err
@@ -258,7 +280,11 @@ def test_run_agent_sends_ephemeral_cache_control_on_system(mods):
     assert "[0001] Scope" in sys_blocks[0]["text"]
 
 
-def test_usage_accumulates_cache_and_verifier_tokens_and_models(mods, monkeypatch):
+def test_usage_accumulates_cache_and_verifier_tokens_and_models(mods, monkeypatch, tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
+    ledger = CostLedger(tmp_path / "ledger.jsonl")
+    usage_log = UsageLogger(tmp_path / "usage.jsonl")
     _patch_agent_io(monkeypatch, mods.agent)
     client = _ScriptedAnthropic(
         _tool("fetch_pages", {"pages": "2"}, model="claude-sonnet-5-5-nav", usage=_usage(100, 20, 0, 50)),
@@ -276,7 +302,7 @@ def test_usage_accumulates_cache_and_verifier_tokens_and_models(mods, monkeypatc
         ),
     )
     monkeypatch.setattr(mods.agent.anthropic, "Anthropic", lambda **kw: client)
-    r = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings())
+    r = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings(), ledger=ledger, usage_log=usage_log)
     u = r["usage"]
     expected_agent = {
         "input_tokens": 155,
@@ -325,7 +351,11 @@ def test_verify_guards_missing_tool_use_and_empty_evidence(mods):
     assert "not found verbatim" in out_guarded[2]["reason"]
 
 
-def test_pre_post_repair_dropped_sentences_and_eval_scoring(mods, fake_ragas, monkeypatch):
+def test_pre_post_repair_dropped_sentences_and_eval_scoring(mods, fake_ragas, monkeypatch, tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
+    ledger = CostLedger(tmp_path / "ledger.jsonl")
+    usage_log = UsageLogger(tmp_path / "usage.jsonl")
     _patch_agent_io(monkeypatch, mods.agent, pages={2: "Storage shall be at 2-8 C."})
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://res.openai.azure.com/")
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", SECRET)
@@ -337,7 +367,7 @@ def test_pre_post_repair_dropped_sentences_and_eval_scoring(mods, fake_ragas, mo
         _verdicts({"claim_id": 1, "verdict": "supported", "evidence": "Storage shall be at 2-8 C.", "reason": ""}),
     )
     monkeypatch.setattr(mods.agent.anthropic, "Anthropic", lambda **kw: clean_client)
-    r_clean = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings())
+    r_clean = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings(), ledger=ledger, usage_log=usage_log)
     assert r_clean["repaired"] is False
     assert r_clean["answer_pre_repair"] == r_clean["answer"] == "Storage shall be at 2-8 C [p. 2]."
     assert r_clean["dropped_sentences"] == []
@@ -354,7 +384,7 @@ def test_pre_post_repair_dropped_sentences_and_eval_scoring(mods, fake_ragas, mo
         ),
     )
     monkeypatch.setattr(mods.agent.anthropic, "Anthropic", lambda **kw: drop_client)
-    r_drop = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings())
+    r_drop = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings(), ledger=ledger, usage_log=usage_log)
     assert r_drop["repaired"] is True
     assert r_drop["answer_pre_repair"] == "Initial bad claim [p. 9]."
     assert r_drop["dropped_sentences"] == ["Unverified extra [p. 2]."]
@@ -369,7 +399,7 @@ def test_pre_post_repair_dropped_sentences_and_eval_scoring(mods, fake_ragas, mo
         _text("Partial", stop="max_tokens"),
     )
     monkeypatch.setattr(mods.agent.anthropic, "Anthropic", lambda **kw: fail_repair_client)
-    r_fail = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings())
+    r_fail = mods.agent.answer_question("Storage?", "gtp", s=mods.common.Settings(), ledger=ledger, usage_log=usage_log)
     assert r_fail["status"] == "failed:max_tokens"
     assert r_fail["repaired"] is True
     assert r_fail["answer"] == ""
@@ -465,7 +495,9 @@ def test_build_tree_pin_cli_settings_and_standalone_imports(mods, monkeypatch, t
     assert seen["s"].index_mode == "flash"
 
 
-def test_pageindex_adapter_forwards_contract_and_repair_fields(mods, monkeypatch):
+def test_pageindex_adapter_forwards_contract_and_repair_fields(mods, monkeypatch, tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
     fake_result = {
         "answer": "Final [p. 2].",
         "answer_pre_repair": "Pre [p. 9].",
@@ -482,8 +514,15 @@ def test_pageindex_adapter_forwards_contract_and_repair_fields(mods, monkeypatch
         "cited_not_fetched": [],
         "retries": 0,
     }
-    monkeypatch.setattr(mods.adapter, "answer_question", lambda q, fam, ver: fake_result)
-    out = mods.adapter.run("Q?")
+    monkeypatch.setattr(mods.adapter, "answer_question", lambda q, fam, ver, **kw: fake_result)
+    mods.adapter.configure(
+        ledger=CostLedger(tmp_path / "ledger.jsonl"),
+        usage_log=UsageLogger(tmp_path / "usage.jsonl"),
+    )
+    try:
+        out = mods.adapter.run("Q?")
+    finally:
+        mods.adapter.configure()
     assert out["answer"] == "Final [p. 2]."
     assert out["answer_pre_repair"] == "Pre [p. 9]."
     assert out["repaired"] is True

@@ -79,7 +79,9 @@ def test_max_turns_is_a_failure_not_a_forced_answer(pi):
     assert all(r['tool_choice'] == {'type': 'auto'} for r in client.requests)
 
 
-def test_answer_question_reports_failure_and_skips_verify(pi, monkeypatch):
+def test_answer_question_reports_failure_and_skips_verify(pi, monkeypatch, tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
     s = pi.common.Settings(agent_max_turns=1)
     rec = NS(title='Doc', version='v', page_count=5, doc_description='', doc_id='gtp@2019',
              pdf_path='x.pdf', tree_path='t.json')
@@ -89,13 +91,19 @@ def test_answer_question_reports_failure_and_skips_verify(pi, monkeypatch):
     monkeypatch.setattr(pi.agent, 'fetch_pages', lambda path, pages: {p: f'page {p}' for p in pages})
     client = Client(tool('fetch_pages', {'pages': '2'}))
     monkeypatch.setattr(pi.agent.anthropic, 'Anthropic', lambda **kw: client)
-    r = pi.agent.answer_question('q', 'gtp', s=s)
+    r = pi.agent.answer_question(
+        'q', 'gtp', s=s,
+        ledger=CostLedger(tmp_path / 'ledger.jsonl'),
+        usage_log=UsageLogger(tmp_path / 'usage.jsonl'),
+    )
     assert r['status'] == 'failed:max_turns' and r['answer'] == '' and r['cited_pages'] == []
     assert r['fetched_pages'] == [2] and r['verdicts'] == []
     assert len(client.requests) == 1          # no verifier call for a failed item
 
 
-def test_cited_pages_are_validated_against_fetched(pi, monkeypatch):
+def test_cited_pages_are_validated_against_fetched(pi, monkeypatch, tmp_path):
+    from eval.s11.ledger import CostLedger, UsageLogger
+
     s = pi.common.Settings()
     rec = NS(title='Doc', version='v', page_count=5, doc_description='', doc_id='gtp@2019',
              pdf_path='x.pdf', tree_path='t.json')
@@ -111,7 +119,11 @@ def test_cited_pages_are_validated_against_fetched(pi, monkeypatch):
                     text('Storage shall be at 2-8 C [p. 2].'),
                     verdicts(ok))
     monkeypatch.setattr(pi.agent.anthropic, 'Anthropic', lambda **kw: client)
-    r = pi.agent.answer_question('q', 'gtp', s=s)
+    r = pi.agent.answer_question(
+        'q', 'gtp', s=s,
+        ledger=CostLedger(tmp_path / 'ledger.jsonl'),
+        usage_log=UsageLogger(tmp_path / 'usage.jsonl'),
+    )
     assert r['status'] == 'ok' and r['repaired'] is True
     assert r['cited_pages'] == [2] and r['cited_not_fetched'] == []
     assert set(r['cited_pages']) <= set(r['fetched_pages'])

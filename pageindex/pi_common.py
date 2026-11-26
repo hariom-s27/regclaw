@@ -68,6 +68,7 @@ class Settings(BaseModel):
     overview_char_budget: int = 24000
     agent_max_tokens: int = 16000
     verifier_max_tokens: int = 4096
+    tree_reserve_max_tokens: int = 32000
     agent_timeout_s: float = AGENT_TIMEOUT_S
     verifier_timeout_s: float = VERIFIER_TIMEOUT_S
     judge_timeout_s: float = JUDGE_TIMEOUT_S
@@ -78,7 +79,7 @@ class Settings(BaseModel):
         p = Path(v)
         return p if p.is_absolute() else (ROOT / p).resolve()
 
-    @field_validator("agent_max_tokens", "verifier_max_tokens")
+    @field_validator("agent_max_tokens", "verifier_max_tokens", "tree_reserve_max_tokens")
     @classmethod
     def _positive_tokens(cls, v: int) -> int:
         if v <= 0:
