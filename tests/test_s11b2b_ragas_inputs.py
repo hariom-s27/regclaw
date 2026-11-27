@@ -280,6 +280,14 @@ def test_writer_requires_path_and_creates_no_file(tmp_path, monkeypatch):
             llm_override=fake_llm,
             emb_override=_DeterministicFakeEmbedding(),
         )
+    with pytest.raises(ValueError, match="out_jsonl"):
+        ragas_inputs.build_ragas_inputs([], {}, {}, run_id="r1", out_jsonl="   ")
+    with pytest.raises(ValueError, match="record_path"):
+        ragas_inputs.build_s11_ragas_metrics(
+            llm_override=fake_llm,
+            emb_override=_DeterministicFakeEmbedding(),
+            recorder_path="",
+        )
 
     assert list(tmp_path.iterdir()) == []
 
@@ -553,6 +561,44 @@ def test_fresh_subprocess_import_ragas_inputs_under_netguard():
         [sys.executable, "-c", guarded_code],
         cwd=ROOT,
         env={**os.environ, "REGCLAW_STUB": "1", "LANGFUSE_ENABLED": "false"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_ragas_do_not_track_forced_before_import_in_fresh_subprocess():
+    code = textwrap.dedent(
+        """
+        import os
+        import requests
+        import eval.s11.ragas_inputs  # noqa: F401
+        import ragas._analytics
+
+        assert os.environ.get("RAGAS_DO_NOT_TRACK") == "true"
+        assert ragas._analytics.do_not_track() is True
+
+        calls = []
+
+        def fail_post(*args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("requests.post called")
+
+        requests.post = fail_post
+        ragas._analytics.requests.post = fail_post
+        ragas._analytics.track(
+            ragas._analytics.BaseEvent(event_type="dummy", user_id="u", ragas_version="0")
+        )
+        assert calls == []
+        """
+    ).strip()
+    env = {k: v for k, v in os.environ.items() if k != "RAGAS_DO_NOT_TRACK"}
+    env.update({"REGCLAW_STUB": "1", "LANGFUSE_ENABLED": "false", "RAGAS_DO_NOT_TRACK": "false"})
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT,
+        env=env,
         capture_output=True,
         text=True,
         check=False,

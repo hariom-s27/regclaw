@@ -397,9 +397,21 @@ def subtree_span(node: dict) -> tuple[int, int]:
     return (min(starts) if starts else None, max(ends) if ends else None)
 
 
-def _line(n: dict, depth: int, summary_chars: int) -> str:
+def _format_key_items(n: dict, key_items_chars: int) -> str:
+    if not key_items_chars:
+        return ""
+    items = [str(x).replace("\n", " ").strip() for x in (n.get("key_items") or []) if str(x).strip()]
+    if not items:
+        return ""
+    joined = "; ".join(items)
+    cut = joined[:key_items_chars] + "…" if len(joined) > key_items_chars else joined
+    return " · also: " + cut
+
+
+def _line(n: dict, depth: int, summary_chars: int, key_items_chars: int = 160) -> str:
     a, b = subtree_span(n)
     pages = f"p. {a}" if a == b else f"pp. {a}-{b}"
+    also = _format_key_items(n, key_items_chars)
     kids = len(n.get("nodes") or [])
     more = f" [+{kids} sub-sections]" if kids else ""
     s = (n.get("summary") or "").replace("\n", " ").strip()
@@ -407,16 +419,20 @@ def _line(n: dict, depth: int, summary_chars: int) -> str:
         s = " — " + (s[:summary_chars] + "…" if len(s) > summary_chars else s)
     else:
         s = ""
-    return f"{'  ' * (depth - 1)}[{n.get('node_id', '?')}] {n.get('title', '')} ({pages}){more}{s}"
+    return f"{'  ' * (depth - 1)}[{n.get('node_id', '?')}] {n.get('title', '')} ({pages}){also}{more}{s}"
 
 
 def outline(structure: list[dict], max_depth: int = 2, summary_chars: int = 160,
-            char_budget: int = 24000) -> str:
+            char_budget: int = 24000, key_items_chars: int = 160) -> str:
     """Compact, token-cheap view of the tree. Degrades gracefully: if the outline
-    is over budget, drop summaries, then drop a level."""
-    for depth_cap, chars in ((max_depth, summary_chars), (max_depth, 0),
-                             (max(1, max_depth - 1), 0)):
-        lines = [_line(n, d, chars) for n, d in iter_nodes(structure) if d <= depth_cap]
+    is over budget, drop key_items, then summaries, then drop a level."""
+    for depth_cap, chars, ki_chars in (
+        (max_depth, summary_chars, key_items_chars),
+        (max_depth, summary_chars, 0),
+        (max_depth, 0, 0),
+        (max(1, max_depth - 1), 0, 0),
+    ):
+        lines = [_line(n, d, chars, ki_chars) for n, d in iter_nodes(structure) if d <= depth_cap]
         text = "\n".join(lines)
         if len(text) <= char_budget:
             return text

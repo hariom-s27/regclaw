@@ -20,6 +20,9 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "pageindex") not in sys.path:
     sys.path.insert(0, str(ROOT / "pageindex"))
 
+# Ragas otherwise posts usage events to its own server outside our wrapper.
+os.environ["RAGAS_DO_NOT_TRACK"] = "true"
+
 from ragas.embeddings.base import BaseRagasEmbedding, embedding_factory  # noqa: E402
 from ragas.llms import llm_factory  # noqa: E402
 from ragas.llms.base import InstructorBaseRagasLLM  # noqa: E402
