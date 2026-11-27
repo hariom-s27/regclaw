@@ -148,6 +148,39 @@ class Session:
     agent_models: list[str] = field(default_factory=list)
 
 
+def _bounded_key_items(raw_items: Any, cap: int = 160) -> list[str]:
+    """Keep key_items in order while '; '-joined length <= cap, cutting only an overflowing item."""
+    items = [str(x).replace("\n", " ").strip() for x in (raw_items or []) if str(x).strip()]
+    if not items or cap <= 0:
+        return []
+    out: list[str] = []
+    used = 0
+    for item in items:
+        sep = 2 if out else 0
+        if used + sep + len(item) <= cap:
+            out.append(item)
+            used += sep + len(item)
+        else:
+            rem = cap - used - sep
+            if rem > 0:
+                out.append(item[:rem] + "…")
+            break
+    return out
+
+
+def _get_node_child_payload(c: dict) -> dict:
+    payload = {
+        "node_id": c.get("node_id"),
+        "title": c.get("title"),
+        "pages": list(subtree_span(c)),
+        "summary": c.get("summary", ""),
+    }
+    ki = _bounded_key_items(c.get("key_items"))
+    if ki:
+        payload["key_items"] = ki
+    return payload
+
+
 @traced('pageindex.tool', as_type='tool')
 def _run_tool(sess: Session, name: str, args: dict) -> tuple[str, bool]:
     try:
@@ -161,14 +194,16 @@ def _run_tool(sess: Session, name: str, args: dict) -> tuple[str, bool]:
             a, b = subtree_span(n)
             parent = next((p for p in sess.nodes.values()
                            if n in (p.get("nodes") or [])), None)
-            kids = [{"node_id": c.get("node_id"), "title": c.get("title"),
-                     "pages": list(subtree_span(c)), "summary": c.get("summary", "")}
-                    for c in n.get("nodes") or []]
-            return json.dumps({"node_id": n.get("node_id"), "title": n.get("title"),
-                               "pages": [a, b], "summary": n.get("summary", ""),
-                               "parent": parent and {"node_id": parent.get("node_id"),
-                                                     "title": parent.get("title")},
-                               "children": kids}, ensure_ascii=False), False
+            kids = [_get_node_child_payload(c) for c in n.get("nodes") or []]
+            payload = {"node_id": n.get("node_id"), "title": n.get("title"),
+                       "pages": [a, b], "summary": n.get("summary", ""),
+                       "parent": parent and {"node_id": parent.get("node_id"),
+                                             "title": parent.get("title")},
+                       "children": kids}
+            ki = _bounded_key_items(n.get("key_items"))
+            if ki:
+                payload["key_items"] = ki
+            return json.dumps(payload, ensure_ascii=False), False
         if name == "fetch_pages":
             pages = parse_page_spec(args["pages"])
             new = [p for p in pages if p not in sess.fetched]
