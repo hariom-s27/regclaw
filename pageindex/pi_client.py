@@ -324,8 +324,15 @@ class AnthropicRetryClient:
             usage_obj = getattr(resp, "usage", None)
             inp, out, cr, cw = _usage_ints(usage_obj)
             thinking_toks = _extract_thinking_tokens(usage_obj)
-            call_status = "model_refusal" if stop_reason == "refusal" else "ok"
-            err_type = "model_refusal" if stop_reason == "refusal" else None
+            if stop_reason == "refusal":
+                call_status = "model_refusal"
+                err_type: str | None = "model_refusal"
+            elif stop_reason == "model_context_window_exceeded":
+                call_status = "model_context_window_exceeded"
+                err_type = "model_context_window_exceeded"
+            else:
+                call_status = "ok"
+                err_type = None
             st = self.ledger.settle(
                 res.reservation_id,
                 input_tokens=inp,

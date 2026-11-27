@@ -174,6 +174,8 @@ def _classify_answer_response(resp: Any) -> tuple[str, str | None, str | None]:
         return text, "model_refusal", stop_reason
     if stop_reason == "max_tokens":
         return text, "max_tokens", stop_reason
+    if stop_reason == "model_context_window_exceeded":
+        return text, "model_context_window_exceeded", stop_reason
     if not text:
         return text, "empty_answer", stop_reason
     return text, None, stop_reason

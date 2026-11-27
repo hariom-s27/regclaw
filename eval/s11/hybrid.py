@@ -147,6 +147,17 @@ def _build_guarded_embedding_client(
     )
 
 
+def _assert_no_running_event_loop() -> None:
+    """Fail loudly if called inside an active asyncio event loop (PR-69)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        "Hybrid retrieval functions are synchronous and cannot be called inside a running asyncio event loop"
+    )
+
+
 def load_or_compute_embeddings(
     items: dict[Any, str],
     *,
@@ -160,6 +171,7 @@ def load_or_compute_embeddings(
     inner_transport: Any = None,
 ) -> tuple[dict[Any, list[float]], dict[str, int]]:
     """Load cached embeddings or fetch uncached inputs via guarded Azure AsyncOpenAI in batches of 16."""
+    _assert_no_running_event_loop()
     cache_root = Path(cache_dir)
     vectors: dict[Any, list[float]] = {}
     pending_by_hex: dict[str, tuple[str, str]] = {}
@@ -303,6 +315,7 @@ def rank_hybrid_pages(
     inner_transport: Any = None,
 ) -> dict[str, Any]:
     """Compute full RRF hybrid ranking over non-empty pages while listing excluded empty pages."""
+    _assert_no_running_event_loop()
     s = s or load_settings()
     emb_model = model or s.embedding_model
     emb_deployment = deployment or s.embedding_model

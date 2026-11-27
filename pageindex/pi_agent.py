@@ -140,8 +140,9 @@ class Session:
     s: Settings
     fetched: dict[int, str] = field(default_factory=dict)   # page -> text
     tool_calls: list[dict] = field(default_factory=list)
-    # R22 R7 / S11b2: set when navigator/generator fails ("max_tokens", "empty_answer",
-    # "max_turns", "model_refusal", "verifier_max_tokens"); None means success.
+    # R22 R7 / S11b2 / S11b2c: set when navigator/generator fails ("max_tokens", "empty_answer",
+    # "max_turns", "model_refusal", "model_context_window_exceeded", "verifier_max_tokens",
+    # "verifier_model_context_window_exceeded"); None means success.
     failure: str | None = None
     last_stop_reason: str | None = None
     retries: int = 0
@@ -247,6 +248,15 @@ def _failure_status(failure: str) -> str:
     return "model_refusal" if failure == "model_refusal" else f"failed:{failure}"
 
 
+def _verifier_stop_labels(stop_reason: str | None) -> tuple[str, str]:
+    """Map terminal verifier stop_reason to (status, check_status)."""
+    if stop_reason == "refusal":
+        return "model_refusal", "verifier_refusal"
+    if stop_reason in ("max_tokens", "model_context_window_exceeded"):
+        return f"failed:verifier_{stop_reason}", f"verifier_{stop_reason}"
+    raise ValueError(f"Unsupported verifier stop_reason: {stop_reason!r}")
+
+
 def _empty_usage() -> dict[str, Any]:
     return {**{k: 0 for k in _USAGE_KEYS}, "thinking_tokens": None}
 
@@ -317,6 +327,7 @@ def run_agent(client: anthropic.Anthropic, sess: Session, question: str,
         bad = (
             "model_refusal" if stop_reason == "refusal"
             else "max_tokens" if stop_reason == "max_tokens"
+            else "model_context_window_exceeded" if stop_reason == "model_context_window_exceeded"
             else "empty_answer" if stop_reason != "tool_use" and not _text_of(resp)
             else None
         )
@@ -413,7 +424,7 @@ def _append_reason(existing: str, note: str) -> str:
 
 
 class _VerifierStopError(Exception):
-    """Internal exception raised when Haiku verifier stops with max_tokens or refusal."""
+    """Internal exception raised when Haiku verifier stops with max_tokens, model_context_window_exceeded, or refusal."""
 
     def __init__(
         self,
@@ -453,8 +464,8 @@ def verify_with_usage(client: anthropic.Anthropic, s: Settings, answer: str,
     v_usage = _extract_usage(resp)
     resp_model = getattr(resp, "model", None)
     stop_reason = getattr(resp, "stop_reason", None)
-    if stop_reason in ("max_tokens", "refusal"):
-        status = "model_refusal" if stop_reason == "refusal" else "failed:verifier_max_tokens"
+    if stop_reason in ("max_tokens", "refusal", "model_context_window_exceeded"):
+        status, _ = _verifier_stop_labels(stop_reason)
         log.error("verifier %s (stop_reason=%s); item fails", status, stop_reason)
         raise _VerifierStopError(
             status=status,
@@ -570,7 +581,7 @@ def verify_and_repair(
             "repaired": False,
             "dropped_sentences": [],
             "refusal": False,
-            "check_status": "verifier_refusal" if stop_reason == "refusal" else "verifier_max_tokens",
+            "check_status": _verifier_stop_labels(stop_reason)[1],
             "stop_reason": stop_reason,
             "verdicts": [],
             "ver_usage": u_ver,
@@ -635,7 +646,7 @@ def verify_and_repair(
                 "repaired": True,
                 "dropped_sentences": [],
                 "refusal": False,
-                "check_status": "verifier_refusal" if stop_reason2 == "refusal" else "verifier_max_tokens",
+                "check_status": _verifier_stop_labels(stop_reason2)[1],
                 "stop_reason": stop_reason2,
                 "verdicts": [],
                 "ver_usage": u_ver,
