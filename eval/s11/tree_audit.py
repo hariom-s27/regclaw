@@ -857,7 +857,7 @@ def audit_tree_variant(
     for entry_idx, m in match_by_entry.items():
         exp_start = int(entries[entry_idx]["expected_start"])
         ns, ne = m["node_start"], m["node_end"]
-        if contained_start_check:
+        if contained_start_check and m["match_source"] == "key_item":
             ok = (ns - 1) <= exp_start <= (ne + 1)
         else:
             ok = abs(ns - exp_start) <= 1

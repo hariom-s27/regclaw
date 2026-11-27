@@ -910,3 +910,157 @@ def test_explain_fallbacks_reports_scores_joins_and_leaks_zero_letters(monkeypat
     excl = tree_audit.explain_contents_fallbacks(toc_excl_analysis, toc_only_pages, toc_only_pages)
     assert excl[0]["pymupdf"]["window"] == {"best_score": 0.0, "page": None, "join_size": None}
     assert excl[0]["pymupdf"]["wide"] == {"best_score": 0.0, "page": None, "join_size": None}
+
+
+def test_variant_b_title_match_3_pages_early_fails_cond2():
+    entries = [
+        {
+            "index": 0,
+            "toc_page": 10,
+            "title": "1 Scope",
+            "printed_page": 9,
+            "expected_start": 20,
+            "is_annexure": False,
+            "annexure_numeral": None,
+        }
+    ]
+    structure = [
+        {
+            "node_id": "0001",
+            "title": "1 Scope",
+            "start_index": 17,
+            "end_index": 25,
+        }
+    ]
+    res = tree_audit.audit_tree_variant(
+        structure,
+        entries,
+        variant="B",
+        allow_key_items=True,
+        contained_start_check=True,
+        coverage_start=17,
+        coverage_end=25,
+        expected_annexures=0,
+    )
+    assert res["matches"][0]["match_source"] == "title"
+    cond2 = res["criteria"]["start_within_1_page_95pct"]
+    assert cond2["within_tolerance"] == 0
+    assert cond2["matched"] == 1
+    assert cond2["rate"] == 0.0
+    assert cond2["pass"] is False
+
+
+@pytest.mark.parametrize("expected_start", [19, 22, 25])
+def test_variant_b_key_item_match_inside_span_pm1_passes_cond2(expected_start):
+    entries = [
+        {
+            "index": 0,
+            "toc_page": 10,
+            "title": "Subtopic A",
+            "printed_page": expected_start - 11,
+            "expected_start": expected_start,
+            "is_annexure": False,
+            "annexure_numeral": None,
+        }
+    ]
+    structure = [
+        {
+            "node_id": "0001",
+            "title": "Parent Node",
+            "start_index": 20,
+            "end_index": 24,
+            "key_items": ["Subtopic A"],
+        }
+    ]
+    res = tree_audit.audit_tree_variant(
+        structure,
+        entries,
+        variant="B",
+        allow_key_items=True,
+        contained_start_check=True,
+        coverage_start=20,
+        coverage_end=24,
+        expected_annexures=0,
+    )
+    assert res["matches"][0]["match_source"] == "key_item"
+    cond2 = res["criteria"]["start_within_1_page_95pct"]
+    assert cond2["within_tolerance"] == 1
+    assert cond2["matched"] == 1
+    assert cond2["rate"] == 1.0
+    assert cond2["pass"] is True
+
+
+@pytest.mark.parametrize("expected_start", [18, 26])
+def test_variant_b_key_item_match_outside_span_pm1_fails_cond2(expected_start):
+    entries = [
+        {
+            "index": 0,
+            "toc_page": 10,
+            "title": "Subtopic A",
+            "printed_page": expected_start - 11,
+            "expected_start": expected_start,
+            "is_annexure": False,
+            "annexure_numeral": None,
+        }
+    ]
+    structure = [
+        {
+            "node_id": "0001",
+            "title": "Parent Node",
+            "start_index": 20,
+            "end_index": 24,
+            "key_items": ["Subtopic A"],
+        }
+    ]
+    res = tree_audit.audit_tree_variant(
+        structure,
+        entries,
+        variant="B",
+        allow_key_items=True,
+        contained_start_check=True,
+        coverage_start=20,
+        coverage_end=24,
+        expected_annexures=0,
+    )
+    assert res["matches"][0]["match_source"] == "key_item"
+    cond2 = res["criteria"]["start_within_1_page_95pct"]
+    assert cond2["within_tolerance"] == 0
+    assert cond2["matched"] == 1
+    assert cond2["rate"] == 0.0
+    assert cond2["pass"] is False
+
+
+def test_variant_a_unchanged_on_existing_fixture():
+    entries, clean_tree = _sample_contents_and_tree()
+    clean_res = tree_audit.audit_tree(clean_tree, entries)
+    clean_a = clean_res["variants"]["A"]
+    assert clean_a["pass"] is True
+    assert clean_a["criteria"]["presence_95pct"]["matched"] == 20
+    assert clean_a["criteria"]["start_within_1_page_95pct"]["within_tolerance"] == 20
+    assert clean_a["criteria"]["start_within_1_page_95pct"]["rate"] == 1.0
+
+    # Merge Sec 2 (expected_start=21) into Sec 1 leaf (16..25, within 15..26);
+    # shift Sec 3 title start from 26 to 24 (abs(24-26)=2 > 1 even though 24..30 spans 26).
+    entries2, mod_tree = _sample_contents_and_tree()
+    sec2_title = mod_tree["structure"][1]["title"]
+    mod_tree["structure"][0]["end_index"] = 25
+    mod_tree["structure"][0]["key_items"] = [sec2_title]
+    mod_tree["structure"].pop(1)
+    assert "nodes" not in mod_tree["structure"][0]
+    mod_tree["structure"][1]["start_index"] = 24  # shifted Sec 3
+
+    mod_res = tree_audit.audit_tree(mod_tree, entries2)
+    va = mod_res["variants"]["A"]
+    assert va["criteria"]["presence_95pct"]["matched"] == 19
+    assert va["criteria"]["start_within_1_page_95pct"]["within_tolerance"] == 18
+    assert va["criteria"]["start_within_1_page_95pct"]["rate"] == 0.947368
+    assert va["criteria"]["start_within_1_page_95pct"]["pass"] is False
+    assert va["pass"] is False
+    assert mod_res["overall_pass"] is False
+
+    vb = mod_res["variants"]["B"]
+    assert vb["criteria"]["presence_95pct"]["matched"] == 20
+    assert vb["criteria"]["start_within_1_page_95pct"]["within_tolerance"] == 19
+    assert vb["criteria"]["start_within_1_page_95pct"]["rate"] == 0.95
+    assert vb["criteria"]["start_within_1_page_95pct"]["pass"] is True
+    assert vb["pass"] is True
